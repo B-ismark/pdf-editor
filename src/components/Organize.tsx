@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { Thumbnail } from "./Thumbnail";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { buildFromPlan, pageCount, type PlanEntry } from "../pdf/pageOps";
 
 interface Props {
@@ -29,6 +30,7 @@ export function Organize({
   const [plan, setPlan] = useState<PlanEntry[] | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirmApply, setConfirmApply] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const addCounter = useRef(0);
 
@@ -92,9 +94,9 @@ export function Organize({
     }
   };
 
-  const apply = async () => {
+  const doApply = async () => {
     if (!plan || plan.length === 0) return;
-    if (hasEdits && !confirm("Applying page changes will discard your current text edits and redactions. Continue?")) return;
+    setConfirmApply(false);
     setBusy("Applying…");
     try {
       const bytes = await buildFromPlan(plan, sources);
@@ -104,6 +106,12 @@ export function Organize({
     } finally {
       setBusy(null);
     }
+  };
+
+  const apply = () => {
+    if (!plan || plan.length === 0) return;
+    if (hasEdits) setConfirmApply(true);
+    else void doApply();
   };
 
   const extract = async () => {
@@ -188,6 +196,17 @@ export function Organize({
             </div>
           ))}
         </div>
+      )}
+
+      {confirmApply && (
+        <ConfirmDialog
+          title="Apply page changes?"
+          message="This rebuilds the document and discards your current text edits, annotations, and redactions."
+          confirmLabel="Apply"
+          danger
+          onConfirm={doApply}
+          onCancel={() => setConfirmApply(false)}
+        />
       )}
     </div>
   );

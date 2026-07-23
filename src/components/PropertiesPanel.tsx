@@ -1,4 +1,5 @@
 import { Icon } from "./Icon";
+import { ColorField } from "./ColorField";
 import type { Annotation, FontKey, Selection, TextStyle } from "../pdf/types";
 
 interface Props {
@@ -72,16 +73,9 @@ export function PropertiesPanel({
 
       {selection?.kind === "redaction" && (
         <div className="props__section">
-          <div className="field">
+          <div className="field field--row">
             <span className="field__label label-medium">Fill colour</span>
-            <label className="swatch">
-              <input
-                type="color"
-                value={redactionColor ?? "#000000"}
-                onChange={(e) => onChangeRedactionColor(e.target.value)}
-              />
-              <span style={{ background: redactionColor ?? "#000000" }} />
-            </label>
+            <ColorField value={redactionColor ?? "#000000"} onChange={onChangeRedactionColor} />
           </div>
           <button className="btn btn--danger" onClick={onDelete}>
             <Icon name="delete" size={18} /> Delete
@@ -91,16 +85,9 @@ export function PropertiesPanel({
 
       {selection?.kind === "annotation" && annotation && (
         <div className="props__section">
-          <div className="field">
+          <div className="field field--row">
             <span className="field__label label-medium">Colour</span>
-            <label className="swatch">
-              <input
-                type="color"
-                value={annotation.color}
-                onChange={(e) => onChangeAnnotation({ color: e.target.value })}
-              />
-              <span style={{ background: annotation.color }} />
-            </label>
+            <ColorField value={annotation.color} onChange={(c) => onChangeAnnotation({ color: c })} />
           </div>
           {"strokeWidth" in annotation && (
             <div className="field">
@@ -187,16 +174,9 @@ export function PropertiesPanel({
             />
           </div>
 
-          <div className="field">
+          <div className="field field--row">
             <span className="field__label label-medium">Colour</span>
-            <label className="swatch">
-              <input
-                type="color"
-                value={style.color}
-                onChange={(e) => onChangeStyle({ color: e.target.value })}
-              />
-              <span style={{ background: style.color }} />
-            </label>
+            <ColorField value={style.color} onChange={(c) => onChangeStyle({ color: c })} />
           </div>
 
           {selection.kind === "textbox" && (

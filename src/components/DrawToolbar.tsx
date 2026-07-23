@@ -1,4 +1,5 @@
 import { Icon } from "./Icon";
+import { ColorField } from "./ColorField";
 import type { AnnotationTool, DrawStyle } from "../pdf/types";
 
 interface Props {
@@ -37,14 +38,7 @@ export function DrawToolbar({ drawTool, setDrawTool, drawStyle, setDrawStyle }: 
         ))}
       </div>
       <span className="drawbar__sep" />
-      <label className="swatch swatch--sm" title="Colour">
-        <input
-          type="color"
-          value={drawStyle.color}
-          onChange={(e) => setDrawStyle({ ...drawStyle, color: e.target.value })}
-        />
-        <span style={{ background: drawStyle.color }} />
-      </label>
+      <ColorField small value={drawStyle.color} onChange={(c) => setDrawStyle({ ...drawStyle, color: c })} />
       {showWidth && (
         <label className="drawbar__width" title="Stroke width">
           <input

@@ -5,6 +5,7 @@ import { Organize } from "./components/Organize";
 import { DrawToolbar } from "./components/DrawToolbar";
 import { SignatureDialog } from "./components/SignatureDialog";
 import { FinishDialog } from "./components/FinishDialog";
+import { ConfirmDialog } from "./components/ConfirmDialog";
 import { Icon } from "./components/Icon";
 import {
   addPageNumbers,
@@ -66,6 +67,7 @@ export function App() {
   const [dragging, setDragging] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [organizeOpen, setOrganizeOpen] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const counter = useRef(0);
   const nextId = (prefix: string) => `${prefix}-${counter.current++}`;
@@ -544,8 +546,7 @@ export function App() {
     }
   }, [pdf, edits, textBoxes, redactions, annotations, stamps, fileName]);
 
-  const reset = useCallback(() => {
-    if (changeCount > 0 && !confirm("Discard all changes and start over?")) return;
+  const doReset = useCallback(() => {
     setPdf(null);
     doc.reset(EMPTY_DOC);
     setSelection(null);
@@ -553,7 +554,14 @@ export function App() {
     setStatus("idle");
     setMessage("");
     setMenuOpen(false);
-  }, [changeCount, doc]);
+    setConfirmReset(false);
+  }, [doc]);
+
+  const reset = useCallback(() => {
+    setMenuOpen(false);
+    if (changeCount > 0) setConfirmReset(true);
+    else doReset();
+  }, [changeCount, doReset]);
 
   const pickTool = (t: NavKey) => {
     setPendingStamp(null);
@@ -670,7 +678,7 @@ export function App() {
         >
           <div className="dropzone__card">
             <div className="dropzone__icon">
-              <Icon name="picture_as_pdf" size={48} />
+              <Icon name="picture_as_pdf" size={34} />
             </div>
             <h1 className="headline-small">Open a PDF to start editing</h1>
             <p className="body-medium dropzone__sub">
@@ -842,6 +850,17 @@ export function App() {
           e.target.value = "";
         }}
       />
+
+      {confirmReset && (
+        <ConfirmDialog
+          title="Open a different PDF?"
+          message="This discards all your current changes."
+          confirmLabel="Discard & open"
+          danger
+          onConfirm={doReset}
+          onCancel={() => setConfirmReset(false)}
+        />
+      )}
 
       {finishTab && (
         <FinishDialog

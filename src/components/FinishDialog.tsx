@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Icon } from "./Icon";
+import { ColorField } from "./ColorField";
 import type { NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/finishOps";
 
 interface Props {
@@ -67,10 +68,7 @@ export function FinishDialog({ initialTab = "numbers", onApplyNumbers, onApplyWa
               </div>
               <div className="field field--row">
                 <span className="field__label label-medium">Colour</span>
-                <label className="swatch">
-                  <input type="color" value={numColor} onChange={(e) => setNumColor(e.target.value)} />
-                  <span style={{ background: numColor }} />
-                </label>
+                <ColorField value={numColor} onChange={setNumColor} />
               </div>
             </div>
           ) : (
@@ -81,10 +79,7 @@ export function FinishDialog({ initialTab = "numbers", onApplyNumbers, onApplyWa
               </div>
               <div className="field field--row">
                 <span className="field__label label-medium">Colour</span>
-                <label className="swatch">
-                  <input type="color" value={wmColor} onChange={(e) => setWmColor(e.target.value)} />
-                  <span style={{ background: wmColor }} />
-                </label>
+                <ColorField value={wmColor} onChange={setWmColor} />
               </div>
               <div className="field">
                 <span className="field__label label-medium">Opacity <b>{Math.round(opacity * 100)}%</b></span>

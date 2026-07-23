@@ -29,8 +29,8 @@ body {
   position: relative;
   display: inline-grid;
   place-items: center;
-  width: 48px;
-  height: 48px;
+  width: 42px;
+  height: 42px;
   flex: none;
   border: none;
   border-radius: var(--radius-full);
@@ -90,27 +90,27 @@ body {
 .appbar {
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 64px;
-  padding: 0 8px 0 12px;
+  gap: 2px;
+  padding: 0 6px 0 12px;
   padding-top: env(safe-area-inset-top);
-  height: calc(64px + env(safe-area-inset-top));
+  height: calc(56px + env(safe-area-inset-top));
   background: var(--surface-container);
   color: var(--on-surface);
+  border-bottom: 1px solid var(--outline-variant);
   z-index: 20;
   flex: none;
 }
-.appbar__brand { display: flex; align-items: center; gap: 10px; }
+.appbar__brand { display: flex; align-items: center; gap: 9px; margin-right: 4px; }
 .appbar__logo {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
-  border-radius: var(--radius-md);
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-sm);
   background: var(--primary);
   color: var(--on-primary);
 }
-.appbar__name { color: var(--on-surface); }
+.appbar__name { color: var(--on-surface); font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
 .appbar__spacer { flex: 1; }
 .appbar__changes { color: var(--on-surface-variant); padding: 0 4px; }
 .appbar__download { margin-left: 4px; }
@@ -133,36 +133,36 @@ body {
   display: flex;
   justify-content: space-around;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   background: var(--surface-container);
-  padding: 8px 8px calc(8px + env(safe-area-inset-bottom));
-  box-shadow: var(--shadow-1);
+  border-top: 1px solid var(--outline-variant);
+  padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
 }
 .toolnav__btn {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
   flex: 1;
-  max-width: 120px;
+  max-width: 96px;
   border: none;
   background: transparent;
   color: var(--on-surface-variant);
   cursor: pointer;
-  padding: 4px 0;
+  padding: 2px 0;
 }
 .toolnav__ind {
   position: relative;
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 32px;
+  width: 48px;
+  height: 28px;
   border-radius: var(--radius-full);
   transition: background var(--dur-short4) var(--ease-standard);
 }
 .toolnav__btn--on { color: var(--on-surface); }
 .toolnav__btn--on .toolnav__ind { background: var(--secondary-container); color: var(--on-secondary-container); }
-.toolnav__label { color: inherit; }
+.toolnav__label { color: inherit; font-size: 0.6875rem; letter-spacing: 0.01em; }
 
 /* Viewer / document scroll surface */
 .viewer {
@@ -174,13 +174,18 @@ body {
   touch-action: none; /* we own pan + pinch */
   padding-bottom: calc(96px + env(safe-area-inset-bottom)); /* clear bottom bar + fab */
   -webkit-overflow-scrolling: touch;
+  /* Reserve scrollbar space so the fit-width scale doesn't shift when a
+     scrollbar appears/disappears during zoom. */
+  scrollbar-gutter: stable;
 }
 .doc {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 20px;
-  padding: 20px;
+  /* `safe` keeps the left/top reachable when a page is larger than the
+     viewport (plain `center` clips the overflow start). */
+  align-items: safe center;
+  gap: 16px;
+  padding: 16px;
   min-height: 100%;
 }
 
@@ -274,7 +279,7 @@ body {
 }
 .props__title { color: var(--on-surface); }
 .props__empty { color: var(--on-surface-variant); margin: 8px 0; }
-.props__section { display: flex; flex-direction: column; gap: 18px; }
+.props__section { display: flex; flex-direction: column; gap: 15px; }
 
 .field { display: flex; flex-direction: column; gap: 8px; }
 .field--row { flex-direction: row; align-items: center; justify-content: space-between; }
@@ -461,8 +466,8 @@ body {
 .dropzone__icon {
   display: grid;
   place-items: center;
-  width: 96px;
-  height: 96px;
+  width: 72px;
+  height: 72px;
   border-radius: var(--radius-full);
   background: var(--primary-container);
   color: var(--on-primary-container);
@@ -600,6 +605,77 @@ body {
 .swatch--sm span { width: 30px; height: 30px; border-radius: var(--radius-sm); }
 .slider--sm { width: 96px; height: 40px; }
 
+/* ============ Colour field (custom colour picker) ============ */
+.colorfield__swatch {
+  width: 44px;
+  height: 30px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--outline-variant);
+  cursor: pointer;
+  padding: 0;
+  box-shadow: inset 0 0 0 2px var(--surface-container-low);
+}
+.colorfield__swatch--sm {
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-full);
+}
+.colorfield__pop {
+  position: fixed;
+  z-index: 80;
+  width: 196px;
+  padding: 12px;
+  background: var(--surface-container-high);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-3);
+}
+.colorfield__grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.colorfield__chip {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: var(--radius-full);
+  border: 1px solid color-mix(in srgb, var(--on-surface) 20%, transparent);
+  cursor: pointer;
+  padding: 0;
+}
+.colorfield__chip--on {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+.colorfield__hexrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.colorfield__preview {
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--outline-variant);
+}
+.colorfield__hex {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm);
+  background: var(--surface-container-lowest);
+  color: var(--on-surface);
+  font: 500 0.8125rem/1 ui-monospace, "SFMono-Regular", monospace;
+  text-transform: uppercase;
+}
+
+/* ============ Confirm dialog ============ */
+.dialog--sm { width: min(400px, 100%); gap: 12px; }
+.confirm__msg { color: var(--on-surface-variant); margin: 0; }
+
 /* ============ Stamps (signatures / images) ============ */
 .stamp {
   position: absolute;
@@ -669,10 +745,13 @@ body {
 .sigpad__canvas {
   width: 100%;
   aspect-ratio: 560 / 220;
-  background: var(--surface-container-lowest);
-  border: 1px dashed var(--outline);
+  /* Always a light "paper" so the dark ink is visible in any theme. */
+  background: #fff;
+  border: 1px solid var(--outline-variant);
   border-radius: var(--radius-md);
+  box-shadow: inset 0 -1px 0 var(--outline-variant);
   touch-action: none;
+  cursor: crosshair;
 }
 .sigpad__clear {
   align-self: flex-end;
@@ -815,13 +894,13 @@ body {
     position: static;
     flex-direction: column;
     justify-content: flex-start;
-    gap: 8px;
-    width: 88px;
-    padding: 12px 8px;
-    box-shadow: none;
+    gap: 4px;
+    width: 76px;
+    padding: 10px 6px;
+    border-top: none;
     border-right: 1px solid var(--outline-variant);
   }
-  .toolnav__btn { flex: none; }
+  .toolnav__btn { flex: none; max-width: none; padding: 4px 0; }
 
   .viewer { padding-bottom: 0; }
 
@@ -829,7 +908,7 @@ body {
   .panel {
     position: static;
     z-index: auto;
-    width: 320px;
+    width: 288px;
     max-height: none;
     border-radius: 0;
     border-left: 1px solid var(--outline-variant);

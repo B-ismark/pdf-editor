@@ -43,40 +43,45 @@ export function useViewport() {
     return () => ro.disconnect();
   }, []);
 
-  // Pending scroll anchor applied after a zoom-driven relayout.
-  const anchor = useRef<{ cx: number; cy: number; ax: number; ay: number } | null>(
+  // Pending scroll anchor applied after a zoom-driven relayout. We store the
+  // fraction of the scrollable extent under the anchor point (rather than a
+  // scale-multiplied coordinate) so fixed padding/gaps don't skew it.
+  const anchor = useRef<{ rx: number; ry: number; ax: number; ay: number } | null>(
     null,
   );
   useLayoutEffect(() => {
     const el = viewportRef.current;
     const a = anchor.current;
     if (!el || !a) return;
-    el.scrollLeft = a.cx * scale - a.ax;
-    el.scrollTop = a.cy * scale - a.ay;
+    el.scrollLeft = a.rx * el.scrollWidth - a.ax;
+    el.scrollTop = a.ry * el.scrollHeight - a.ay;
     anchor.current = null;
   }, [scale]);
 
+  const captureAnchor = (ax: number, ay: number) => {
+    const el = viewportRef.current;
+    if (!el) return;
+    anchor.current = {
+      rx: el.scrollWidth ? (el.scrollLeft + ax) / el.scrollWidth : 0,
+      ry: el.scrollHeight ? (el.scrollTop + ay) / el.scrollHeight : 0,
+      ax,
+      ay,
+    };
+  };
+
   /** Apply a zoom factor keeping the given screen point stationary. */
-  const zoomBy = useCallback(
-    (factor: number, clientX?: number, clientY?: number) => {
-      const el = viewportRef.current;
-      if (!el) return;
-      const rect = el.getBoundingClientRect();
-      const ax =
-        clientX !== undefined ? clientX - rect.left : el.clientWidth / 2;
-      const ay =
-        clientY !== undefined ? clientY - rect.top : el.clientHeight / 2;
-      // Content point (in unscaled units) currently under the anchor.
-      const cx = (el.scrollLeft + ax) / scale;
-      const cy = (el.scrollTop + ay) / scale;
-      setZoom((z) => {
-        const target = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * factor));
-        if (target !== z) anchor.current = { cx, cy, ax, ay };
-        return target;
-      });
-    },
-    [scale],
-  );
+  const zoomBy = useCallback((factor: number, clientX?: number, clientY?: number) => {
+    const el = viewportRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const ax = clientX !== undefined ? clientX - rect.left : el.clientWidth / 2;
+    const ay = clientY !== undefined ? clientY - rect.top : el.clientHeight / 2;
+    setZoom((z) => {
+      const target = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * factor));
+      if (target !== z) captureAnchor(ax, ay);
+      return target;
+    });
+  }, []);
 
   const zoomIn = useCallback(() => zoomBy(1.25), [zoomBy]);
   const zoomOut = useCallback(() => zoomBy(1 / 1.25), [zoomBy]);
@@ -134,15 +139,8 @@ export function useViewport() {
         const el = viewportRef.current;
         if (!el) return;
         const rect = el.getBoundingClientRect();
-        const ax = midX - rect.left;
-        const ay = midY - rect.top;
-        const cx = (el.scrollLeft + ax) / scale;
-        const cy = (el.scrollTop + ay) / scale;
-        setZoom(() => {
-          const z = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, target));
-          anchor.current = { cx, cy, ax, ay };
-          return z;
-        });
+        captureAnchor(midX - rect.left, midY - rect.top);
+        setZoom(() => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, target)));
       }
     },
     [scale],
