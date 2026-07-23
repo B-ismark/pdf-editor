@@ -264,6 +264,7 @@ function sanitize(text: string, font: PDFFont): string {
 export async function exportPdf(
   loaded: LoadedPdf,
   input: ExportInput,
+  onProgress?: (page: number, total: number) => void,
 ): Promise<Uint8Array> {
   const { edits, textBoxes, redactions, annotations, stamps, links = [], formValues = {} } = input;
   const src = await PDFDocument.load(loaded.bytes.slice(0));
@@ -282,7 +283,9 @@ export async function exportPdf(
 
   const helv = await getFont("Helvetica");
 
+  let done = 0;
   for (const pageData of loaded.pages) {
+    onProgress?.(++done, loaded.pages.length);
     const i = pageData.pageIndex;
     const pageBoxes = textBoxes.filter((t) => t.pageIndex === i);
     const pageRedactions = redactions.filter((r) => r.pageIndex === i);

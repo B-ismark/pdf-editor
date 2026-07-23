@@ -20,6 +20,39 @@ export class OcrAssetsMissing extends Error {
   }
 }
 
+/** Thrown when the caller aborts OCR via its AbortSignal. */
+export class OcrCancelled extends Error {
+  constructor() {
+    super("OCR was cancelled.");
+    this.name = "OcrCancelled";
+  }
+}
+
+/** Reject if `p` doesn't settle within `ms` — so a wedged worker (asset fetch
+ * that never resolves, wasm that never boots) surfaces an error instead of
+ * spinning forever. */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
+
+/** Longest we'll wait for the Tesseract worker to boot (fetch wasm core +
+ * language model over the app's own origin). */
+const WORKER_INIT_TIMEOUT = 60_000;
+/** Longest we'll wait to recognise a single page. */
+const PAGE_TIMEOUT = 120_000;
+
 /** Quick check that the language model is reachable on our own origin. */
 async function assetsPresent(): Promise<boolean> {
   try {
@@ -65,24 +98,36 @@ export async function ocrPages(
   bytes: ArrayBuffer,
   pages: PageData[],
   onProgress?: OcrProgress,
+  signal?: AbortSignal,
 ): Promise<Map<number, TextFragment[]>> {
+  if (signal?.aborted) throw new OcrCancelled();
   if (!(await assetsPresent())) throw new OcrAssetsMissing();
 
   const { createWorker } = await import("tesseract.js");
-  const worker = await createWorker("eng", 1, {
-    workerPath: WORKER_PATH,
-    corePath: CORE_PATH,
-    langPath: LANG_PATH,
-    gzip: true,
-  });
+  onProgress?.(0, pages.length, "Starting");
+  const worker = await withTimeout(
+    createWorker("eng", 1, {
+      workerPath: WORKER_PATH,
+      corePath: CORE_PATH,
+      langPath: LANG_PATH,
+      gzip: true,
+    }),
+    WORKER_INIT_TIMEOUT,
+    "Loading OCR engine",
+  );
 
   const result = new Map<number, TextFragment[]>();
   try {
     for (let p = 0; p < pages.length; p++) {
+      if (signal?.aborted) throw new OcrCancelled();
       onProgress?.(p + 1, pages.length, "Reading text");
       const page = pages[p];
       const canvas = await renderPageToCanvas(bytes, page.pageIndex, OCR_SCALE);
-      const { data } = await worker.recognize(canvas, {}, { blocks: true });
+      const { data } = await withTimeout(
+        worker.recognize(canvas, {}, { blocks: true }),
+        PAGE_TIMEOUT,
+        `Recognising page ${p + 1}`,
+      );
       const H = page.viewBox.height;
       const frags: TextFragment[] = [];
       const words = collectWords(data);

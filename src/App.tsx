@@ -28,7 +28,7 @@ import { useMediaQuery } from "./hooks/useMediaQuery";
 import { usePersistentState } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
 import { useViewport } from "./hooks/useViewport";
-import { loadPdf } from "./pdf/loader";
+import { loadPdf, looksLikePdf } from "./pdf/loader";
 import { DEFAULT_STYLE, isFragmentModified, resolveFragmentStyle } from "./pdf/style";
 
 // On-demand modals — each pulls in heavy code (pdf-lib, canvas rendering) that
@@ -62,7 +62,11 @@ import type {
   Tool,
 } from "./pdf/types";
 
-type Status = "idle" | "loading" | "ready" | "exporting" | "error";
+// "exporting" is reserved for the primary Download action (drives the Download
+// button's label); "working" is every other long op (OCR, compress, watermark,
+// page numbers, image export) so they show the busy indicator without hijacking
+// the Download button.
+type Status = "idle" | "loading" | "ready" | "exporting" | "working" | "error";
 type NavKey = Tool | "sign";
 
 const EMPTY_DOC: DocState = { edits: {}, textBoxes: [], redactions: [], annotations: [], stamps: [] };
@@ -126,6 +130,13 @@ function isTypingTarget(): boolean {
   );
 }
 
+/** True when a modal dialog (Organize, Finish, Compress, Command Palette, …)
+ * is open. Global editing shortcuts must not act on the hidden canvas beneath
+ * it. */
+function aModalIsOpen(): boolean {
+  return !!document.querySelector('[aria-modal="true"]');
+}
+
 export function App() {
   const [pdf, setPdf] = useState<LoadedPdf | null>(null);
   const [fileName, setFileName] = useState("document.pdf");
@@ -179,6 +190,9 @@ export function App() {
   const [revision, setRevision] = useState(0);
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
+  // When a long, cancellable operation is running (OCR), this holds its
+  // cancel handler so the busy indicator can offer a Cancel button.
+  const [onCancel, setOnCancel] = useState<null | (() => void)>(null);
   const [dragging, setDragging] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [organizeOpen, setOrganizeOpen] = useState(false);
@@ -237,6 +251,10 @@ export function App() {
   );
   const changeCount =
     editedFragmentCount + textBoxes.length + redactions.length + annotations.length + stamps.length + links.length + Object.keys(formValues).length;
+
+  // A long-running operation is in flight (opening a file, exporting, OCR,
+  // finishing ops). Drives the busy spinner + prevents overlapping actions.
+  const busy = status === "loading" || status === "exporting" || status === "working";
 
   // ---- Find in document (Ctrl/⌘+F) ----
   const matches: FindMatch[] = useMemo(
@@ -368,12 +386,27 @@ export function App() {
 
   const openFile = useCallback(
     async (file: File) => {
-      if (file.type && file.type !== "application/pdf") {
+      // Show feedback immediately — reading a large file into memory and
+      // sniffing it can take a beat, and a drag-drop gives no other signal.
+      setStatus("loading");
+      setMessage(`Opening ${file.name}…`);
+      let bytes: ArrayBuffer;
+      try {
+        bytes = await file.arrayBuffer();
+      } catch {
         setStatus("error");
-        setMessage(`"${file.name}" is not a PDF.`);
+        setMessage(`Couldn't read "${file.name}".`);
         return;
       }
-      await openBytes(await file.arrayBuffer(), file.name);
+      // Trust the content, not the extension or MIME type: an HTML page or
+      // image renamed to .pdf (or dropped with an empty MIME type) must be
+      // rejected here rather than failing deep inside pdf.js.
+      if (!looksLikePdf(bytes)) {
+        setStatus("error");
+        setMessage(`"${file.name}" isn't a PDF file. Please choose a .pdf document.`);
+        return;
+      }
+      await openBytes(bytes, file.name);
     },
     [openBytes],
   );
@@ -422,7 +455,7 @@ export function App() {
   const applyNumbers = useCallback(
     async (opts: PageNumberOptions) => {
       setFinishTab(null);
-      setStatus("exporting");
+      setStatus("working");
       setMessage("Adding page numbers…");
       try {
         const baked = await bakeCurrent();
@@ -440,7 +473,7 @@ export function App() {
   const applyWatermark = useCallback(
     async (opts: WatermarkOptions) => {
       setFinishTab(null);
-      setStatus("exporting");
+      setStatus("working");
       setMessage("Applying watermark…");
       try {
         const baked = await bakeCurrent();
@@ -459,13 +492,15 @@ export function App() {
     async (opts: import("./pdf/finishOps").CompressOptions) => {
       if (!pdf) return;
       setCompressOpen(false);
-      setStatus("exporting");
+      setStatus("working");
       setMessage("Compressing…");
       try {
         const baked = await bakeCurrent();
         const { compressPdf } = await import("./pdf/finishOps");
         const sizes = pdf.pages.map((p) => ({ width: p.viewBox.width, height: p.viewBox.height }));
-        const compressed = await compressPdf(baked, sizes, opts);
+        const compressed = await compressPdf(baked, sizes, opts, (p, t) =>
+          setMessage(`Compressing… page ${p}/${t}`),
+        );
         const before = baked.byteLength;
         const after = compressed.byteLength;
         // Rasterising a text/vector PDF can produce a *larger* file than the
@@ -499,12 +534,18 @@ export function App() {
   const runOcr = useCallback(async () => {
     if (!pdf) return;
     setMenuOpen(false);
-    setStatus("exporting");
+    const ctrl = new AbortController();
+    setOnCancel(() => () => ctrl.abort());
+    setStatus("working");
     setMessage("Reading text (OCR)…");
     try {
       const { ocrPages } = await import("./pdf/ocr");
-      const map = await ocrPages(pdf.bytes, pdf.pages, (p, t) =>
-        setMessage(`Reading text… page ${p}/${t}`),
+      const map = await ocrPages(
+        pdf.bytes,
+        pdf.pages,
+        (p, t) =>
+          setMessage(p === 0 ? "Starting OCR engine…" : `Reading text… page ${p}/${t}`),
+        ctrl.signal,
       );
       let added = 0;
       const pages = pdf.pages.map((pg) => {
@@ -523,24 +564,34 @@ export function App() {
           : "No recognisable text found.",
       );
     } catch (err) {
-      setStatus("error");
-      setMessage(
-        (err as Error)?.name === "OcrAssetsMissing"
-          ? "On-device OCR isn't set up in this build — run `npm run setup-ocr` to enable it."
-          : "OCR failed on this document. Please try again.",
-      );
+      const name = (err as Error)?.name;
+      if (name === "OcrCancelled") {
+        setStatus("idle");
+        setMessage("OCR cancelled.");
+      } else if (name === "OcrAssetsMissing") {
+        console.warn("OCR assets missing — run `npm run setup-ocr` to enable on-device text recognition.");
+        setStatus("error");
+        setMessage("Text recognition isn't available in this version.");
+      } else {
+        setStatus("error");
+        setMessage("OCR couldn't finish on this document. It may be very large or image-heavy — try again.");
+      }
+    } finally {
+      setOnCancel(null);
     }
   }, [pdf]);
 
   const exportImages = useCallback(async () => {
     if (!pdf) return;
     setMenuOpen(false);
-    setStatus("exporting");
+    setStatus("working");
     setMessage("Rendering images…");
     try {
       const baked = await bakeCurrent();
       const { renderImages } = await import("./pdf/finishOps");
-      const urls = await renderImages(baked, pdf.pages.length, 2);
+      const urls = await renderImages(baked, pdf.pages.length, 2, (p, t) =>
+        setMessage(`Rendering images… page ${p}/${t}`),
+      );
       const base = fileName.replace(/\.pdf$/i, "");
       urls.forEach((url, i) => {
         setTimeout(() => {
@@ -971,7 +1022,8 @@ export function App() {
     const h = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
-        setCmdOpen((v) => !v);
+        // Don't stack the palette over another modal; still allow closing it.
+        setCmdOpen((v) => (v ? false : !aModalIsOpen()));
       }
     };
     window.addEventListener("keydown", h);
@@ -1054,7 +1106,7 @@ export function App() {
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || isTypingTarget()) return;
+      if (!(e.metaKey || e.ctrlKey) || isTypingTarget() || aModalIsOpen()) return;
       const key = e.key.toLowerCase();
       if (key === "d") {
         if (!selection) return;
@@ -1289,15 +1341,20 @@ export function App() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [changeCount]);
 
-  // Auto-dismiss transient status messages (keep errors until superseded).
+  // Auto-dismiss transient status messages (keep errors and in-progress
+  // messages until superseded).
   useEffect(() => {
-    if (!message || status === "error" || status === "loading" || status === "exporting") return;
+    if (!message || status === "error" || busy) return;
     const t = setTimeout(() => setMessage(""), 4000);
     return () => clearTimeout(t);
-  }, [message, status]);
+  }, [message, status, busy]);
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      // A modal (Organize / Finish / Compress / Command Palette) owns the
+      // keyboard while it's open — don't undo/redo/find/delete on the canvas
+      // hidden beneath it. Modals manage their own Escape via useModal.
+      if (aModalIsOpen()) return;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
       if (mod && key === "z") {
@@ -1460,7 +1517,11 @@ export function App() {
     setMessage("Building edited PDF…");
     try {
       const { exportPdf } = await import("./pdf/exporter");
-      const out = await exportPdf(pdf, { edits, textBoxes, redactions, annotations, stamps, links, formValues });
+      const out = await exportPdf(
+        pdf,
+        { edits, textBoxes, redactions, annotations, stamps, links, formValues },
+        (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`),
+      );
       const blob = new Blob([out as BlobPart], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -1545,8 +1606,12 @@ export function App() {
           <span className="appbar__changes label-medium">
             {changeCount > 0 ? `${changeCount} change${changeCount === 1 ? "" : "s"}` : ""}
           </span>
-          <button className="btn btn--filled appbar__download" onClick={download} disabled={status === "exporting"}>
-            <Icon name="download" size={16} />
+          <button className="btn btn--filled appbar__download" onClick={download} disabled={busy}>
+            {status === "exporting" ? (
+              <span className="spinner spinner--sm spinner--on-primary" aria-hidden="true" />
+            ) : (
+              <Icon name="download" size={16} />
+            )}
             <span>{status === "exporting" ? "Exporting…" : "Download"}</span>
           </button>
           <div className="menu">
@@ -1611,7 +1676,7 @@ export function App() {
                     <Icon name="content_copy" size={18} /> Copy all text
                   </button>
                   <button className="menu__item" onClick={exportTextFile} role="menuitem">
-                    <Icon name="scan_text" size={18} /> Export text (.txt)
+                    <Icon name="download" size={18} /> Export text (.txt)
                   </button>
                   <div className="menu__divider" />
                   <button
@@ -1698,7 +1763,7 @@ export function App() {
           <Icon name="compress" size={18} /> Compress PDF
         </button>
         <button className="doclist__item" onClick={exportTextFile}>
-          <Icon name="content_copy" size={18} /> Export text (.txt)
+          <Icon name="download" size={18} /> Export text (.txt)
         </button>
       </div>
     </div>
@@ -1747,7 +1812,11 @@ export function App() {
               <Icon name="upload_file" size={18} /> Choose PDF
             </button>
             <p className="body-small dropzone__hint">or drag &amp; drop a file here</p>
-            {status === "loading" && <p className="body-small dropzone__note">{message}</p>}
+            {status === "loading" && (
+              <p className="body-small dropzone__note">
+                <span className="spinner spinner--sm" aria-hidden="true" /> {message}
+              </p>
+            )}
             {status === "error" && <p className="body-small dropzone__err">{message}</p>}
           </div>
           <input
@@ -1993,10 +2062,16 @@ export function App() {
       </div>
       {message && (
         <div
-          className={`snackbar body-medium${status === "error" ? " snackbar--err" : ""}`}
+          className={`snackbar body-medium${status === "error" ? " snackbar--err" : ""}${busy ? " snackbar--busy" : ""}`}
           aria-hidden="true"
         >
-          {message}
+          {busy && <span className="spinner spinner--sm" aria-hidden="true" />}
+          <span className="snackbar__msg">{message}</span>
+          {busy && onCancel && (
+            <button className="snackbar__cancel" onClick={() => onCancel()}>
+              Cancel
+            </button>
+          )}
         </div>
       )}
 

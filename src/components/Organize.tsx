@@ -4,6 +4,7 @@ import { Thumbnail } from "./Thumbnail";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useModal } from "../hooks/useModal";
 import { buildFromPlan, pageCount, type PlanEntry } from "../pdf/pageOps";
+import { looksLikePdf } from "../pdf/loader";
 
 interface Props {
   mainBytes: ArrayBuffer;
@@ -31,6 +32,7 @@ export function Organize({
   const [plan, setPlan] = useState<PlanEntry[] | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
   const [confirmApply, setConfirmApply] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const addCounter = useRef(0);
@@ -80,10 +82,16 @@ export function Organize({
   };
 
   const addFile = async (file: File) => {
-    if (file.type && file.type !== "application/pdf") return;
+    setErr(null);
     setBusy("Adding pages…");
     try {
       const bytes = await file.arrayBuffer();
+      // Sniff the content — reject an image/HTML/renamed file before pdf-lib
+      // chokes on it deep in the merge.
+      if (!looksLikePdf(bytes)) {
+        setErr(`"${file.name}" isn't a PDF file.`);
+        return;
+      }
       const key = `add-${addCounter.current++}`;
       const n = await pageCount(bytes);
       setSources((prev) => new Map(prev).set(key, bytes));
@@ -91,6 +99,8 @@ export function Organize({
         ...(prev ?? []),
         ...Array.from({ length: n }, (_, i) => ({ sourceKey: key, index: i, rotation: 0 })),
       ]);
+    } catch {
+      setErr(`Couldn't add "${file.name}". It may be damaged or password-protected.`);
     } finally {
       setBusy(null);
     }
@@ -99,12 +109,15 @@ export function Organize({
   const doApply = async () => {
     if (!plan || plan.length === 0) return;
     setConfirmApply(false);
+    setErr(null);
     setBusy("Applying…");
     try {
       const bytes = await buildFromPlan(plan, sources);
       const ab = new ArrayBuffer(bytes.byteLength);
       new Uint8Array(ab).set(bytes);
       onApply(ab, `${plan.length} page(s) after organizing`);
+    } catch {
+      setErr("Couldn't rebuild the document. Please try again.");
     } finally {
       setBusy(null);
     }
@@ -120,9 +133,12 @@ export function Organize({
     if (!plan) return;
     const subset = plan.filter((_, i) => selected.has(i));
     if (subset.length === 0) return;
+    setErr(null);
     setBusy("Extracting…");
     try {
       onExtract(await buildFromPlan(subset, sources));
+    } catch {
+      setErr("Couldn't extract those pages. Please try again.");
     } finally {
       setBusy(null);
     }
@@ -152,6 +168,7 @@ export function Organize({
           </button>
         )}
         <button className="btn btn--filled" onClick={apply} disabled={!plan || plan.length === 0 || !!busy}>
+          {busy && <span className="spinner spinner--sm spinner--on-primary" aria-hidden="true" />}
           {busy ?? "Apply"}
         </button>
         <input
@@ -172,8 +189,16 @@ export function Organize({
         add another PDF to merge. {fileName}
       </p>
 
+      {err && (
+        <p className="organize__err body-small" role="alert">
+          <Icon name="close" size={15} /> {err}
+        </p>
+      )}
+
       {!plan ? (
-        <div className="organize__loading body-medium">Loading pages…</div>
+        <div className="organize__loading body-medium">
+          <span className="spinner spinner--sm" aria-hidden="true" /> Loading pages…
+        </div>
       ) : (
         <div className="organize__grid">
           {plan.map((entry, i) => (

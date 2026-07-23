@@ -91,9 +91,11 @@ export async function compressPdf(
   bytes: ArrayBuffer,
   pageSizes: { width: number; height: number }[],
   opts: CompressOptions,
+  onProgress?: (page: number, total: number) => void,
 ): Promise<Uint8Array> {
   const out = await PDFDocument.create();
   for (let i = 0; i < pageSizes.length; i++) {
+    onProgress?.(i + 1, pageSizes.length);
     const canvas = await renderPageToCanvas(bytes, i, opts.scale);
     const jpg = canvas.toDataURL("image/jpeg", opts.quality);
     const img = await out.embedJpg(jpg);
@@ -109,9 +111,11 @@ export async function renderImages(
   bytes: ArrayBuffer,
   pageCount: number,
   scale = 2,
+  onProgress?: (page: number, total: number) => void,
 ): Promise<string[]> {
   const urls: string[] = [];
   for (let i = 0; i < pageCount; i++) {
+    onProgress?.(i + 1, pageCount);
     const canvas = await renderPageToCanvas(bytes, i, scale);
     urls.push(canvas.toDataURL("image/png"));
   }

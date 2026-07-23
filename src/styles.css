@@ -754,6 +754,26 @@ body {
   to { opacity: 1; }
 }
 
+/* ============ Spinner ============ */
+/* Inherits currentColor, so it works on any surface (snackbar, buttons, etc.). */
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  vertical-align: -3px;
+  animation: spin 0.7s linear infinite;
+}
+.spinner--sm { width: 15px; height: 15px; border-width: 2px; }
+.spinner--on-primary { color: var(--on-primary); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation-duration: 1.6s; }
+}
+
 /* ============ Snackbar ============ */
 .snackbar {
   position: fixed;
@@ -763,6 +783,9 @@ body {
      bottom nav, FAB, or an open properties sheet. Desktop override below. */
   top: calc(60px + env(safe-area-inset-top));
   z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   max-width: min(92vw, 560px);
   padding: 13px 18px;
   background: var(--inverse-surface);
@@ -772,6 +795,24 @@ body {
   animation: snack-in var(--dur-med2) var(--ease-emphasized-decelerate);
   /* Purely informational — must never intercept taps on the content beneath. */
   pointer-events: none;
+}
+.snackbar__msg { min-width: 0; }
+/* A busy snackbar may carry a Cancel button, so it must accept pointer events. */
+.snackbar--busy { pointer-events: auto; }
+.snackbar__cancel {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  padding: 5px 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--inverse-on-surface) 16%, transparent);
+  color: var(--inverse-on-surface);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.snackbar__cancel:hover {
+  background: color-mix(in srgb, var(--inverse-on-surface) 26%, transparent);
 }
 .snackbar--err { background: var(--error); color: var(--on-error); }
 @keyframes snack-in {
@@ -1558,7 +1599,25 @@ body {
   padding: 10px 16px;
   margin: 0;
 }
-.organize__loading { padding: 40px; text-align: center; color: var(--on-surface-variant); }
+.organize__loading {
+  padding: 40px;
+  text-align: center;
+  color: var(--on-surface-variant);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.organize__err {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  color: var(--on-error-container);
+  background: var(--error-container);
+}
 .organize__grid {
   flex: 1;
   overflow-y: auto;

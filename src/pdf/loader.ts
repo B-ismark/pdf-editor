@@ -7,6 +7,24 @@ import type { FormField, LoadedPdf, PageData, TextFragment } from "./types";
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
 /**
+ * True if the bytes look like a PDF. The MIME type a browser reports is
+ * unreliable (empty for many drag-drops, and trivially wrong for a renamed
+ * file), so we sniff the actual content: a PDF begins with the `%PDF-`
+ * signature. The spec allows a little leading junk, so scan the first 1 KB.
+ */
+export function looksLikePdf(bytes: ArrayBuffer): boolean {
+  const head = new Uint8Array(bytes.slice(0, 1024));
+  const sig = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
+  outer: for (let i = 0; i + sig.length <= head.length; i++) {
+    for (let j = 0; j < sig.length; j++) {
+      if (head[i + j] !== sig[j]) continue outer;
+    }
+    return true;
+  }
+  return false;
+}
+
+/**
  * Parse a PDF into per-page editable text fragments.
  *
  * We keep the raw bytes around: unedited content is preserved by exporting
