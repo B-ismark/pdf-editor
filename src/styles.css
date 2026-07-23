@@ -788,6 +788,45 @@ body {
 .formfield--check.formfield--on { background: color-mix(in srgb, #1a73e8 18%, transparent); }
 .formfield:disabled { opacity: 0.6; cursor: default; }
 
+/* ============ Marquee + multi-select ============ */
+.marquee {
+  position: absolute;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  border: 1px solid var(--primary);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 6;
+}
+.multisel {
+  position: absolute;
+  outline: 1.5px solid var(--primary);
+  outline-offset: 1px;
+  background: color-mix(in srgb, var(--primary) 10%, transparent);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 5;
+}
+.multibar {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  max-width: calc(100% - 24px);
+  padding: 4px 6px 4px 12px;
+  background: var(--surface-container-high);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-2);
+  z-index: 17;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.multibar::-webkit-scrollbar { display: none; }
+.multibar__title { color: var(--on-surface-variant); white-space: nowrap; flex: none; }
+.multibar__sep { width: 1px; height: 22px; background: var(--outline-variant); margin: 0 3px; flex: none; }
+
 /* ============ Snap guides ============ */
 .snapguide { position: absolute; background: var(--primary); pointer-events: none; z-index: 6; opacity: 0.9; }
 .snapguide--v { top: 0; bottom: 0; width: 1px; }

@@ -11,6 +11,16 @@ import { PageNav } from "./components/PageNav";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
 import { findMatches, extractText, type FindMatch } from "./pdf/find";
+import {
+  annotationBox,
+  boxCX,
+  boxCY,
+  linkBox,
+  redactionBox,
+  stampBox,
+  textBoxBox,
+  type Box,
+} from "./pdf/bbox";
 import { useAutosave } from "./hooks/useAutosave";
 import type { PageNumberOptions, WatermarkOptions } from "./pdf/finishOps";
 import { useHistory } from "./hooks/useHistory";
@@ -178,6 +188,7 @@ export function App() {
   const [findActive, setFindActive] = useState(0);
   const [navOpen, setNavOpen] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
+  const [multi, setMulti] = useState<string[]>([]);
   const [compressOpen, setCompressOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -1011,6 +1022,153 @@ export function App() {
     return () => window.removeEventListener("keydown", h);
   }, [selection, selectedClip, pasteItem, duplicateSelection]);
 
+  // ---- Multi-select (marquee) + align / distribute ----
+  const multiIds = useMemo(() => new Set(multi), [multi]);
+  const clearMulti = useCallback(() => setMulti([]), []);
+
+  const onMarquee = useCallback((ids: string[]) => {
+    setMulti(ids.length >= 2 ? ids : []);
+  }, []);
+
+  // A single selection or a tool change ends a multi-selection.
+  useEffect(() => {
+    if (selection) setMulti([]);
+  }, [selection]);
+
+  const multiItems = useMemo(() => {
+    const set = new Set(multi);
+    const items: { id: string; kind: string; box: Box }[] = [];
+    textBoxes.forEach((b) => set.has(b.id) && items.push({ id: b.id, kind: "textbox", box: textBoxBox(b) }));
+    redactions.forEach((r) => set.has(r.id) && items.push({ id: r.id, kind: "redaction", box: redactionBox(r) }));
+    annotations.forEach((a) => set.has(a.id) && items.push({ id: a.id, kind: "annotation", box: annotationBox(a) }));
+    stamps.forEach((s) => set.has(s.id) && items.push({ id: s.id, kind: "stamp", box: stampBox(s) }));
+    links.forEach((l) => set.has(l.id) && items.push({ id: l.id, kind: "link", box: linkBox(l) }));
+    return items;
+  }, [multi, textBoxes, redactions, annotations, stamps, links]);
+
+  /** Apply per-id {dx,dy} deltas to every overlay object in one undo step. */
+  const applyDeltas = useCallback(
+    (deltas: Map<string, { dx: number; dy: number }>) => {
+      doc.set((d) => ({
+        ...d,
+        textBoxes: d.textBoxes.map((b) => {
+          const m = deltas.get(b.id);
+          return m ? { ...b, x: b.x + m.dx, y: b.y + m.dy } : b;
+        }),
+        redactions: d.redactions.map((r) => {
+          const m = deltas.get(r.id);
+          return m ? { ...r, x: r.x + m.dx, y: r.y + m.dy } : r;
+        }),
+        annotations: d.annotations.map((a) => {
+          const m = deltas.get(a.id);
+          return m ? translateAnnotation(a, m.dx, m.dy) : a;
+        }),
+        stamps: d.stamps.map((s) => {
+          const m = deltas.get(s.id);
+          return m ? { ...s, x: s.x + m.dx, y: s.y + m.dy } : s;
+        }),
+        links: (d.links ?? []).map((l) => {
+          const m = deltas.get(l.id);
+          return m ? { ...l, x: l.x + m.dx, y: l.y + m.dy } : l;
+        }),
+      }));
+    },
+    [doc],
+  );
+
+  type AlignOp = "left" | "center-h" | "right" | "top" | "middle" | "bottom";
+  const alignMulti = useCallback(
+    (op: AlignOp) => {
+      if (multiItems.length < 2) return;
+      const ls = multiItems.map((i) => i.box.l);
+      const rs = multiItems.map((i) => i.box.r);
+      const bs = multiItems.map((i) => i.box.b);
+      const ts = multiItems.map((i) => i.box.t);
+      const minL = Math.min(...ls), maxR = Math.max(...rs), minB = Math.min(...bs), maxT = Math.max(...ts);
+      const cH = (minL + maxR) / 2, cV = (minB + maxT) / 2;
+      const deltas = new Map<string, { dx: number; dy: number }>();
+      for (const it of multiItems) {
+        let dx = 0, dy = 0;
+        if (op === "left") dx = minL - it.box.l;
+        else if (op === "right") dx = maxR - it.box.r;
+        else if (op === "center-h") dx = cH - boxCX(it.box);
+        else if (op === "top") dy = maxT - it.box.t;
+        else if (op === "bottom") dy = minB - it.box.b;
+        else if (op === "middle") dy = cV - boxCY(it.box);
+        deltas.set(it.id, { dx, dy });
+      }
+      applyDeltas(deltas);
+    },
+    [multiItems, applyDeltas],
+  );
+
+  const distributeMulti = useCallback(
+    (axis: "h" | "v") => {
+      if (multiItems.length < 3) return;
+      const sorted = [...multiItems].sort((a, b) =>
+        axis === "h" ? boxCX(a.box) - boxCX(b.box) : boxCY(a.box) - boxCY(b.box),
+      );
+      const first = axis === "h" ? boxCX(sorted[0].box) : boxCY(sorted[0].box);
+      const last =
+        axis === "h" ? boxCX(sorted[sorted.length - 1].box) : boxCY(sorted[sorted.length - 1].box);
+      const step = (last - first) / (sorted.length - 1);
+      const deltas = new Map<string, { dx: number; dy: number }>();
+      sorted.forEach((it, i) => {
+        const target = first + step * i;
+        const cur = axis === "h" ? boxCX(it.box) : boxCY(it.box);
+        deltas.set(it.id, axis === "h" ? { dx: target - cur, dy: 0 } : { dx: 0, dy: target - cur });
+      });
+      applyDeltas(deltas);
+    },
+    [multiItems, applyDeltas],
+  );
+
+  const deleteMulti = useCallback(() => {
+    const set = new Set(multi);
+    if (set.size === 0) return;
+    doc.set((d) => ({
+      ...d,
+      textBoxes: d.textBoxes.filter((b) => !set.has(b.id)),
+      redactions: d.redactions.filter((r) => !set.has(r.id)),
+      annotations: d.annotations.filter((a) => !set.has(a.id)),
+      stamps: d.stamps.filter((s) => !set.has(s.id)),
+      links: (d.links ?? []).filter((l) => !set.has(l.id)),
+    }));
+    setMulti([]);
+  }, [multi, doc]);
+
+  const duplicateMulti = useCallback(() => {
+    if (multiItems.length === 0) return;
+    const dx = 12, dy = -12;
+    const newIds: string[] = [];
+    doc.set((d) => {
+      const next = { ...d, links: d.links ?? [] };
+      const set = new Set(multi);
+      for (const b of d.textBoxes.filter((x) => set.has(x.id))) {
+        const id = nextId("tb"); newIds.push(id);
+        next.textBoxes = [...next.textBoxes, { ...b, id, x: b.x + dx, y: b.y + dy }];
+      }
+      for (const r of d.redactions.filter((x) => set.has(x.id))) {
+        const id = nextId("rd"); newIds.push(id);
+        next.redactions = [...next.redactions, { ...r, id, x: r.x + dx, y: r.y + dy }];
+      }
+      for (const s of d.stamps.filter((x) => set.has(x.id))) {
+        const id = nextId("st"); newIds.push(id);
+        next.stamps = [...next.stamps, { ...s, id, x: s.x + dx, y: s.y + dy }];
+      }
+      for (const l of next.links.filter((x) => set.has(x.id))) {
+        const id = nextId("ln"); newIds.push(id);
+        next.links = [...next.links, { ...l, id, x: l.x + dx, y: l.y + dy }];
+      }
+      for (const a of d.annotations.filter((x) => set.has(x.id))) {
+        const id = nextId("an"); newIds.push(id);
+        next.annotations = [...next.annotations, { ...translateAnnotation(a, dx, dy), id }];
+      }
+      return next;
+    });
+    setMulti(newIds);
+  }, [multi, multiItems, doc]);
+
   // Move focus into the overflow menu when it opens (ARIA menu pattern).
   useEffect(() => {
     if (!menuOpen) return;
@@ -1108,6 +1266,18 @@ export function App() {
         e.preventDefault();
         closeFind();
         return;
+      }
+      if (multi.length > 0 && !isTypingTarget()) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          clearMulti();
+          return;
+        }
+        if (e.key === "Delete" || e.key === "Backspace") {
+          e.preventDefault();
+          deleteMulti();
+          return;
+        }
       }
       // Escape clears the current selection (and closes the mobile sheet /
       // desktop panel, which is driven by selection). Modals stop Escape from
@@ -1226,6 +1396,9 @@ export function App() {
     findOpen,
     links,
     onChangeLink,
+    multi,
+    clearMulti,
+    deleteMulti,
   ]);
 
   const download = useCallback(async () => {
@@ -1274,6 +1447,7 @@ export function App() {
 
   const pickTool = (t: NavKey) => {
     setPendingStamp(null);
+    setMulti([]);
     if (t === "sign") {
       setSelection(null);
       setSigOpen(true);
@@ -1553,6 +1727,7 @@ export function App() {
                 stamps={stamps.filter((s) => s.pageIndex === page.pageIndex)}
                 links={links.filter((l) => l.pageIndex === page.pageIndex)}
                 formValues={formValues}
+                multiIds={multiIds}
                 placing={!!pendingStamp}
                 findMatches={matchesByPage.get(page.pageIndex)}
                 activeFindId={activeMatch?.id ?? null}
@@ -1575,6 +1750,7 @@ export function App() {
                 onAddRedaction={onAddRedaction}
                 onAddLink={onAddLink}
                 onChangeFormValue={onChangeFormValue}
+                onMarquee={onMarquee}
                 onAddAnnotation={onAddAnnotation}
                 onPlaceStamp={onPlaceStamp}
               />
@@ -1612,6 +1788,27 @@ export function App() {
               onRedactAll={redactAllMatches}
               onClose={closeFind}
             />
+          )}
+
+          {multi.length >= 2 && (
+            <div className="multibar" role="toolbar" aria-label={`${multi.length} objects selected`}>
+              <span className="multibar__title label-large">{multi.length} selected</span>
+              <span className="multibar__sep" />
+              <button className="icon-btn icon-btn--sm" onClick={() => alignMulti("left")} aria-label="Align left" data-tip="Align left"><Icon name="align_left" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={() => alignMulti("center-h")} aria-label="Align centre" data-tip="Align horizontal centre"><Icon name="align_center_h" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={() => alignMulti("right")} aria-label="Align right" data-tip="Align right"><Icon name="align_right" size={18} /></button>
+              <span className="multibar__sep" />
+              <button className="icon-btn icon-btn--sm" onClick={() => alignMulti("top")} aria-label="Align top" data-tip="Align top"><Icon name="align_top" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={() => alignMulti("middle")} aria-label="Align middle" data-tip="Align vertical centre"><Icon name="align_center_v" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={() => alignMulti("bottom")} aria-label="Align bottom" data-tip="Align bottom"><Icon name="align_bottom" size={18} /></button>
+              <span className="multibar__sep" />
+              <button className="icon-btn icon-btn--sm" onClick={() => distributeMulti("h")} disabled={multi.length < 3} aria-label="Distribute horizontally" data-tip="Distribute horizontally"><Icon name="distribute_h" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={() => distributeMulti("v")} disabled={multi.length < 3} aria-label="Distribute vertically" data-tip="Distribute vertically"><Icon name="distribute_v" size={18} /></button>
+              <span className="multibar__sep" />
+              <button className="icon-btn icon-btn--sm" onClick={duplicateMulti} aria-label="Duplicate" data-tip="Duplicate"><Icon name="duplicate" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={deleteMulti} aria-label="Delete" data-tip="Delete"><Icon name="delete" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={clearMulti} aria-label="Clear selection" data-tip="Clear"><Icon name="close" size={18} /></button>
+            </div>
           )}
 
           {tool === "draw" && (

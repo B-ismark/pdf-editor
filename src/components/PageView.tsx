@@ -21,6 +21,7 @@ import { StampItem } from "./StampItem";
 import { AnnotationFrame } from "./AnnotationFrame";
 import { dragState } from "../hooks/useDrag";
 import { useGuides } from "../hooks/useSnap";
+import { annotationBox, intersects, linkBox, redactionBox, stampBox, textBoxBox, type Box } from "../pdf/bbox";
 import type { LinkAnnot, Stamp } from "../pdf/types";
 import type { FindMatch } from "../pdf/find";
 import { LinkItem } from "./LinkItem";
@@ -43,6 +44,8 @@ interface Props {
   stamps: Stamp[];
   links: LinkAnnot[];
   formValues: Record<string, string | boolean>;
+  /** Ids currently in a multi-selection (highlighted, not individually chromed). */
+  multiIds: Set<string>;
   placing: boolean;
   /** Search hits on this page (PDF units), and the id of the active one. */
   findMatches?: FindMatch[];
@@ -68,6 +71,8 @@ interface Props {
   onAddRedaction: (pageIndex: number, x: number, y: number, width: number, height: number, cover?: boolean) => void;
   onAddLink: (pageIndex: number, x: number, y: number, width: number, height: number) => void;
   onChangeFormValue: (name: string, value: string | boolean) => void;
+  /** Report the ids enclosed by a marquee drag on this page. */
+  onMarquee: (ids: string[], additive: boolean) => void;
   onAddAnnotation: (pageIndex: number, spec: AnnotSpec) => void;
   onPlaceStamp: (pageIndex: number, xLeft: number, yTop: number) => void;
 }
@@ -75,7 +80,7 @@ interface Props {
 const MIN_DRAG = 6;
 
 interface Gesture {
-  mode: "redact" | "whiteout" | "link" | AnnotationTool;
+  mode: "redact" | "whiteout" | "link" | "marquee" | AnnotationTool;
   x0: number;
   y0: number;
   x1: number;
@@ -86,9 +91,9 @@ interface Gesture {
 export function PageView(props: Props) {
   const {
     bytes, page, scale, tool, drawTool, drawStyle, edits, textBoxes, redactions,
-    annotations, stamps, links, formValues, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, revision, onSelect,
+    annotations, stamps, links, formValues, multiIds, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, revision, onSelect,
     onChangeFragmentText, onChangeTextBoxText, onChangeTextBox, onChangeRedaction, onChangeLink,
-    onChangeNoteText, onMoveAnnotation, onChangeStamp, onDeleteStamp, onAddTextBox, onAddRedaction, onAddLink, onChangeFormValue, onAddAnnotation,
+    onChangeNoteText, onMoveAnnotation, onChangeStamp, onDeleteStamp, onAddTextBox, onAddRedaction, onAddLink, onChangeFormValue, onMarquee, onAddAnnotation,
     onPlaceStamp,
   } = props;
 
@@ -142,6 +147,13 @@ export function PageView(props: Props) {
     }
     if (tool === "select") {
       onSelect(null);
+      // Mouse: rubber-band select. Touch keeps deselect + page-pan behaviour.
+      if (ev.pointerType === "mouse") {
+        ev.preventDefault();
+        (ev.target as HTMLElement).setPointerCapture(ev.pointerId);
+        dragState.active = true;
+        setG({ mode: "marquee", x0: x, y0: y, x1: x, y1: y, pts: [] });
+      }
       return;
     }
     if (tool === "text") {
@@ -180,6 +192,23 @@ export function PageView(props: Props) {
     const w = Math.abs(cur.x1 - cur.x0), h = Math.abs(cur.y1 - cur.y0);
     const { color, width } = drawStyle;
 
+    if (cur.mode === "marquee") {
+      if (w < MIN_DRAG && h < MIN_DRAG) return;
+      const rect: Box = {
+        l: left / scale,
+        r: (left + w) / scale,
+        b: H - (top + h) / scale,
+        t: H - top / scale,
+      };
+      const ids: string[] = [];
+      for (const b of textBoxes) if (intersects(rect, textBoxBox(b))) ids.push(b.id);
+      for (const r of redactions) if (intersects(rect, redactionBox(r))) ids.push(r.id);
+      for (const a of annotations) if (intersects(rect, annotationBox(a))) ids.push(a.id);
+      for (const s of stamps) if (intersects(rect, stampBox(s))) ids.push(s.id);
+      for (const l of links) if (intersects(rect, linkBox(l))) ids.push(l.id);
+      onMarquee(ids, false);
+      return;
+    }
     if (cur.mode === "redact" || cur.mode === "whiteout") {
       if (w < MIN_DRAG || h < MIN_DRAG) return;
       onAddRedaction(page.pageIndex, left / scale, H - (top + h) / scale, w / scale, h / scale, cur.mode === "whiteout");
@@ -391,6 +420,27 @@ export function PageView(props: Props) {
             onChange={onChangeFormValue}
           />
 
+          {/* Multi-selection highlights (marquee result). */}
+          {multiIds.size > 0 &&
+            [
+              ...textBoxes.filter((b) => multiIds.has(b.id)).map((b) => ({ id: b.id, box: textBoxBox(b) })),
+              ...redactions.filter((r) => multiIds.has(r.id)).map((r) => ({ id: r.id, box: redactionBox(r) })),
+              ...annotations.filter((a) => multiIds.has(a.id)).map((a) => ({ id: a.id, box: annotationBox(a) })),
+              ...stamps.filter((s) => multiIds.has(s.id)).map((s) => ({ id: s.id, box: stampBox(s) })),
+              ...links.filter((l) => multiIds.has(l.id)).map((l) => ({ id: l.id, box: linkBox(l) })),
+            ].map(({ id, box }) => (
+              <div
+                key={`multi-${id}`}
+                className="multisel"
+                style={{
+                  left: box.l * scale,
+                  top: (H - box.t) * scale,
+                  width: Math.max(4, (box.r - box.l) * scale),
+                  height: Math.max(4, (box.t - box.b) * scale),
+                }}
+              />
+            ))}
+
           {/* Snap guide lines (shown while dragging an element near a page
               edge or centre line). */}
           {guides.gx != null && (
@@ -419,6 +469,9 @@ function DrawPreview({ g, color, width, scale }: { g: Gesture; color: string; wi
   }
   if (g.mode === "link") {
     return <div className="linkbox linkbox--preview" style={{ left, top, width: w, height: h }} />;
+  }
+  if (g.mode === "marquee") {
+    return <div className="marquee" style={{ left, top, width: w, height: h }} />;
   }
   const sw = width * scale;
   return (
