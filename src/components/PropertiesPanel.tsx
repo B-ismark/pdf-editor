@@ -59,7 +59,7 @@ export function PropertiesPanel({
         <span className="props__title title-medium">{title}</span>
         {onClose && (
           <button className="icon-btn" onClick={onClose} aria-label="Close">
-            <Icon name="close" size={22} />
+            <Icon name="close" size={20} />
           </button>
         )}
       </div>
@@ -78,7 +78,7 @@ export function PropertiesPanel({
             <ColorField value={redactionColor ?? "#000000"} onChange={onChangeRedactionColor} />
           </div>
           <button className="btn btn--danger" onClick={onDelete}>
-            <Icon name="delete" size={18} /> Delete
+            <Icon name="delete" size={16} /> Delete
           </button>
         </div>
       )}
@@ -108,7 +108,7 @@ export function PropertiesPanel({
             <p className="props__empty body-small">Edit the note text directly on the page.</p>
           )}
           <button className="btn btn--danger" onClick={onDelete}>
-            <Icon name="delete" size={18} /> Delete
+            <Icon name="delete" size={16} /> Delete
           </button>
         </div>
       )}
@@ -181,7 +181,7 @@ export function PropertiesPanel({
 
           {selection.kind === "textbox" && (
             <button className="btn btn--danger" onClick={onDelete}>
-              <Icon name="delete" size={18} /> Delete
+              <Icon name="delete" size={16} /> Delete
             </button>
           )}
         </div>

@@ -32,7 +32,7 @@ export function FinishDialog({ initialTab = "numbers", onApplyNumbers, onApplyWa
         <div className="dialog__head">
           <span className="title-large">Finishing touches</span>
           <button className="icon-btn" onClick={onClose} aria-label="Close">
-            <Icon name="close" size={22} />
+            <Icon name="close" size={20} />
           </button>
         </div>
 

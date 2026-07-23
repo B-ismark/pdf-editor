@@ -29,8 +29,8 @@ body {
   position: relative;
   display: inline-grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
+  width: 40px;
+  height: 40px;
   flex: none;
   border: none;
   border-radius: var(--radius-full);
@@ -58,8 +58,8 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 40px;
-  padding: 0 20px;
+  height: 38px;
+  padding: 0 18px;
   border: none;
   border-radius: var(--radius-full);
   background: var(--surface-container-high);
@@ -84,33 +84,33 @@ body {
 .btn--filled { background: var(--primary); color: var(--on-primary); }
 .btn--tonal { background: var(--secondary-container); color: var(--on-secondary-container); }
 .btn--danger { background: var(--error-container); color: var(--on-error-container); }
-.btn--lg { height: 56px; padding: 0 28px; font-size: 1rem; }
+.btn--lg { height: 50px; padding: 0 26px; font-size: 0.9375rem; }
 
 /* ============ Top app bar ============ */
 .appbar {
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 0 6px 0 12px;
+  padding: 0 8px 0 14px;
   padding-top: env(safe-area-inset-top);
-  height: calc(56px + env(safe-area-inset-top));
+  height: calc(52px + env(safe-area-inset-top));
   background: var(--surface-container);
   color: var(--on-surface);
   border-bottom: 1px solid var(--outline-variant);
   z-index: 20;
   flex: none;
 }
-.appbar__brand { display: flex; align-items: center; gap: 9px; margin-right: 4px; }
+.appbar__brand { display: flex; align-items: center; gap: 10px; margin-right: 6px; }
 .appbar__logo {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-sm);
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
   background: var(--primary);
   color: var(--on-primary);
 }
-.appbar__name { color: var(--on-surface); font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+.appbar__name { color: var(--on-surface); font-size: 0.9375rem; font-weight: 600; letter-spacing: -0.01em; }
 .appbar__spacer { flex: 1; }
 .appbar__changes { color: var(--on-surface-variant); padding: 0 4px; }
 .appbar__download { margin-left: 4px; }
@@ -155,8 +155,8 @@ body {
   position: relative;
   display: grid;
   place-items: center;
-  width: 48px;
-  height: 28px;
+  width: 44px;
+  height: 26px;
   border-radius: var(--radius-full);
   transition: background var(--dur-short4) var(--ease-standard);
 }
@@ -194,7 +194,7 @@ body {
   position: relative;
   background: #fff;
   box-shadow: var(--shadow-2);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   flex: none;
 }
 .page__canvas { display: block; width: 100%; height: 100%; border-radius: inherit; }
@@ -224,8 +224,8 @@ body {
   z-index: 15;
 }
 .zoombar__label {
-  min-width: 52px;
-  height: 40px;
+  min-width: 48px;
+  height: 36px;
   border: none;
   background: transparent;
   color: var(--on-surface);
@@ -348,14 +348,14 @@ body {
   z-index: 22;
   display: inline-flex;
   align-items: center;
-  gap: 10px;
-  height: 56px;
+  gap: 9px;
+  height: 50px;
   padding: 0 20px;
   border: none;
   border-radius: var(--radius-lg);
   background: var(--primary-container);
   color: var(--on-primary-container);
-  box-shadow: var(--shadow-3);
+  box-shadow: var(--shadow-2);
   cursor: pointer;
   font: 500 0.9375rem/1 var(--font-plain);
 }
@@ -380,7 +380,7 @@ body {
   align-items: center;
   gap: 12px;
   width: 100%;
-  min-height: 48px;
+  min-height: 44px;
   padding: 0 12px;
   border: none;
   border-radius: var(--radius-sm);
@@ -399,7 +399,7 @@ body {
 .posgrid__cell {
   height: 30px;
   border: 1px solid var(--outline);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   background: transparent;
   cursor: pointer;
 }
@@ -422,10 +422,10 @@ body {
   bottom: calc(96px + env(safe-area-inset-bottom));
   z-index: 50;
   max-width: min(92vw, 560px);
-  padding: 14px 16px;
+  padding: 13px 18px;
   background: var(--inverse-surface);
   color: var(--inverse-on-surface);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-3);
   animation: snack-in var(--dur-med2) var(--ease-emphasized-decelerate);
   bottom: calc(160px + env(safe-area-inset-bottom)); /* clear bottom bar + FAB */
@@ -466,9 +466,9 @@ body {
 .dropzone__icon {
   display: grid;
   place-items: center;
-  width: 72px;
-  height: 72px;
-  border-radius: var(--radius-full);
+  width: 60px;
+  height: 60px;
+  border-radius: var(--radius-lg);
   background: var(--primary-container);
   color: var(--on-primary-container);
   margin-bottom: 4px;
@@ -900,7 +900,7 @@ body {
     flex-direction: column;
     justify-content: flex-start;
     gap: 4px;
-    width: 76px;
+    width: 66px;
     padding: 10px 6px;
     border-top: none;
     border-right: 1px solid var(--outline-variant);

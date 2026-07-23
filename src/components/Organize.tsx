@@ -130,16 +130,16 @@ export function Organize({
     <div className="organize">
       <header className="organize__bar">
         <button className="icon-btn" onClick={onClose} aria-label="Close">
-          <Icon name="close" size={24} />
+          <Icon name="close" size={20} />
         </button>
         <span className="title-large">Organize pages</span>
         <div className="appbar__spacer" />
         <button className="btn" onClick={() => fileRef.current?.click()}>
-          <Icon name="note_add" size={18} /> <span className="organize__btnlabel">Add PDF</span>
+          <Icon name="note_add" size={16} /> <span className="organize__btnlabel">Add PDF</span>
         </button>
         {selected.size > 0 && (
           <button className="btn" onClick={extract}>
-            <Icon name="download" size={18} /> <span className="organize__btnlabel">Extract {selected.size}</span>
+            <Icon name="download" size={16} /> <span className="organize__btnlabel">Extract {selected.size}</span>
           </button>
         )}
         <button className="btn btn--filled" onClick={apply} disabled={!plan || plan.length === 0 || !!busy}>
@@ -175,22 +175,22 @@ export function Organize({
               <button className="pcard__thumb" onClick={() => toggleSel(i)} aria-pressed={selected.has(i)}>
                 <Thumbnail bytes={sources.get(entry.sourceKey)!} index={entry.index} rotation={entry.rotation} />
                 {selected.has(i) && (
-                  <span className="pcard__check"><Icon name="add" size={16} /></span>
+                  <span className="pcard__check"><Icon name="add" size={15} /></span>
                 )}
               </button>
               <div className="pcard__no label-medium">{i + 1}</div>
               <div className="pcard__actions">
                 <button className="icon-btn icon-btn--sm" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move earlier">
-                  <Icon name="chevron_left" size={18} />
+                  <Icon name="chevron_left" size={16} />
                 </button>
                 <button className="icon-btn icon-btn--sm" onClick={() => rotate(i)} aria-label="Rotate">
-                  <Icon name="rotate" size={18} />
+                  <Icon name="rotate" size={16} />
                 </button>
                 <button className="icon-btn icon-btn--sm" onClick={() => del(i)} aria-label="Delete page">
-                  <Icon name="delete" size={18} />
+                  <Icon name="delete" size={16} />
                 </button>
                 <button className="icon-btn icon-btn--sm" onClick={() => move(i, 1)} disabled={i === plan.length - 1} aria-label="Move later">
-                  <Icon name="chevron_right" size={18} />
+                  <Icon name="chevron_right" size={16} />
                 </button>
               </div>
             </div>

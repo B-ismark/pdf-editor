@@ -86,7 +86,7 @@ export function Icon({ name, size = 24, className }: Props) {
     <C
       size={size}
       className={className}
-      strokeWidth={2}
+      strokeWidth={1.75}
       absoluteStrokeWidth
       aria-hidden="true"
       style={{ display: "block", flex: "none", fill: fill ? "currentColor" : "none" }}

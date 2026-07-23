@@ -588,7 +588,7 @@ export function App() {
     <header className="appbar">
       <div className="appbar__brand">
         <span className="appbar__logo">
-          <Icon name="stylus_note" size={22} filled />
+          <Icon name="stylus_note" size={18} filled />
         </span>
         <span className="title-large appbar__name">PDF Editor</span>
       </div>
@@ -597,21 +597,21 @@ export function App() {
         <>
           <div className="appbar__spacer" />
           <button className="icon-btn" onClick={undo} disabled={!doc.canUndo} aria-label="Undo" title="Undo (Ctrl+Z)">
-            <Icon name="undo" size={22} />
+            <Icon name="undo" size={18} />
           </button>
           <button className="icon-btn" onClick={redo} disabled={!doc.canRedo} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">
-            <Icon name="redo" size={22} />
+            <Icon name="redo" size={18} />
           </button>
           <span className="appbar__changes label-medium">
             {changeCount > 0 ? `${changeCount} change${changeCount === 1 ? "" : "s"}` : ""}
           </span>
           <button className="btn btn--filled appbar__download" onClick={download} disabled={status === "exporting"}>
-            <Icon name="download" size={18} />
+            <Icon name="download" size={16} />
             <span>{status === "exporting" ? "Exporting…" : "Download"}</span>
           </button>
           <div className="menu">
             <button className="icon-btn" onClick={() => setMenuOpen((v) => !v)} aria-label="More" aria-expanded={menuOpen}>
-              <Icon name="more_vert" size={22} />
+              <Icon name="more_vert" size={18} />
             </button>
             {menuOpen && (
               <>
@@ -626,7 +626,7 @@ export function App() {
                     }}
                     role="menuitem"
                   >
-                    <Icon name="select" size={20} /> Organize pages
+                    <Icon name="select" size={18} /> Organize pages
                   </button>
                   <button
                     className="menu__item"
@@ -636,7 +636,7 @@ export function App() {
                     }}
                     role="menuitem"
                   >
-                    <Icon name="image" size={20} /> Add image
+                    <Icon name="image" size={18} /> Add image
                   </button>
                   <div className="menu__divider" />
                   <button
@@ -644,21 +644,21 @@ export function App() {
                     onClick={() => { setMenuOpen(false); setSelection(null); setFinishTab("numbers"); }}
                     role="menuitem"
                   >
-                    <Icon name="tag" size={20} /> Page numbers
+                    <Icon name="tag" size={18} /> Page numbers
                   </button>
                   <button
                     className="menu__item"
                     onClick={() => { setMenuOpen(false); setSelection(null); setFinishTab("watermark"); }}
                     role="menuitem"
                   >
-                    <Icon name="watermark" size={20} /> Watermark
+                    <Icon name="watermark" size={18} /> Watermark
                   </button>
                   <button className="menu__item" onClick={exportImages} role="menuitem">
-                    <Icon name="image" size={20} /> Export as images
+                    <Icon name="image" size={18} /> Export as images
                   </button>
                   <div className="menu__divider" />
                   <button className="menu__item" onClick={reset} role="menuitem">
-                    <Icon name="note_add" size={20} /> Open another PDF
+                    <Icon name="note_add" size={18} /> Open another PDF
                   </button>
                 </div>
               </>
@@ -672,7 +672,7 @@ export function App() {
         aria-label={`Theme: ${themeLabel}. Click to change.`}
         title={themeLabel}
       >
-        <Icon name={themeIcon} size={22} />
+        <Icon name={themeIcon} size={20} />
       </button>
     </header>
   );
@@ -697,7 +697,7 @@ export function App() {
         >
           <div className="dropzone__card">
             <div className="dropzone__icon">
-              <Icon name="picture_as_pdf" size={34} />
+              <Icon name="picture_as_pdf" size={30} />
             </div>
             <h1 className="headline-small">Open a PDF to start editing</h1>
             <p className="body-medium dropzone__sub">
@@ -705,7 +705,7 @@ export function App() {
               Nothing is uploaded.
             </p>
             <button className="btn btn--filled btn--lg" onClick={() => inputRef.current?.click()}>
-              <Icon name="upload_file" size={20} /> Choose PDF
+              <Icon name="upload_file" size={18} /> Choose PDF
             </button>
             <p className="body-small dropzone__hint">or drag &amp; drop a file here</p>
             {status === "loading" && <p className="body-small dropzone__note">{message}</p>}
@@ -741,7 +741,7 @@ export function App() {
               aria-pressed={tool === t.key}
             >
               <span className="toolnav__ind">
-                <Icon name={t.icon} size={24} filled={tool === t.key} />
+                <Icon name={t.icon} size={21} filled={tool === t.key} />
               </span>
               <span className="toolnav__label label-medium">{t.label}</span>
             </button>
@@ -790,13 +790,13 @@ export function App() {
           {/* Floating zoom control */}
           <div className="zoombar" role="group" aria-label="Zoom">
             <button className="icon-btn" onClick={vp.zoomOut} aria-label="Zoom out">
-              <Icon name="remove" size={22} />
+              <Icon name="remove" size={18} />
             </button>
             <button className="zoombar__label label-medium" onClick={vp.resetZoom} title="Reset to fit width">
               {Math.round(vp.zoom * 100)}%
             </button>
             <button className="icon-btn" onClick={vp.zoomIn} aria-label="Zoom in">
-              <Icon name="add" size={22} />
+              <Icon name="add" size={18} />
             </button>
           </div>
 
@@ -834,7 +834,7 @@ export function App() {
         disabled={status === "exporting"}
         aria-label="Download PDF"
       >
-        <Icon name={status === "exporting" ? "hourglass_top" : "download"} size={24} />
+        <Icon name={status === "exporting" ? "hourglass_top" : "download"} size={20} />
         <span className="fab__label label-large">
           {status === "exporting" ? "Exporting…" : "Download"}
         </span>

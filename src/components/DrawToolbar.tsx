@@ -33,7 +33,7 @@ export function DrawToolbar({ drawTool, setDrawTool, drawStyle, setDrawStyle }: 
             aria-label={t.label}
             aria-pressed={drawTool === t.key}
           >
-            <Icon name={t.icon} size={22} />
+            <Icon name={t.icon} size={20} />
           </button>
         ))}
       </div>

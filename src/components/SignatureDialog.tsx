@@ -99,7 +99,7 @@ export function SignatureDialog({ onCreate, onClose }: Props) {
         <div className="dialog__head">
           <span className="title-large">Add signature</span>
           <button className="icon-btn" onClick={onClose} aria-label="Close">
-            <Icon name="close" size={22} />
+            <Icon name="close" size={20} />
           </button>
         </div>
 
@@ -145,7 +145,7 @@ export function SignatureDialog({ onCreate, onClose }: Props) {
                 <img src={uploaded.dataUrl} alt="preview" className="sigupload__img" />
               ) : (
                 <label className="btn btn--tonal">
-                  <Icon name="upload_file" size={18} /> Choose image
+                  <Icon name="upload_file" size={16} /> Choose image
                   <input type="file" accept="image/*" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onUpload(f); }} />
                 </label>
               )}
