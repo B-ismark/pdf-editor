@@ -8,6 +8,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { TooltipHost } from "./components/TooltipHost";
 import { FindBar } from "./components/FindBar";
 import { PageNav } from "./components/PageNav";
+import { CommandPalette, type Command } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
 import { findMatches, extractText, type FindMatch } from "./pdf/find";
 import { useAutosave } from "./hooks/useAutosave";
@@ -32,11 +33,15 @@ const SignatureDialog = lazy(() =>
 const FinishDialog = lazy(() =>
   import("./components/FinishDialog").then((m) => ({ default: m.FinishDialog })),
 );
+const CompressDialog = lazy(() =>
+  import("./components/CompressDialog").then((m) => ({ default: m.CompressDialog })),
+);
 import type {
   Annotation,
   AnnotationTool,
   DocState,
   DrawStyle,
+  LinkAnnot,
   LoadedPdf,
   Redaction,
   Selection,
@@ -74,6 +79,8 @@ const TOOLS: { key: NavKey; label: string; icon: string }[] = [
   { key: "draw", label: "Draw", icon: "draw" },
   { key: "sign", label: "Sign", icon: "signature" },
   { key: "redact", label: "Redact", icon: "select" },
+  { key: "whiteout", label: "Whiteout", icon: "eraser" },
+  { key: "link", label: "Link", icon: "link" },
 ];
 
 // Single-key tool shortcuts (ignored while typing or when a modal is open).
@@ -83,6 +90,8 @@ const TOOL_KEYS: Record<string, NavKey> = {
   d: "draw",
   s: "sign",
   r: "redact",
+  w: "whiteout",
+  l: "link",
 };
 const TOOL_SHORTCUT: Record<NavKey, string> = {
   select: "V",
@@ -90,6 +99,8 @@ const TOOL_SHORTCUT: Record<NavKey, string> = {
   draw: "D",
   sign: "S",
   redact: "R",
+  whiteout: "W",
+  link: "L",
 };
 
 /** True when focus is in a text-entry context, so single-key shortcuts and
@@ -111,6 +122,7 @@ export function App() {
   const [tool, setTool] = useState<Tool>("select");
   const doc = useHistory<DocState>(EMPTY_DOC);
   const { edits, textBoxes, redactions, annotations, stamps } = doc.state;
+  const links = doc.state.links ?? [];
   // Remembered across sessions so the user's choices aren't reset each time.
   const [drawTool, setDrawTool] = usePersistentState("pref.drawTool", "highlight") as [
     AnnotationTool,
@@ -164,6 +176,8 @@ export function App() {
   const [findQuery, setFindQuery] = useState("");
   const [findActive, setFindActive] = useState(0);
   const [navOpen, setNavOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [compressOpen, setCompressOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuListRef = useRef<HTMLDivElement>(null);
@@ -206,7 +220,7 @@ export function App() {
     [pdf, fragmentById, edits],
   );
   const changeCount =
-    editedFragmentCount + textBoxes.length + redactions.length + annotations.length + stamps.length;
+    editedFragmentCount + textBoxes.length + redactions.length + annotations.length + stamps.length + links.length;
 
   // ---- Find in document (Ctrl/⌘+F) ----
   const matches: FindMatch[] = useMemo(
@@ -385,9 +399,9 @@ export function App() {
   /** Export the current edits to fresh bytes so finishing ops build on them. */
   const bakeCurrent = useCallback(async (): Promise<ArrayBuffer> => {
     const { exportPdf } = await import("./pdf/exporter");
-    const out = await exportPdf(pdf!, { edits, textBoxes, redactions, annotations, stamps });
+    const out = await exportPdf(pdf!, { edits, textBoxes, redactions, annotations, stamps, links });
     return toAB(out);
-  }, [pdf, edits, textBoxes, redactions, annotations, stamps]);
+  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links]);
 
   const applyNumbers = useCallback(
     async (opts: PageNumberOptions) => {
@@ -423,6 +437,36 @@ export function App() {
       }
     },
     [bakeCurrent, openBytes, fileName],
+  );
+
+  const applyCompress = useCallback(
+    async (opts: import("./pdf/finishOps").CompressOptions) => {
+      if (!pdf) return;
+      setCompressOpen(false);
+      setStatus("exporting");
+      setMessage("Compressing…");
+      try {
+        const baked = await bakeCurrent();
+        const { compressPdf } = await import("./pdf/finishOps");
+        const sizes = pdf.pages.map((p) => ({ width: p.viewBox.width, height: p.viewBox.height }));
+        const out = await compressPdf(baked, sizes, opts);
+        const before = pdf.bytes.byteLength;
+        const after = out.byteLength;
+        downloadBytes(out, fileName.replace(/\.pdf$/i, "") + "-compressed.pdf");
+        setStatus("ready");
+        const pct = Math.round((1 - after / before) * 100);
+        const fmt = (n: number) => (n / 1_000_000).toFixed(2) + " MB";
+        setMessage(
+          pct > 0
+            ? `Compressed — ${fmt(before)} → ${fmt(after)} (${pct}% smaller).`
+            : `Compressed to ${fmt(after)}.`,
+        );
+      } catch {
+        setStatus("error");
+        setMessage("Couldn't compress this PDF. Please try again.");
+      }
+    },
+    [pdf, bakeCurrent, fileName, downloadBytes],
   );
 
   const exportImages = useCallback(async () => {
@@ -517,16 +561,45 @@ export function App() {
   );
 
   const onAddRedaction = useCallback(
-    (pageIndex: number, x: number, y: number, width: number, height: number) => {
+    (pageIndex: number, x: number, y: number, width: number, height: number, cover?: boolean) => {
       const id = nextId("rd");
       doc.set((d) => ({
         ...d,
-        redactions: [...d.redactions, { id, pageIndex, x, y, width, height, color: "#000000" }],
+        redactions: [
+          ...d.redactions,
+          { id, pageIndex, x, y, width, height, color: cover ? "#ffffff" : "#000000", cover },
+        ],
       }));
       // Switch to Select so the new redaction can be moved/resized/recoloured
       // right away (in Redact mode it wouldn't be interactive).
       setTool("select");
       setSelection({ kind: "redaction", id });
+    },
+    [doc],
+  );
+
+  const onAddLink = useCallback(
+    (pageIndex: number, x: number, y: number, width: number, height: number) => {
+      const id = nextId("ln");
+      doc.set((d) => ({
+        ...d,
+        links: [...(d.links ?? []), { id, pageIndex, x, y, width, height, url: "" }],
+      }));
+      setTool("select");
+      setSelection({ kind: "link", id });
+    },
+    [doc],
+  );
+
+  const onChangeLink = useCallback(
+    (id: string, patch: Partial<LinkAnnot>, key: string) => {
+      doc.set(
+        (d) => ({
+          ...d,
+          links: (d.links ?? []).map((l) => (l.id === id ? { ...l, ...patch } : l)),
+        }),
+        key,
+      );
     },
     [doc],
   );
@@ -683,10 +756,19 @@ export function App() {
     return null;
   }, [selection, fragmentById, edits, textBoxes]);
 
-  const redactionColor =
-    selection?.kind === "redaction"
-      ? redactions.find((r) => r.id === selection.id)?.color ?? "#000000"
-      : null;
+  const selectedRedaction =
+    selection?.kind === "redaction" ? redactions.find((r) => r.id === selection.id) ?? null : null;
+  const redactionColor = selectedRedaction?.color ?? null;
+  const selectedLink =
+    selection?.kind === "link" ? links.find((l) => l.id === selection.id) ?? null : null;
+
+  const onChangeLinkUrl = useCallback(
+    (url: string) => {
+      if (selection?.kind !== "link") return;
+      onChangeLink(selection.id, { url }, `lurl-${selection.id}`);
+    },
+    [selection, onChangeLink],
+  );
 
   const onChangeStyle = useCallback(
     (patch: Partial<TextStyle>) => {
@@ -766,8 +848,24 @@ export function App() {
       const id = selection.id;
       doc.set((d) => ({ ...d, stamps: d.stamps.filter((s) => s.id !== id) }));
       setSelection(null);
+    } else if (selection?.kind === "link") {
+      const id = selection.id;
+      doc.set((d) => ({ ...d, links: (d.links ?? []).filter((l) => l.id !== id) }));
+      setSelection(null);
     }
   }, [selection, doc]);
+
+  // Command palette (Ctrl/⌘+K) — a global toggle independent of focus.
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCmdOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
 
   // Move focus into the overflow menu when it opens (ARIA menu pattern).
   useEffect(() => {
@@ -818,8 +916,10 @@ export function App() {
       setSelection(null);
     } else if (selection?.kind === "stamp" && !stamps.some((s) => s.id === selection.id)) {
       setSelection(null);
+    } else if (selection?.kind === "link" && !links.some((l) => l.id === selection.id)) {
+      setSelection(null);
     }
-  }, [textBoxes, redactions, annotations, stamps, selection]);
+  }, [textBoxes, redactions, annotations, stamps, links, selection]);
 
   // Warn before leaving/reloading the tab while there are unsaved changes.
   // Everything lives in memory (no server, no autosave), so an accidental
@@ -874,7 +974,7 @@ export function App() {
         return;
       }
       if (
-        (selection?.kind === "redaction" || selection?.kind === "stamp") &&
+        (selection?.kind === "redaction" || selection?.kind === "stamp" || selection?.kind === "link") &&
         (e.key === "Delete" || e.key === "Backspace")
       ) {
         e.preventDefault();
@@ -918,6 +1018,14 @@ export function App() {
           if (s) {
             e.preventDefault();
             onChangeStamp(s.id, { x: s.x + dx, y: s.y + dy }, `nudge-st-${s.id}`);
+          }
+          return;
+        }
+        if (selection.kind === "link") {
+          const l = links.find((x) => x.id === selection.id);
+          if (l) {
+            e.preventDefault();
+            onChangeLink(l.id, { x: l.x + dx, y: l.y + dy }, `nudge-ln-${l.id}`);
           }
           return;
         }
@@ -972,6 +1080,8 @@ export function App() {
     openFind,
     closeFind,
     findOpen,
+    links,
+    onChangeLink,
   ]);
 
   const download = useCallback(async () => {
@@ -980,7 +1090,7 @@ export function App() {
     setMessage("Building edited PDF…");
     try {
       const { exportPdf } = await import("./pdf/exporter");
-      const out = await exportPdf(pdf, { edits, textBoxes, redactions, annotations, stamps });
+      const out = await exportPdf(pdf, { edits, textBoxes, redactions, annotations, stamps, links });
       const blob = new Blob([out as BlobPart], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -998,7 +1108,7 @@ export function App() {
       setStatus("error");
       setMessage("Couldn't build the edited PDF. Please try again.");
     }
-  }, [pdf, edits, textBoxes, redactions, annotations, stamps, fileName]);
+  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, fileName]);
 
   const doReset = useCallback(() => {
     setPdf(null);
@@ -1115,6 +1225,13 @@ export function App() {
                   <button className="menu__item" onClick={exportImages} role="menuitem">
                     <Icon name="image" size={18} /> Export as images
                   </button>
+                  <button
+                    className="menu__item"
+                    onClick={() => { setMenuOpen(false); setSelection(null); setCompressOpen(true); }}
+                    role="menuitem"
+                  >
+                    <Icon name="compress" size={18} /> Compress PDF
+                  </button>
                   <div className="menu__divider" />
                   <button className="menu__item" onClick={copyAllText} role="menuitem">
                     <Icon name="content_copy" size={18} /> Copy all text
@@ -1158,9 +1275,12 @@ export function App() {
       selection={panelSelection}
       style={activeStyle}
       redactionColor={redactionColor}
+      redactionCover={!!selectedRedaction?.cover}
       annotation={selectedAnnotation}
+      linkUrl={selectedLink?.url ?? null}
       onChangeStyle={onChangeStyle}
       onChangeRedactionColor={onChangeRedactionColor}
+      onChangeLinkUrl={onChangeLinkUrl}
       onChangeAnnotation={onChangeAnnotation}
       onDelete={onDelete}
       onReset={onResetStyle}
@@ -1284,6 +1404,7 @@ export function App() {
                 redactions={redactions.filter((r) => r.pageIndex === page.pageIndex)}
                 annotations={annotations.filter((a) => a.pageIndex === page.pageIndex)}
                 stamps={stamps.filter((s) => s.pageIndex === page.pageIndex)}
+                links={links.filter((l) => l.pageIndex === page.pageIndex)}
                 placing={!!pendingStamp}
                 findMatches={matchesByPage.get(page.pageIndex)}
                 activeFindId={activeMatch?.id ?? null}
@@ -1297,12 +1418,14 @@ export function App() {
                 onChangeTextBoxText={onChangeTextBoxText}
                 onChangeTextBox={onChangeTextBox}
                 onChangeRedaction={onChangeRedaction}
+                onChangeLink={onChangeLink}
                 onChangeNoteText={onChangeNoteText}
                 onMoveAnnotation={onMoveAnnotation}
                 onChangeStamp={onChangeStamp}
                 onDeleteStamp={onDeleteStamp}
                 onAddTextBox={onAddTextBox}
                 onAddRedaction={onAddRedaction}
+                onAddLink={onAddLink}
                 onAddAnnotation={onAddAnnotation}
                 onPlaceStamp={onPlaceStamp}
               />
@@ -1466,6 +1589,45 @@ export function App() {
             onClose={() => setFinishTab(null)}
           />
         </Suspense>
+      )}
+
+      {compressOpen && (
+        <Suspense fallback={null}>
+          <CompressDialog onApply={applyCompress} onClose={() => setCompressOpen(false)} />
+        </Suspense>
+      )}
+
+      {cmdOpen && (
+        <CommandPalette
+          onClose={() => setCmdOpen(false)}
+          commands={
+            [
+              { id: "select", label: "Select tool", hint: "V", icon: "arrow_selector_tool", run: () => pickTool("select") },
+              { id: "text", label: "Add text", hint: "T", icon: "text_fields", run: () => pickTool("text") },
+              { id: "draw", label: "Draw", hint: "D", icon: "draw", run: () => pickTool("draw") },
+              { id: "sign", label: "Sign", hint: "S", icon: "signature", run: () => pickTool("sign") },
+              { id: "redact", label: "Redact", hint: "R", icon: "select", run: () => pickTool("redact") },
+              { id: "whiteout", label: "Whiteout", hint: "W", icon: "eraser", run: () => pickTool("whiteout") },
+              { id: "link", label: "Add link", hint: "L", icon: "link", run: () => pickTool("link") },
+              { id: "find", label: "Find in document", hint: "Ctrl+F", icon: "search", run: openFind },
+              { id: "pages", label: "Toggle page thumbnails", icon: "panel", run: () => setNavOpen((v) => !v) },
+              { id: "undo", label: "Undo", hint: "Ctrl+Z", icon: "undo", disabled: !doc.canUndo, run: undo },
+              { id: "redo", label: "Redo", hint: "Ctrl+Shift+Z", icon: "redo", disabled: !doc.canRedo, run: redo },
+              { id: "organize", label: "Organize pages", icon: "layers", keywords: "reorder rotate merge split", run: () => { setSelection(null); setOrganizeOpen(true); } },
+              { id: "image", label: "Add image", icon: "image", run: () => imageInputRef.current?.click() },
+              { id: "numbers", label: "Add page numbers", icon: "tag", run: () => { setSelection(null); setFinishTab("numbers"); } },
+              { id: "watermark", label: "Add watermark", icon: "watermark", run: () => { setSelection(null); setFinishTab("watermark"); } },
+              { id: "eximg", label: "Export as images", icon: "image", run: exportImages },
+              { id: "compress", label: "Compress / optimise PDF", icon: "compress", keywords: "shrink reduce size", run: () => setCompressOpen(true) },
+              { id: "copytext", label: "Copy all text", icon: "content_copy", run: copyAllText },
+              { id: "exporttext", label: "Export text (.txt)", icon: "scan_text", run: exportTextFile },
+              { id: "dim", label: dimPages ? "Undim pages" : "Dim pages", icon: "contrast", run: () => setDimPages((v) => !v) },
+              { id: "theme", label: `Theme: ${themeLabel}`, icon: themeIcon, keywords: "dark light system", run: theme.cycle },
+              { id: "download", label: "Download PDF", hint: "", icon: "download", run: download },
+              { id: "open", label: "Open another PDF", icon: "note_add", run: reset },
+            ] as Command[]
+          }
+        />
       )}
 
       {organizeOpen && pdf && (

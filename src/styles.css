@@ -760,6 +760,85 @@ body {
 .redaction { position: absolute; border-radius: 1px; touch-action: none; }
 .redaction--selected { box-shadow: 0 0 0 2px var(--primary), 0 0 0 4px color-mix(in srgb, var(--primary) 30%, transparent); }
 .redaction--preview { background: rgba(0, 0, 0, 0.55); border: 1px dashed #fff; pointer-events: none; }
+/* Whiteout cover — a plain fill (often white), so it needs a faint outline to
+   stay visible against the page while editing. */
+.redaction--cover { outline: 1px dashed color-mix(in srgb, var(--primary) 55%, transparent); outline-offset: -1px; }
+.whiteout--preview { position: absolute; background: rgba(255, 255, 255, 0.85); border: 1px dashed var(--primary); pointer-events: none; }
+
+/* ============ Link regions ============ */
+.linkbox {
+  position: absolute;
+  border-radius: 2px;
+  background: color-mix(in srgb, #1a73e8 12%, transparent);
+  outline: 1px solid color-mix(in srgb, #1a73e8 55%, transparent);
+  touch-action: none;
+}
+.linkbox--empty { background: color-mix(in srgb, var(--error) 12%, transparent); outline-color: color-mix(in srgb, var(--error) 55%, transparent); }
+.linkbox--selected { outline: 2px solid var(--primary); }
+.linkbox--preview { pointer-events: none; }
+.linkbox__chip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translate(-30%, -30%);
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-full);
+  background: #1a73e8;
+  color: #fff;
+  pointer-events: none;
+}
+.linkbox--empty .linkbox__chip { background: var(--error); }
+
+/* ============ Command palette ============ */
+.cmdk-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 75;
+  background: color-mix(in srgb, var(--scrim) 40%, transparent);
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: max(12vh, 60px) 16px 16px;
+}
+.cmdk {
+  width: min(560px, 100%);
+  max-height: 60vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-container-high);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+  overflow: hidden;
+  animation: cmdk-in var(--dur-med2) var(--ease-emphasized-decelerate);
+}
+@keyframes cmdk-in { from { opacity: 0; transform: translateY(-8px) scale(0.98); } to { opacity: 1; transform: none; } }
+.cmdk__search { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--outline-variant); }
+.cmdk__icon { color: var(--on-surface-variant); flex: none; }
+.cmdk__input { flex: 1; border: none; background: transparent; color: var(--on-surface); font: 400 1rem/1.5 var(--font-plain); outline: none; }
+.cmdk__list { overflow-y: auto; padding: 8px; }
+.cmdk__empty { padding: 20px; text-align: center; color: var(--on-surface-variant); }
+.cmdk__item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--on-surface);
+  cursor: pointer;
+  font-size: 0.9375rem;
+  text-align: left;
+}
+.cmdk__item--on { background: var(--secondary-container); color: var(--on-secondary-container); }
+.cmdk__label { flex: 1; }
+.cmdk__hint { color: var(--on-surface-variant); font-variant-numeric: tabular-nums; }
+.cmdk__item--on .cmdk__hint { color: var(--on-secondary-container); }
 
 /* ============ Drag/resize handles ============ */
 .handle {
@@ -1052,6 +1131,26 @@ body {
   font: 500 0.8125rem/1 ui-monospace, "SFMono-Regular", monospace;
   text-transform: uppercase;
 }
+
+/* ============ Compress dialog ============ */
+.compress__presets { display: flex; flex-direction: column; gap: 8px; }
+.compress__preset {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 12px 14px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--on-surface);
+  cursor: pointer;
+  text-align: left;
+}
+.compress__preset--on { border-color: transparent; background: var(--secondary-container); color: var(--on-secondary-container); }
+.compress__preset-label { font-weight: 600; }
+.compress__preset-hint { color: var(--on-surface-variant); }
+.compress__preset--on .compress__preset-hint { color: var(--on-secondary-container); }
 
 /* ============ Confirm dialog ============ */
 .dialog--sm { width: min(400px, 100%); gap: 12px; }

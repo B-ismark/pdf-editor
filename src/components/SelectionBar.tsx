@@ -17,6 +17,7 @@ const TITLES: Record<string, string> = {
   textbox: "Text box",
   redaction: "Redaction",
   annotation: "Annotation",
+  link: "Link",
 };
 
 /**
@@ -38,7 +39,7 @@ export function SelectionBar({ selection, annotationKind, onEdit, onStyle, onDel
   const kind = selection.kind;
   const isNote = kind === "annotation" && annotationKind === "note";
   const editable = kind === "fragment" || kind === "textbox" || isNote;
-  const styleLabel = kind === "redaction" ? "Colour" : "Style";
+  const styleLabel = kind === "redaction" ? "Colour" : kind === "link" ? "URL" : "Style";
   const title =
     kind === "annotation" ? (isNote ? "Note" : "Annotation") : TITLES[kind] ?? "Selected";
 

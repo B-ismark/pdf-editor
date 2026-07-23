@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { PDFDocument, PDFString, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { renderPageToCanvas } from "./loader";
 import {
   DEFAULT_STYLE,
@@ -11,6 +11,7 @@ import {
 import type {
   Annotation,
   Edits,
+  LinkAnnot,
   LoadedPdf,
   Redaction,
   Stamp,
@@ -27,6 +28,24 @@ export interface ExportInput {
   redactions: Redaction[];
   annotations: Annotation[];
   stamps: Stamp[];
+  links?: LinkAnnot[];
+}
+
+/** Attach clickable URI link annotations to a page (works on vector and
+ * rasterised pages alike — links sit above the content). */
+function addLinkAnnots(out: PDFDocument, page: PDFPage, links: LinkAnnot[]): void {
+  for (const l of links) {
+    const url = l.url.trim();
+    if (!url) continue;
+    const dict = out.context.obj({
+      Type: "Annot",
+      Subtype: "Link",
+      Rect: [l.x, l.y, l.x + l.width, l.y + l.height],
+      Border: [0, 0, 0],
+      A: { Type: "Action", S: "URI", URI: PDFString.of(url) },
+    });
+    page.node.addAnnot(out.context.register(dict));
+  }
 }
 
 /** Embed a data-URL image into the document (PNG or JPEG). */
@@ -225,7 +244,7 @@ export async function exportPdf(
   loaded: LoadedPdf,
   input: ExportInput,
 ): Promise<Uint8Array> {
-  const { edits, textBoxes, redactions, annotations, stamps } = input;
+  const { edits, textBoxes, redactions, annotations, stamps, links = [] } = input;
   const src = await PDFDocument.load(loaded.bytes.slice(0));
   const out = await PDFDocument.create();
   const fontCache = new Map<string, PDFFont>();
@@ -247,9 +266,15 @@ export async function exportPdf(
     const pageRedactions = redactions.filter((r) => r.pageIndex === i);
     const pageAnnots = annotations.filter((a) => a.pageIndex === i);
     const pageStamps = stamps.filter((s) => s.pageIndex === i);
+    const pageLinks = links.filter((l) => l.pageIndex === i);
+    // Only a *true* redaction forces the destructive raster path. Whiteout
+    // covers stay vector.
+    const pageCovers = pageRedactions.filter((r) => r.cover);
+    const needsRaster = pageRedactions.some((r) => !r.cover);
 
-    if (pageRedactions.length > 0) {
-      await rasterisePage(out, loaded, pageData.pageIndex, edits, pageBoxes, pageRedactions, pageAnnots, pageStamps);
+    if (needsRaster) {
+      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, pageBoxes, pageRedactions, pageAnnots, pageStamps);
+      addLinkAnnots(out, rasterPage, pageLinks);
       continue;
     }
 
@@ -314,6 +339,14 @@ export async function exportPdf(
         page.drawImage(img, { x: s.x, y: s.y, width: s.width, height: s.height });
       }
     }
+
+    // Whiteout covers — vector filled rects on top (non-destructive).
+    for (const cov of pageCovers) {
+      const c = hexToRgb(cov.color);
+      page.drawRectangle({ x: cov.x, y: cov.y, width: cov.width, height: cov.height, color: rgb(c.r, c.g, c.b) });
+    }
+
+    addLinkAnnots(out, page, pageLinks);
   }
 
   return out.save();
@@ -330,7 +363,7 @@ async function rasterisePage(
   redactions: Redaction[],
   annots: Annotation[],
   stamps: Stamp[],
-): Promise<void> {
+): Promise<PDFPage> {
   const pageData = loaded.pages[pageIndex];
   const H = pageData.viewBox.height;
   const canvas = await renderPageToCanvas(loaded.bytes, pageIndex, REDACT_SCALE);
@@ -401,6 +434,7 @@ async function rasterisePage(
   const hPt = pageData.viewBox.height;
   const page = out.addPage([wPt, hPt]);
   page.drawImage(png, { x: 0, y: 0, width: wPt, height: hPt });
+  return page;
 }
 
 export { DEFAULT_STYLE };

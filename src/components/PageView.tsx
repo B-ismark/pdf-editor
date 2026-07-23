@@ -20,8 +20,9 @@ import { NoteItem } from "./NoteItem";
 import { StampItem } from "./StampItem";
 import { AnnotationFrame } from "./AnnotationFrame";
 import { dragState } from "../hooks/useDrag";
-import type { Stamp } from "../pdf/types";
+import type { LinkAnnot, Stamp } from "../pdf/types";
 import type { FindMatch } from "../pdf/find";
+import { LinkItem } from "./LinkItem";
 
 /** Annotation spec minus the fields the App assigns (id, pageIndex). */
 export type AnnotSpec = Omit<Annotation, "id" | "pageIndex">;
@@ -38,6 +39,7 @@ interface Props {
   redactions: Redaction[];
   annotations: Annotation[];
   stamps: Stamp[];
+  links: LinkAnnot[];
   placing: boolean;
   /** Search hits on this page (PDF units), and the id of the active one. */
   findMatches?: FindMatch[];
@@ -54,12 +56,14 @@ interface Props {
   onChangeTextBoxText: (id: string, text: string) => void;
   onChangeTextBox: (id: string, patch: Partial<TextBox>, key: string) => void;
   onChangeRedaction: (id: string, patch: Partial<Redaction>, key: string) => void;
+  onChangeLink: (id: string, patch: Partial<LinkAnnot>, key: string) => void;
   onChangeNoteText: (id: string, text: string) => void;
   onMoveAnnotation: (annot: Annotation, key: string) => void;
   onChangeStamp: (id: string, patch: Partial<Stamp>, key: string) => void;
   onDeleteStamp: (id: string) => void;
   onAddTextBox: (pageIndex: number, x: number, y: number) => void;
-  onAddRedaction: (pageIndex: number, x: number, y: number, width: number, height: number) => void;
+  onAddRedaction: (pageIndex: number, x: number, y: number, width: number, height: number, cover?: boolean) => void;
+  onAddLink: (pageIndex: number, x: number, y: number, width: number, height: number) => void;
   onAddAnnotation: (pageIndex: number, spec: AnnotSpec) => void;
   onPlaceStamp: (pageIndex: number, xLeft: number, yTop: number) => void;
 }
@@ -67,7 +71,7 @@ interface Props {
 const MIN_DRAG = 6;
 
 interface Gesture {
-  mode: "redact" | AnnotationTool;
+  mode: "redact" | "whiteout" | "link" | AnnotationTool;
   x0: number;
   y0: number;
   x1: number;
@@ -78,9 +82,9 @@ interface Gesture {
 export function PageView(props: Props) {
   const {
     bytes, page, scale, tool, drawTool, drawStyle, edits, textBoxes, redactions,
-    annotations, stamps, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, revision, onSelect,
-    onChangeFragmentText, onChangeTextBoxText, onChangeTextBox, onChangeRedaction,
-    onChangeNoteText, onMoveAnnotation, onChangeStamp, onDeleteStamp, onAddTextBox, onAddRedaction, onAddAnnotation,
+    annotations, stamps, links, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, revision, onSelect,
+    onChangeFragmentText, onChangeTextBoxText, onChangeTextBox, onChangeRedaction, onChangeLink,
+    onChangeNoteText, onMoveAnnotation, onChangeStamp, onDeleteStamp, onAddTextBox, onAddRedaction, onAddLink, onAddAnnotation,
     onPlaceStamp,
   } = props;
 
@@ -149,7 +153,8 @@ export function PageView(props: Props) {
     ev.stopPropagation();
     (ev.target as HTMLElement).setPointerCapture(ev.pointerId);
     dragState.active = true;
-    const mode = tool === "redact" ? "redact" : drawTool;
+    const mode =
+      tool === "redact" ? "redact" : tool === "whiteout" ? "whiteout" : tool === "link" ? "link" : drawTool;
     setG({ mode, x0: x, y0: y, x1: x, y1: y, pts: [{ x, y }] });
   };
 
@@ -169,9 +174,12 @@ export function PageView(props: Props) {
     const w = Math.abs(cur.x1 - cur.x0), h = Math.abs(cur.y1 - cur.y0);
     const { color, width } = drawStyle;
 
-    if (cur.mode === "redact") {
+    if (cur.mode === "redact" || cur.mode === "whiteout") {
       if (w < MIN_DRAG || h < MIN_DRAG) return;
-      onAddRedaction(page.pageIndex, left / scale, H - (top + h) / scale, w / scale, h / scale);
+      onAddRedaction(page.pageIndex, left / scale, H - (top + h) / scale, w / scale, h / scale, cur.mode === "whiteout");
+    } else if (cur.mode === "link") {
+      if (w < MIN_DRAG || h < MIN_DRAG) return;
+      onAddLink(page.pageIndex, left / scale, H - (top + h) / scale, w / scale, h / scale);
     } else if (cur.mode === "highlight" || cur.mode === "rect") {
       if (w < MIN_DRAG || h < MIN_DRAG) return;
       const base = { x: left / scale, y: H - (top + h) / scale, width: w / scale, height: h / scale, color };
@@ -193,7 +201,7 @@ export function PageView(props: Props) {
     ? "copy"
     : tool === "text"
       ? "text"
-      : tool === "redact" || tool === "draw"
+      : tool === "redact" || tool === "whiteout" || tool === "link" || tool === "draw"
         ? "crosshair"
         : "default";
   const nonNote = annotations.filter((a) => a.kind !== "note");
@@ -351,6 +359,19 @@ export function PageView(props: Props) {
             />
           ))}
 
+          {links.map((l) => (
+            <LinkItem
+              key={l.id}
+              link={l}
+              scale={scale}
+              pageHeight={H}
+              selected={selection?.kind === "link" && selection.id === l.id}
+              interactive={tool === "select"}
+              onSelect={(id) => onSelect({ kind: "link", id })}
+              onChange={onChangeLink}
+            />
+          ))}
+
           {/* Live draw preview */}
           {g && <DrawPreview g={g} color={drawStyle.color} width={drawStyle.width} scale={scale} />}
         </div>
@@ -364,6 +385,12 @@ function DrawPreview({ g, color, width, scale }: { g: Gesture; color: string; wi
   const w = Math.abs(g.x1 - g.x0), h = Math.abs(g.y1 - g.y0);
   if (g.mode === "redact") {
     return <div className="redaction redaction--preview" style={{ left, top, width: w, height: h }} />;
+  }
+  if (g.mode === "whiteout") {
+    return <div className="whiteout whiteout--preview" style={{ left, top, width: w, height: h }} />;
+  }
+  if (g.mode === "link") {
+    return <div className="linkbox linkbox--preview" style={{ left, top, width: w, height: h }} />;
   }
   const sw = width * scale;
   return (
