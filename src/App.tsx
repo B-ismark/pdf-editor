@@ -470,6 +470,42 @@ export function App() {
     [pdf, bakeCurrent, fileName, downloadBytes],
   );
 
+  const runOcr = useCallback(async () => {
+    if (!pdf) return;
+    setMenuOpen(false);
+    setStatus("exporting");
+    setMessage("Reading text (OCR)…");
+    try {
+      const { ocrPages } = await import("./pdf/ocr");
+      const map = await ocrPages(pdf.bytes, pdf.pages, (p, t) =>
+        setMessage(`Reading text… page ${p}/${t}`),
+      );
+      let added = 0;
+      const pages = pdf.pages.map((pg) => {
+        const extra = map.get(pg.pageIndex) ?? [];
+        added += extra.length;
+        // Replace any prior OCR layer so re-running doesn't duplicate words.
+        const kept = pg.fragments.filter((f) => !f.id.startsWith("ocr:"));
+        return { ...pg, fragments: [...kept, ...extra] };
+      });
+      setPdf({ ...pdf, pages });
+      setRevision((r) => r + 1);
+      setStatus("ready");
+      setMessage(
+        added > 0
+          ? `OCR added ${added} words — now searchable and redactable.`
+          : "No recognisable text found.",
+      );
+    } catch (err) {
+      setStatus("error");
+      setMessage(
+        (err as Error)?.name === "OcrAssetsMissing"
+          ? "On-device OCR isn't set up in this build — run `npm run setup-ocr` to enable it."
+          : "OCR failed on this document. Please try again.",
+      );
+    }
+  }, [pdf]);
+
   const exportImages = useCallback(async () => {
     if (!pdf) return;
     setMenuOpen(false);
@@ -1340,6 +1376,9 @@ export function App() {
                   >
                     <Icon name="compress" size={18} /> Compress PDF
                   </button>
+                  <button className="menu__item" onClick={runOcr} role="menuitem">
+                    <Icon name="scan_text" size={18} /> OCR (recognise text)
+                  </button>
                   <div className="menu__divider" />
                   <button className="menu__item" onClick={copyAllText} role="menuitem">
                     <Icon name="content_copy" size={18} /> Copy all text
@@ -1730,6 +1769,7 @@ export function App() {
               { id: "watermark", label: "Add watermark", icon: "watermark", run: () => { setSelection(null); setFinishTab("watermark"); } },
               { id: "eximg", label: "Export as images", icon: "image", run: exportImages },
               { id: "compress", label: "Compress / optimise PDF", icon: "compress", keywords: "shrink reduce size", run: () => setCompressOpen(true) },
+              { id: "ocr", label: "OCR — recognise text", icon: "scan_text", keywords: "scan searchable image", run: runOcr },
               { id: "copytext", label: "Copy all text", icon: "content_copy", run: copyAllText },
               { id: "exporttext", label: "Export text (.txt)", icon: "scan_text", run: exportTextFile },
               { id: "dim", label: dimPages ? "Undim pages" : "Dim pages", icon: "contrast", run: () => setDimPages((v) => !v) },
