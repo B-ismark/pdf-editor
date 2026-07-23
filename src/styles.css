@@ -55,8 +55,9 @@ body {
   position: relative;
   display: inline-grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  /* 48px hit area — meets Material 48dp and Apple 44pt minimums. */
+  width: 48px;
+  height: 48px;
   flex: none;
   border: none;
   border-radius: var(--radius-full);
@@ -84,7 +85,7 @@ body {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  height: 38px;
+  height: 44px;
   padding: 0 18px;
   border: none;
   border-radius: var(--radius-full);
@@ -267,7 +268,7 @@ body {
 }
 .zoombar__label {
   min-width: 48px;
-  height: 36px;
+  height: 44px;
   border: none;
   background: transparent;
   color: var(--on-surface);
@@ -353,7 +354,7 @@ body {
 .chip-row { display: flex; gap: 8px; }
 .chip {
   min-width: 48px;
-  height: 40px;
+  height: 44px;
   padding: 0 14px;
   border: 1px solid var(--outline);
   border-radius: var(--radius-sm);
@@ -440,7 +441,7 @@ body {
 .dialog__body--form { display: block; align-items: stretch; }
 .posgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; width: 150px; }
 .posgrid__cell {
-  height: 30px;
+  height: 44px;
   border: 1px solid var(--outline);
   border-radius: var(--radius-sm);
   background: transparent;
@@ -692,8 +693,8 @@ body {
   box-shadow: inset 0 0 0 2px var(--surface-container-low);
 }
 .colorfield__swatch--sm {
-  width: 34px;
-  height: 34px;
+  width: 40px;
+  height: 40px;
   border-radius: var(--radius-full);
 }
 .colorfield__pop {
@@ -831,10 +832,10 @@ body {
 .sigsaved__use:hover { border-color: var(--primary); }
 .sigsaved__del {
   position: absolute;
-  top: -6px;
-  right: -6px;
-  width: 22px;
-  height: 22px;
+  top: -8px;
+  right: -8px;
+  width: 28px;
+  height: 28px;
   display: grid;
   place-items: center;
   border: none;
@@ -1004,7 +1005,8 @@ body {
     flex-direction: column;
     justify-content: flex-start;
     gap: 4px;
-    width: 66px;
+    /* Material navigation rail is 80dp wide. */
+    width: 80px;
     padding: 10px 6px;
     border-top: none;
     border-right: 1px solid var(--outline-variant);
