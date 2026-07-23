@@ -1,57 +1,62 @@
 import { memo, useEffect, useRef } from "react";
-import type { TextFragment } from "../pdf/types";
+import { CSS_FONT } from "../pdf/style";
+import type { TextFragment, TextStyle } from "../pdf/types";
 
 interface Props {
   fragment: TextFragment;
-  /** Render scale (CSS px per PDF unit). */
   scale: number;
-  /** Unscaled page height in PDF units. */
   pageHeight: number;
   /** Current text (edited value or original). Applied on mount only. */
   value: string;
-  /** True when the fragment has been changed from its original text. */
-  edited: boolean;
-  onFocus: (id: string) => void;
-  onBlur: () => void;
-  onChange: (id: string, text: string) => void;
+  /** Resolved display style (used when the fragment is styled/selected). */
+  style: TextStyle;
+  /** Whether the fragment differs from its original (text or style). */
+  modified: boolean;
+  selected: boolean;
+  /** Only interactive (clickable/editable) in the Select tool. */
+  interactive: boolean;
+  onSelect: (id: string) => void;
+  onChangeText: (id: string, text: string) => void;
 }
 
 /**
- * A single contentEditable overlay positioned over its glyphs on the page
- * canvas. It is invisible until focused or edited, at which point it paints
- * an opaque box over the original text so the preview matches the export.
- *
- * Memoized and text-managed imperatively so React never clobbers the caret
- * while typing — only positioning styles are updated on re-render.
+ * A contentEditable overlay positioned over its glyphs. Invisible until it is
+ * styled, edited, or selected — at which point it paints an opaque box over
+ * the original text so the on-screen preview matches the exported file.
  */
 function EditableFragmentImpl({
   fragment,
   scale,
   pageHeight,
   value,
-  edited,
-  onFocus,
-  onBlur,
-  onChange,
+  style,
+  modified,
+  selected,
+  interactive,
+  onSelect,
+  onChangeText,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
 
-  // Seed the DOM text exactly once; subsequent edits live in the DOM.
   useEffect(() => {
     if (ref.current) ref.current.textContent = value;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const [, , c, d, e, f] = fragment.transform;
-  const fontPx = Math.hypot(c, d) * scale;
+  const show = modified || selected;
+  const sizeUnits = show ? style.size : Math.hypot(c, d);
+  const fontPx = sizeUnits * scale;
   const left = e * scale;
   const top = (pageHeight - f) * scale - fontPx;
+
+  const fontFamily = show ? CSS_FONT[style.font] : fragment.fontFamily;
 
   return (
     <div
       ref={ref}
-      className={`fragment${edited ? " fragment--edited" : ""}`}
-      contentEditable
+      className={`fragment${show ? " fragment--shown" : ""}${selected ? " fragment--selected" : ""}`}
+      contentEditable={interactive}
       suppressContentEditableWarning
       spellCheck={false}
       data-id={fragment.id}
@@ -60,14 +65,18 @@ function EditableFragmentImpl({
         left: `${left}px`,
         top: `${top}px`,
         fontSize: `${fontPx}px`,
-        fontFamily: fragment.fontFamily,
+        fontFamily,
+        fontWeight: show && style.bold ? "bold" : "normal",
+        fontStyle: show && style.italic ? "italic" : "normal",
+        color: show ? style.color : "transparent",
         lineHeight: 1,
+        pointerEvents: interactive ? "auto" : "none",
       }}
-      onFocus={() => onFocus(fragment.id)}
-      onBlur={() => onBlur()}
-      onInput={(ev) => onChange(fragment.id, ev.currentTarget.textContent ?? "")}
+      onMouseDown={() => interactive && onSelect(fragment.id)}
+      onInput={(ev) =>
+        onChangeText(fragment.id, ev.currentTarget.textContent ?? "")
+      }
       onKeyDown={(ev) => {
-        // Fragments are single-line; keep Enter from injecting <div> breaks.
         if (ev.key === "Enter") ev.preventDefault();
       }}
     />

@@ -78,3 +78,25 @@ export async function renderPage(
   await page.render({ canvasContext: ctx, viewport }).promise;
   await doc.destroy();
 }
+
+/**
+ * Render a page to a fresh canvas at an exact pixel scale (no devicePixelRatio
+ * fiddling). Used at export time to rasterise pages that contain redactions.
+ */
+export async function renderPageToCanvas(
+  bytes: ArrayBuffer,
+  pageIndex: number,
+  scale: number,
+): Promise<HTMLCanvasElement> {
+  const doc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+  const page = await doc.getPage(pageIndex + 1);
+  const viewport = page.getViewport({ scale });
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Could not get 2D canvas context");
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  await doc.destroy();
+  return canvas;
+}
