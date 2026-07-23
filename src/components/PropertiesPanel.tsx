@@ -1,15 +1,27 @@
-import type { FontKey, Selection, TextStyle } from "../pdf/types";
+import { Icon } from "./Icon";
+import type { Annotation, FontKey, Selection, TextStyle } from "../pdf/types";
 
 interface Props {
   selection: Selection;
-  /** Effective style of the selected text element (fragment or text box). */
   style: TextStyle | null;
-  /** Colour of the selected redaction. */
   redactionColor: string | null;
+  annotation: Annotation | null;
   onChangeStyle: (patch: Partial<TextStyle>) => void;
   onChangeRedactionColor: (color: string) => void;
+  onChangeAnnotation: (patch: { color?: string; strokeWidth?: number }) => void;
   onDelete: () => void;
+  /** Mobile bottom-sheet close affordance (omitted on desktop side panel). */
+  onClose?: () => void;
 }
+
+const ANNOT_LABEL: Record<string, string> = {
+  highlight: "Highlight",
+  pen: "Drawing",
+  rect: "Rectangle",
+  line: "Line",
+  arrow: "Arrow",
+  note: "Sticky note",
+};
 
 const FONTS: { key: FontKey; label: string }[] = [
   { key: "sans", label: "Sans" },
@@ -17,111 +29,182 @@ const FONTS: { key: FontKey; label: string }[] = [
   { key: "mono", label: "Mono" },
 ];
 
-/** Contextual controls for the currently selected element. */
+/** Contextual controls for the selected element. */
 export function PropertiesPanel({
   selection,
   style,
   redactionColor,
+  annotation,
   onChangeStyle,
   onChangeRedactionColor,
+  onChangeAnnotation,
   onDelete,
+  onClose,
 }: Props) {
-  if (!selection) {
-    return (
-      <div className="props props--empty">
-        Select text to restyle it, or use the tools above to add text and
-        redactions.
-      </div>
-    );
-  }
-
-  if (selection.kind === "redaction") {
-    return (
-      <div className="props">
-        <span className="props__label">Redaction</span>
-        <label className="props__color">
-          Fill
-          <input
-            type="color"
-            value={redactionColor ?? "#000000"}
-            onChange={(e) => onChangeRedactionColor(e.target.value)}
-          />
-        </label>
-        <div className="props__spacer" />
-        <button className="btn btn--danger" onClick={onDelete}>
-          Delete
-        </button>
-      </div>
-    );
-  }
-
-  if (!style) return null;
+  const title =
+    selection?.kind === "redaction"
+      ? "Redaction"
+      : selection?.kind === "textbox"
+        ? "Text box"
+        : selection?.kind === "fragment"
+          ? "Text"
+          : selection?.kind === "annotation"
+            ? (annotation ? ANNOT_LABEL[annotation.kind] : "Annotation")
+            : "Properties";
 
   return (
     <div className="props">
-      <span className="props__label">
-        {selection.kind === "textbox" ? "Text box" : "Text"}
-      </span>
-
-      <div className="props__group">
-        {FONTS.map((f) => (
-          <button
-            key={f.key}
-            className={`chip${style.font === f.key ? " chip--on" : ""}`}
-            onClick={() => onChangeStyle({ font: f.key })}
-          >
-            {f.label}
+      <div className="props__header">
+        <span className="props__title title-medium">{title}</span>
+        {onClose && (
+          <button className="icon-btn" onClick={onClose} aria-label="Close">
+            <Icon name="close" size={22} />
           </button>
-        ))}
+        )}
       </div>
 
-      <div className="props__group">
-        <button
-          className={`chip chip--icon${style.bold ? " chip--on" : ""}`}
-          style={{ fontWeight: 700 }}
-          onClick={() => onChangeStyle({ bold: !style.bold })}
-        >
-          B
-        </button>
-        <button
-          className={`chip chip--icon${style.italic ? " chip--on" : ""}`}
-          style={{ fontStyle: "italic" }}
-          onClick={() => onChangeStyle({ italic: !style.italic })}
-        >
-          I
-        </button>
-      </div>
+      {!selection && (
+        <p className="props__empty body-medium">
+          Select text to restyle it, or use the tools to add text and
+          redactions.
+        </p>
+      )}
 
-      <label className="props__size">
-        Size
-        <input
-          type="number"
-          min={4}
-          max={200}
-          value={Math.round(style.size)}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            if (Number.isFinite(v) && v > 0) onChangeStyle({ size: v });
-          }}
-        />
-      </label>
-
-      <label className="props__color">
-        Colour
-        <input
-          type="color"
-          value={style.color}
-          onChange={(e) => onChangeStyle({ color: e.target.value })}
-        />
-      </label>
-
-      {selection.kind === "textbox" && (
-        <>
-          <div className="props__spacer" />
+      {selection?.kind === "redaction" && (
+        <div className="props__section">
+          <div className="field">
+            <span className="field__label label-medium">Fill colour</span>
+            <label className="swatch">
+              <input
+                type="color"
+                value={redactionColor ?? "#000000"}
+                onChange={(e) => onChangeRedactionColor(e.target.value)}
+              />
+              <span style={{ background: redactionColor ?? "#000000" }} />
+            </label>
+          </div>
           <button className="btn btn--danger" onClick={onDelete}>
-            Delete
+            <Icon name="delete" size={18} /> Delete
           </button>
-        </>
+        </div>
+      )}
+
+      {selection?.kind === "annotation" && annotation && (
+        <div className="props__section">
+          <div className="field">
+            <span className="field__label label-medium">Colour</span>
+            <label className="swatch">
+              <input
+                type="color"
+                value={annotation.color}
+                onChange={(e) => onChangeAnnotation({ color: e.target.value })}
+              />
+              <span style={{ background: annotation.color }} />
+            </label>
+          </div>
+          {"strokeWidth" in annotation && (
+            <div className="field">
+              <span className="field__label label-medium">
+                Width <b>{annotation.strokeWidth}</b>
+              </span>
+              <input
+                className="slider"
+                type="range"
+                min={1}
+                max={12}
+                value={annotation.strokeWidth}
+                onChange={(e) => onChangeAnnotation({ strokeWidth: Number(e.target.value) })}
+              />
+            </div>
+          )}
+          {annotation.kind === "note" && (
+            <p className="props__empty body-small">Edit the note text directly on the page.</p>
+          )}
+          <button className="btn btn--danger" onClick={onDelete}>
+            <Icon name="delete" size={18} /> Delete
+          </button>
+        </div>
+      )}
+
+      {style && selection && selection.kind !== "redaction" && selection.kind !== "annotation" && (
+        <div className="props__section">
+          <div className="field">
+            <span className="field__label label-medium">Font</span>
+            <div className="segmented">
+              {FONTS.map((f) => (
+                <button
+                  key={f.key}
+                  className={`segmented__btn${style.font === f.key ? " segmented__btn--on" : ""}`}
+                  onClick={() => onChangeStyle({ font: f.key })}
+                  style={{
+                    fontFamily:
+                      f.key === "serif"
+                        ? "Georgia, serif"
+                        : f.key === "mono"
+                          ? "ui-monospace, monospace"
+                          : "inherit",
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="field field--row">
+            <span className="field__label label-medium">Style</span>
+            <div className="chip-row">
+              <button
+                className={`chip${style.bold ? " chip--on" : ""}`}
+                onClick={() => onChangeStyle({ bold: !style.bold })}
+                aria-pressed={style.bold}
+                style={{ fontWeight: 700 }}
+              >
+                B
+              </button>
+              <button
+                className={`chip${style.italic ? " chip--on" : ""}`}
+                onClick={() => onChangeStyle({ italic: !style.italic })}
+                aria-pressed={style.italic}
+                style={{ fontStyle: "italic" }}
+              >
+                I
+              </button>
+            </div>
+          </div>
+
+          <div className="field">
+            <span className="field__label label-medium">
+              Size <b>{Math.round(style.size)}</b>
+            </span>
+            <input
+              className="slider"
+              type="range"
+              min={6}
+              max={96}
+              value={Math.min(96, Math.max(6, Math.round(style.size)))}
+              onChange={(e) => onChangeStyle({ size: Number(e.target.value) })}
+            />
+          </div>
+
+          <div className="field">
+            <span className="field__label label-medium">Colour</span>
+            <label className="swatch">
+              <input
+                type="color"
+                value={style.color}
+                onChange={(e) => onChangeStyle({ color: e.target.value })}
+              />
+              <span style={{ background: style.color }} />
+            </label>
+          </div>
+
+          {selection.kind === "textbox" && (
+            <button className="btn btn--danger" onClick={onDelete}>
+              <Icon name="delete" size={18} /> Delete
+            </button>
+          )}
+        </div>
       )}
     </div>
   );

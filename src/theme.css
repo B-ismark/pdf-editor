@@ -1,0 +1,158 @@
+/*
+ * Material 3 Expressive design tokens.
+ * Color roles (light + dark), expressive shape scale, M3 type scale,
+ * motion easings/durations, and state-layer opacities — all as CSS custom
+ * properties so components stay declarative and themeable.
+ */
+
+:root {
+  /* ---- Color: light ---- */
+  --primary: #6750a4;
+  --on-primary: #ffffff;
+  --primary-container: #eaddff;
+  --on-primary-container: #21005d;
+  --secondary: #625b71;
+  --on-secondary: #ffffff;
+  --secondary-container: #e8def8;
+  --on-secondary-container: #1d192b;
+  --tertiary: #7d5260;
+  --on-tertiary: #ffffff;
+  --tertiary-container: #ffd8e4;
+  --on-tertiary-container: #31111d;
+  --error: #b3261e;
+  --on-error: #ffffff;
+  --error-container: #f9dedc;
+  --on-error-container: #410e0b;
+
+  --surface: #fef7ff;
+  --on-surface: #1d1b20;
+  --surface-variant: #e7e0ec;
+  --on-surface-variant: #49454f;
+  --outline: #79747e;
+  --outline-variant: #cac4d0;
+
+  --surface-dim: #ded8e1;
+  --surface-bright: #fef7ff;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #f7f2fa;
+  --surface-container: #f3edf7;
+  --surface-container-high: #ece6f0;
+  --surface-container-highest: #e6e0e9;
+
+  --inverse-surface: #322f35;
+  --inverse-on-surface: #f5eff7;
+  --inverse-primary: #d0bcff;
+  --scrim: #000000;
+
+  /* ---- Shape (expressive scale) ---- */
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-lg-inc: 20px;
+  --radius-xl: 28px;
+  --radius-xl-inc: 32px;
+  --radius-xxl: 48px;
+  --radius-full: 9999px;
+
+  /* ---- Typography ---- */
+  --font-brand: "Roboto Flex", "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-plain: "Roboto Flex", "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* ---- Motion: easing ---- */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-standard-decelerate: cubic-bezier(0, 0, 0, 1);
+  --ease-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
+  --ease-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
+  /* Springy overshoot approximation for expressive press/appear. */
+  --ease-spring: cubic-bezier(0.2, 0.9, 0.2, 1.15);
+
+  /* ---- Motion: duration ---- */
+  --dur-short2: 100ms;
+  --dur-short4: 200ms;
+  --dur-med2: 300ms;
+  --dur-med4: 400ms;
+  --dur-long2: 500ms;
+
+  /* ---- State layers ---- */
+  --state-hover: 0.08;
+  --state-focus: 0.1;
+  --state-press: 0.1;
+  --state-drag: 0.16;
+
+  /* ---- Elevation shadows (only for genuinely floating elements) ---- */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.15), 0 1px 2px rgba(0, 0, 0, 0.1);
+  --shadow-3: 0 6px 16px rgba(0, 0, 0, 0.18), 0 2px 6px rgba(0, 0, 0, 0.12);
+
+  color-scheme: light dark;
+}
+
+/* ---- Color: dark ---- */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --primary: #d0bcff;
+    --on-primary: #381e72;
+    --primary-container: #4f378b;
+    --on-primary-container: #eaddff;
+    --secondary: #ccc2dc;
+    --on-secondary: #332d41;
+    --secondary-container: #4a4458;
+    --on-secondary-container: #e8def8;
+    --tertiary: #efb8c8;
+    --on-tertiary: #492532;
+    --tertiary-container: #633b48;
+    --on-tertiary-container: #ffd8e4;
+    --error: #f2b8b5;
+    --on-error: #601410;
+    --error-container: #8c1d18;
+    --on-error-container: #f9dedc;
+
+    --surface: #141218;
+    --on-surface: #e6e0e9;
+    --surface-variant: #49454f;
+    --on-surface-variant: #cac4d0;
+    --outline: #938f99;
+    --outline-variant: #49454f;
+
+    --surface-dim: #141218;
+    --surface-bright: #3b383e;
+    --surface-container-lowest: #0f0d13;
+    --surface-container-low: #1d1b20;
+    --surface-container: #211f26;
+    --surface-container-high: #2b2930;
+    --surface-container-highest: #36343b;
+
+    --inverse-surface: #e6e0e9;
+    --inverse-on-surface: #322f35;
+    --inverse-primary: #6750a4;
+
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+    --shadow-2: 0 2px 6px rgba(0, 0, 0, 0.5), 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow-3: 0 6px 16px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.4);
+  }
+}
+
+/* ---- Type scale utility classes ---- */
+.display-small { font: 400 2.25rem/1.22 var(--font-brand); letter-spacing: 0; }
+.headline-medium { font: 400 1.75rem/1.29 var(--font-brand); letter-spacing: 0; }
+.headline-small { font: 400 1.5rem/1.33 var(--font-brand); letter-spacing: 0; }
+.title-large { font: 400 1.375rem/1.27 var(--font-brand); letter-spacing: 0; }
+.title-medium { font: 500 1rem/1.5 var(--font-plain); letter-spacing: 0.15px; }
+.title-small { font: 500 0.875rem/1.43 var(--font-plain); letter-spacing: 0.1px; }
+.body-large { font: 400 1rem/1.5 var(--font-plain); letter-spacing: 0.5px; }
+.body-medium { font: 400 0.875rem/1.43 var(--font-plain); letter-spacing: 0.25px; }
+.body-small { font: 400 0.75rem/1.33 var(--font-plain); letter-spacing: 0.4px; }
+.label-large { font: 500 0.875rem/1.43 var(--font-plain); letter-spacing: 0.1px; }
+.label-medium { font: 500 0.75rem/1.33 var(--font-plain); letter-spacing: 0.5px; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-short2: 0ms;
+    --dur-short4: 0ms;
+    --dur-med2: 0ms;
+    --dur-med4: 0ms;
+    --dur-long2: 0ms;
+  }
+}

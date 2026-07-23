@@ -1,15 +1,32 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { PageView } from "./components/PageView";
+import { PageView, type AnnotSpec } from "./components/PageView";
 import { PropertiesPanel } from "./components/PropertiesPanel";
+import { Organize } from "./components/Organize";
+import { DrawToolbar } from "./components/DrawToolbar";
+import { SignatureDialog } from "./components/SignatureDialog";
+import { FinishDialog } from "./components/FinishDialog";
+import { Icon } from "./components/Icon";
+import {
+  addPageNumbers,
+  addWatermark,
+  renderImages,
+  type PageNumberOptions,
+  type WatermarkOptions,
+} from "./pdf/finishOps";
 import { useHistory } from "./hooks/useHistory";
+import { useViewport } from "./hooks/useViewport";
 import { loadPdf } from "./pdf/loader";
 import { exportPdf, isFragmentModified } from "./pdf/exporter";
 import { DEFAULT_STYLE, resolveFragmentStyle } from "./pdf/style";
 import type {
+  Annotation,
+  AnnotationTool,
   DocState,
+  DrawStyle,
   LoadedPdf,
   Redaction,
   Selection,
+  Stamp,
   TextBox,
   TextFragment,
   TextStyle,
@@ -17,13 +34,16 @@ import type {
 } from "./pdf/types";
 
 type Status = "idle" | "loading" | "ready" | "exporting" | "error";
+type NavKey = Tool | "sign";
 
-const EMPTY_DOC: DocState = { edits: {}, textBoxes: [], redactions: [] };
+const EMPTY_DOC: DocState = { edits: {}, textBoxes: [], redactions: [], annotations: [], stamps: [] };
 
-const TOOLS: { key: Tool; label: string; hint: string }[] = [
-  { key: "select", label: "Select", hint: "Click text to edit, restyle, drag, or resize it" },
-  { key: "text", label: "Add text", hint: "Click on the page to drop a text box" },
-  { key: "redact", label: "Redact", hint: "Drag to permanently black out a region" },
+const TOOLS: { key: NavKey; label: string; icon: string }[] = [
+  { key: "select", label: "Select", icon: "arrow_selector_tool" },
+  { key: "text", label: "Add text", icon: "text_fields" },
+  { key: "draw", label: "Draw", icon: "draw" },
+  { key: "sign", label: "Sign", icon: "signature" },
+  { key: "redact", label: "Redact", icon: "select" },
 ];
 
 export function App() {
@@ -31,18 +51,26 @@ export function App() {
   const [fileName, setFileName] = useState("document.pdf");
   const [tool, setTool] = useState<Tool>("select");
   const doc = useHistory<DocState>(EMPTY_DOC);
-  const { edits, textBoxes, redactions } = doc.state;
+  const { edits, textBoxes, redactions, annotations, stamps } = doc.state;
+  const [drawTool, setDrawTool] = useState<AnnotationTool>("highlight");
+  const [drawStyle, setDrawStyle] = useState<DrawStyle>({ color: "#f4c400", width: 3 });
+  const [sigOpen, setSigOpen] = useState(false);
+  const [finishTab, setFinishTab] = useState<"numbers" | "watermark" | null>(null);
+  const [pendingStamp, setPendingStamp] = useState<{ dataUrl: string; w: number; h: number } | null>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [selection, setSelection] = useState<Selection>(null);
   const [autoFocusId, setAutoFocusId] = useState<string | null>(null);
-  // Bumped on undo/redo/load so imperatively-managed editable text re-seeds.
   const [revision, setRevision] = useState(0);
-  const [scale, setScale] = useState(1.4);
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [organizeOpen, setOrganizeOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const counter = useRef(0);
   const nextId = (prefix: string) => `${prefix}-${counter.current++}`;
+
+  const vp = useViewport();
 
   const fragmentById = useMemo(() => {
     const map = new Map<string, TextFragment>();
@@ -60,7 +88,32 @@ export function App() {
     [pdf, fragmentById, edits],
   );
   const changeCount =
-    editedFragmentCount + textBoxes.length + redactions.length;
+    editedFragmentCount + textBoxes.length + redactions.length + annotations.length + stamps.length;
+
+  const openBytes = useCallback(
+    async (bytes: ArrayBuffer, name: string, note?: string) => {
+      setStatus("loading");
+      setMessage(`Loading ${name}…`);
+      try {
+        const loaded = await loadPdf(bytes);
+        setPdf(loaded);
+        setFileName(name);
+        doc.reset(EMPTY_DOC);
+        setSelection(null);
+        setTool("select");
+        setRevision((r) => r + 1);
+        vp.setPageWidth(Math.max(...loaded.pages.map((p) => p.viewBox.width), 1));
+        vp.resetZoom();
+        setStatus("ready");
+        const total = loaded.pages.reduce((n, p) => n + p.fragments.length, 0);
+        setMessage(note ?? `${loaded.pages.length} page(s) · ${total} text fragments`);
+      } catch (err) {
+        setStatus("error");
+        setMessage(`Could not open PDF: ${String(err)}`);
+      }
+    },
+    [doc, vp],
+  );
 
   const openFile = useCallback(
     async (file: File) => {
@@ -69,29 +122,92 @@ export function App() {
         setMessage(`"${file.name}" is not a PDF.`);
         return;
       }
-      setStatus("loading");
-      setMessage(`Loading ${file.name}…`);
-      try {
-        const bytes = await file.arrayBuffer();
-        const loaded = await loadPdf(bytes);
-        setPdf(loaded);
-        setFileName(file.name);
-        doc.reset(EMPTY_DOC);
-        setSelection(null);
-        setTool("select");
-        setRevision((r) => r + 1);
-        setStatus("ready");
-        const total = loaded.pages.reduce((n, p) => n + p.fragments.length, 0);
-        setMessage(`${loaded.pages.length} page(s), ${total} text fragments.`);
-      } catch (err) {
-        setStatus("error");
-        setMessage(`Could not open PDF: ${String(err)}`);
-      }
+      await openBytes(await file.arrayBuffer(), file.name);
     },
-    [doc],
+    [openBytes],
   );
 
-  // ---- Text edits ----
+  const downloadBytes = useCallback((bytes: Uint8Array, filename: string) => {
+    const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const toAB = (u8: Uint8Array): ArrayBuffer => {
+    const ab = new ArrayBuffer(u8.byteLength);
+    new Uint8Array(ab).set(u8);
+    return ab;
+  };
+
+  /** Export the current edits to fresh bytes so finishing ops build on them. */
+  const bakeCurrent = useCallback(async (): Promise<ArrayBuffer> => {
+    const out = await exportPdf(pdf!, { edits, textBoxes, redactions, annotations, stamps });
+    return toAB(out);
+  }, [pdf, edits, textBoxes, redactions, annotations, stamps]);
+
+  const applyNumbers = useCallback(
+    async (opts: PageNumberOptions) => {
+      setFinishTab(null);
+      setStatus("exporting");
+      setMessage("Adding page numbers…");
+      try {
+        const baked = await bakeCurrent();
+        const res = await addPageNumbers(baked, opts);
+        await openBytes(toAB(res), fileName, "Page numbers added.");
+      } catch (err) {
+        setStatus("error");
+        setMessage(`Failed: ${String(err)}`);
+      }
+    },
+    [bakeCurrent, openBytes, fileName],
+  );
+
+  const applyWatermark = useCallback(
+    async (opts: WatermarkOptions) => {
+      setFinishTab(null);
+      setStatus("exporting");
+      setMessage("Applying watermark…");
+      try {
+        const baked = await bakeCurrent();
+        const res = await addWatermark(baked, opts);
+        await openBytes(toAB(res), fileName, "Watermark applied.");
+      } catch (err) {
+        setStatus("error");
+        setMessage(`Failed: ${String(err)}`);
+      }
+    },
+    [bakeCurrent, openBytes, fileName],
+  );
+
+  const exportImages = useCallback(async () => {
+    if (!pdf) return;
+    setMenuOpen(false);
+    setStatus("exporting");
+    setMessage("Rendering images…");
+    try {
+      const baked = await bakeCurrent();
+      const urls = await renderImages(baked, pdf.pages.length, 2);
+      const base = fileName.replace(/\.pdf$/i, "");
+      urls.forEach((url, i) => {
+        setTimeout(() => {
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `${base}-p${i + 1}.png`;
+          a.click();
+        }, i * 300);
+      });
+      setStatus("ready");
+      setMessage(`Exported ${urls.length} image(s).`);
+    } catch (err) {
+      setStatus("error");
+      setMessage(`Failed: ${String(err)}`);
+    }
+  }, [pdf, bakeCurrent, fileName]);
+
   const onChangeFragmentText = useCallback(
     (id: string, text: string) => {
       doc.set(
@@ -118,15 +234,12 @@ export function App() {
     [doc],
   );
 
-  // ---- Geometry (drag / resize) ----
   const onChangeTextBox = useCallback(
     (id: string, patch: Partial<TextBox>, key: string) => {
       doc.set(
         (d) => ({
           ...d,
-          textBoxes: d.textBoxes.map((b) =>
-            b.id === id ? { ...b, ...patch } : b,
-          ),
+          textBoxes: d.textBoxes.map((b) => (b.id === id ? { ...b, ...patch } : b)),
         }),
         key,
       );
@@ -139,9 +252,7 @@ export function App() {
       doc.set(
         (d) => ({
           ...d,
-          redactions: d.redactions.map((r) =>
-            r.id === id ? { ...r, ...patch } : r,
-          ),
+          redactions: d.redactions.map((r) => (r.id === id ? { ...r, ...patch } : r)),
         }),
         key,
       );
@@ -149,18 +260,10 @@ export function App() {
     [doc],
   );
 
-  // ---- Adding ----
   const onAddTextBox = useCallback(
     (pageIndex: number, x: number, y: number) => {
       const id = nextId("tb");
-      const box: TextBox = {
-        id,
-        pageIndex,
-        x,
-        y,
-        text: "",
-        style: { ...DEFAULT_STYLE },
-      };
+      const box: TextBox = { id, pageIndex, x, y, text: "", style: { ...DEFAULT_STYLE } };
       doc.set((d) => ({ ...d, textBoxes: [...d.textBoxes, box] }));
       setTool("select");
       setSelection({ kind: "textbox", id });
@@ -174,10 +277,7 @@ export function App() {
       const id = nextId("rd");
       doc.set((d) => ({
         ...d,
-        redactions: [
-          ...d.redactions,
-          { id, pageIndex, x, y, width, height, color: "#000000" },
-        ],
+        redactions: [...d.redactions, { id, pageIndex, x, y, width, height, color: "#000000" }],
       }));
       setTool("select");
       setSelection({ kind: "redaction", id });
@@ -185,12 +285,103 @@ export function App() {
     [doc],
   );
 
+  const onAddAnnotation = useCallback(
+    (pageIndex: number, spec: AnnotSpec) => {
+      const id = nextId("an");
+      const annot = { ...spec, id, pageIndex } as Annotation;
+      doc.set((d) => ({ ...d, annotations: [...d.annotations, annot] }));
+      if (spec.kind === "note") {
+        setTool("select");
+        setSelection({ kind: "annotation", id });
+        setAutoFocusId(id);
+      }
+    },
+    [doc],
+  );
+
+  const onChangeNoteText = useCallback(
+    (id: string, text: string) => {
+      doc.set(
+        (d) => ({
+          ...d,
+          annotations: d.annotations.map((a) =>
+            a.id === id && a.kind === "note" ? { ...a, text } : a,
+          ),
+        }),
+        `note-${id}`,
+      );
+    },
+    [doc],
+  );
+
+  const onChangeAnnotation = useCallback(
+    (patch: { color?: string; strokeWidth?: number }) => {
+      if (selection?.kind !== "annotation") return;
+      const id = selection.id;
+      const onlyColour = Object.keys(patch).length === 1 && patch.color !== undefined;
+      doc.set(
+        (d) => ({
+          ...d,
+          annotations: d.annotations.map((a) =>
+            a.id === id ? ({ ...a, ...patch } as Annotation) : a,
+          ),
+        }),
+        onlyColour ? `acolor-${id}` : `awidth-${id}`,
+      );
+    },
+    [selection, doc],
+  );
+
+  const onPlaceStamp = useCallback(
+    (pageIndex: number, xLeft: number, yTop: number) => {
+      if (!pendingStamp) return;
+      const width = Math.min(220, pendingStamp.w * 0.75);
+      const height = width * (pendingStamp.h / pendingStamp.w);
+      const id = nextId("st");
+      const stamp: Stamp = { id, pageIndex, x: xLeft, y: yTop - height, width, height, dataUrl: pendingStamp.dataUrl };
+      doc.set((d) => ({ ...d, stamps: [...d.stamps, stamp] }));
+      setPendingStamp(null);
+      setSelection({ kind: "stamp", id });
+      setMessage("");
+    },
+    [pendingStamp, doc],
+  );
+
+  const onChangeStamp = useCallback(
+    (id: string, patch: Partial<Stamp>, key: string) => {
+      doc.set(
+        (d) => ({ ...d, stamps: d.stamps.map((s) => (s.id === id ? { ...s, ...patch } : s)) }),
+        key,
+      );
+    },
+    [doc],
+  );
+
+  const startImagePlacement = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result);
+      const img = new Image();
+      img.onload = () => {
+        setPendingStamp({ dataUrl, w: img.naturalWidth, h: img.naturalHeight });
+        setStatus("ready");
+        setMessage("Tap the page to place the image.");
+      };
+      img.src = dataUrl;
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
   const onSelect = useCallback((sel: Selection) => {
     setAutoFocusId(null);
     setSelection(sel);
   }, []);
 
-  // ---- Styling ----
+  const selectedAnnotation =
+    selection?.kind === "annotation"
+      ? annotations.find((a) => a.id === selection.id) ?? null
+      : null;
+
   const activeStyle: TextStyle | null = useMemo(() => {
     if (selection?.kind === "fragment") {
       const f = fragmentById.get(selection.id);
@@ -210,31 +401,21 @@ export function App() {
   const onChangeStyle = useCallback(
     (patch: Partial<TextStyle>) => {
       if (!selection) return;
-      // Colour sweeps coalesce into one undo step; discrete toggles don't.
-      const onlyColour =
-        Object.keys(patch).length === 1 && patch.color !== undefined;
-      const key = onlyColour
-        ? `color-${selection.kind}-${selection.id}`
-        : undefined;
-
+      const onlyColour = Object.keys(patch).length === 1 && patch.color !== undefined;
+      const key = onlyColour ? `color-${selection.kind}-${selection.id}` : undefined;
       if (selection.kind === "fragment") {
         const id = selection.id;
         doc.set((d) => {
           const f = fragmentById.get(id);
           const prev = d.edits[id] ?? { text: f?.original ?? "", style: {} };
-          return {
-            ...d,
-            edits: { ...d.edits, [id]: { ...prev, style: { ...prev.style, ...patch } } },
-          };
+          return { ...d, edits: { ...d.edits, [id]: { ...prev, style: { ...prev.style, ...patch } } } };
         }, key);
       } else if (selection.kind === "textbox") {
         const id = selection.id;
         doc.set(
           (d) => ({
             ...d,
-            textBoxes: d.textBoxes.map((b) =>
-              b.id === id ? { ...b, style: { ...b.style, ...patch } } : b,
-            ),
+            textBoxes: d.textBoxes.map((b) => (b.id === id ? { ...b, style: { ...b.style, ...patch } } : b)),
           }),
           key,
         );
@@ -248,12 +429,7 @@ export function App() {
       if (selection?.kind !== "redaction") return;
       const id = selection.id;
       doc.set(
-        (d) => ({
-          ...d,
-          redactions: d.redactions.map((r) =>
-            r.id === id ? { ...r, color } : r,
-          ),
-        }),
+        (d) => ({ ...d, redactions: d.redactions.map((r) => (r.id === id ? { ...r, color } : r)) }),
         `rcolor-${id}`,
       );
     },
@@ -263,53 +439,58 @@ export function App() {
   const onDelete = useCallback(() => {
     if (selection?.kind === "textbox") {
       const id = selection.id;
-      doc.set((d) => ({
-        ...d,
-        textBoxes: d.textBoxes.filter((b) => b.id !== id),
-      }));
+      doc.set((d) => ({ ...d, textBoxes: d.textBoxes.filter((b) => b.id !== id) }));
       setSelection(null);
     } else if (selection?.kind === "redaction") {
       const id = selection.id;
-      doc.set((d) => ({
-        ...d,
-        redactions: d.redactions.filter((r) => r.id !== id),
-      }));
+      doc.set((d) => ({ ...d, redactions: d.redactions.filter((r) => r.id !== id) }));
+      setSelection(null);
+    } else if (selection?.kind === "annotation") {
+      const id = selection.id;
+      doc.set((d) => ({ ...d, annotations: d.annotations.filter((a) => a.id !== id) }));
+      setSelection(null);
+    } else if (selection?.kind === "stamp") {
+      const id = selection.id;
+      doc.set((d) => ({ ...d, stamps: d.stamps.filter((s) => s.id !== id) }));
       setSelection(null);
     }
   }, [selection, doc]);
 
-  // ---- Undo / redo ----
   const undo = useCallback(() => {
     doc.undo();
     setRevision((r) => r + 1);
   }, [doc]);
-
   const redo = useCallback(() => {
     doc.redo();
     setRevision((r) => r + 1);
   }, [doc]);
 
-  // Drop a selection that no longer exists after an undo/redo.
   useEffect(() => {
     if (selection?.kind === "textbox" && !textBoxes.some((b) => b.id === selection.id)) {
       setSelection(null);
-    } else if (
-      selection?.kind === "redaction" &&
-      !redactions.some((r) => r.id === selection.id)
-    ) {
+    } else if (selection?.kind === "redaction" && !redactions.some((r) => r.id === selection.id)) {
+      setSelection(null);
+    } else if (selection?.kind === "annotation" && !annotations.some((a) => a.id === selection.id)) {
+      setSelection(null);
+    } else if (selection?.kind === "stamp" && !stamps.some((s) => s.id === selection.id)) {
       setSelection(null);
     }
-  }, [textBoxes, redactions, selection]);
+  }, [textBoxes, redactions, annotations, stamps, selection]);
 
-  // Keyboard: undo/redo, and Delete for a selected redaction.
+  // Auto-dismiss transient status messages (keep errors until superseded).
+  useEffect(() => {
+    if (!message || status === "error" || status === "loading" || status === "exporting") return;
+    const t = setTimeout(() => setMessage(""), 4000);
+    return () => clearTimeout(t);
+  }, [message, status]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
       if (mod && key === "z") {
         e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
+        e.shiftKey ? redo() : undo();
         return;
       }
       if (mod && key === "y") {
@@ -318,8 +499,17 @@ export function App() {
         return;
       }
       if (
-        selection?.kind === "redaction" &&
+        (selection?.kind === "redaction" || selection?.kind === "stamp") &&
         (e.key === "Delete" || e.key === "Backspace")
+      ) {
+        e.preventDefault();
+        onDelete();
+      }
+      // Delete a selected annotation (but not while editing a sticky note).
+      if (
+        selection?.kind === "annotation" &&
+        e.key === "Delete" &&
+        selectedAnnotation?.kind !== "note"
       ) {
         e.preventDefault();
         onDelete();
@@ -327,14 +517,14 @@ export function App() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selection, onDelete, undo, redo]);
+  }, [selection, selectedAnnotation, onDelete, undo, redo]);
 
   const download = useCallback(async () => {
     if (!pdf) return;
     setStatus("exporting");
     setMessage("Building edited PDF…");
     try {
-      const out = await exportPdf(pdf, { edits, textBoxes, redactions });
+      const out = await exportPdf(pdf, { edits, textBoxes, redactions, annotations, stamps });
       const blob = new Blob([out as BlobPart], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -345,109 +535,125 @@ export function App() {
       setStatus("ready");
       setMessage(
         redactions.length > 0
-          ? "Downloaded. Redacted pages were flattened to images."
+          ? "Downloaded — redacted pages were flattened to images."
           : "Downloaded edited PDF.",
       );
     } catch (err) {
       setStatus("error");
       setMessage(`Export failed: ${String(err)}`);
     }
-  }, [pdf, edits, textBoxes, redactions, fileName]);
+  }, [pdf, edits, textBoxes, redactions, annotations, stamps, fileName]);
 
   const reset = useCallback(() => {
-    if (changeCount > 0 && !confirm("Discard all changes and start over?"))
-      return;
+    if (changeCount > 0 && !confirm("Discard all changes and start over?")) return;
     setPdf(null);
     doc.reset(EMPTY_DOC);
     setSelection(null);
     setTool("select");
     setStatus("idle");
     setMessage("");
+    setMenuOpen(false);
   }, [changeCount, doc]);
 
-  const activeHint = TOOLS.find((t) => t.key === tool)?.hint ?? "";
+  const pickTool = (t: NavKey) => {
+    setPendingStamp(null);
+    if (t === "sign") {
+      setSelection(null);
+      setSigOpen(true);
+      return;
+    }
+    setTool(t);
+    if (t !== "select") setSelection(null);
+  };
 
-  return (
-    <div className="app">
-      <header className="toolbar">
-        <div className="toolbar__brand">
-          <span className="toolbar__logo">✎</span>
-          <span>PDF Text Editor</span>
-        </div>
-
-        {pdf && (
-          <>
-            <div className="toolbar__group toolbar__tools">
-              {TOOLS.map((t) => (
-                <button
-                  key={t.key}
-                  className={`tool${tool === t.key ? " tool--on" : ""}`}
-                  onClick={() => {
-                    setTool(t.key);
-                    if (t.key !== "select") setSelection(null);
-                  }}
-                  title={t.hint}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="toolbar__group">
-              <button onClick={undo} disabled={!doc.canUndo} title="Undo (Ctrl+Z)">
-                ↶
-              </button>
-              <button onClick={redo} disabled={!doc.canRedo} title="Redo (Ctrl+Shift+Z)">
-                ↷
-              </button>
-            </div>
-
-            <div className="toolbar__group">
-              <button
-                onClick={() =>
-                  setScale((s) => Math.max(0.5, +(s - 0.2).toFixed(2)))
-                }
-                title="Zoom out"
-              >
-                −
-              </button>
-              <span className="toolbar__zoom">{Math.round(scale * 100)}%</span>
-              <button
-                onClick={() =>
-                  setScale((s) => Math.min(3, +(s + 0.2).toFixed(2)))
-                }
-                title="Zoom in"
-              >
-                +
-              </button>
-            </div>
-          </>
-        )}
-
-        <div className="toolbar__spacer" />
-
-        {pdf && (
-          <>
-            <span className="toolbar__status">
-              {changeCount > 0
-                ? `${changeCount} change${changeCount === 1 ? "" : "s"}`
-                : "No changes yet"}
-            </span>
-            <button
-              className="btn btn--primary"
-              onClick={download}
-              disabled={status === "exporting"}
-            >
-              {status === "exporting" ? "Exporting…" : "Download PDF"}
+  const appBar = (
+    <header className="appbar">
+      <div className="appbar__brand">
+        <span className="appbar__logo">
+          <Icon name="stylus_note" size={22} filled />
+        </span>
+        <span className="title-large appbar__name">PDF Editor</span>
+      </div>
+      {pdf && (
+        <>
+          <div className="appbar__spacer" />
+          <button className="icon-btn" onClick={undo} disabled={!doc.canUndo} aria-label="Undo" title="Undo (Ctrl+Z)">
+            <Icon name="undo" size={22} />
+          </button>
+          <button className="icon-btn" onClick={redo} disabled={!doc.canRedo} aria-label="Redo" title="Redo (Ctrl+Shift+Z)">
+            <Icon name="redo" size={22} />
+          </button>
+          <span className="appbar__changes label-medium">
+            {changeCount > 0 ? `${changeCount} change${changeCount === 1 ? "" : "s"}` : ""}
+          </span>
+          <button className="btn btn--filled appbar__download" onClick={download} disabled={status === "exporting"}>
+            <Icon name="download" size={18} />
+            <span>{status === "exporting" ? "Exporting…" : "Download"}</span>
+          </button>
+          <div className="menu">
+            <button className="icon-btn" onClick={() => setMenuOpen((v) => !v)} aria-label="More" aria-expanded={menuOpen}>
+              <Icon name="more_vert" size={22} />
             </button>
-            <button className="btn" onClick={reset}>
-              New file
-            </button>
-          </>
-        )}
-      </header>
+            {menuOpen && (
+              <>
+                <div className="menu__scrim" onClick={() => setMenuOpen(false)} />
+                <div className="menu__list" role="menu">
+                  <button
+                    className="menu__item"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      setSelection(null);
+                      setOrganizeOpen(true);
+                    }}
+                    role="menuitem"
+                  >
+                    <Icon name="select" size={20} /> Organize pages
+                  </button>
+                  <button
+                    className="menu__item"
+                    onClick={() => {
+                      setMenuOpen(false);
+                      imageInputRef.current?.click();
+                    }}
+                    role="menuitem"
+                  >
+                    <Icon name="image" size={20} /> Add image
+                  </button>
+                  <div className="menu__divider" />
+                  <button
+                    className="menu__item"
+                    onClick={() => { setMenuOpen(false); setSelection(null); setFinishTab("numbers"); }}
+                    role="menuitem"
+                  >
+                    <Icon name="tag" size={20} /> Page numbers
+                  </button>
+                  <button
+                    className="menu__item"
+                    onClick={() => { setMenuOpen(false); setSelection(null); setFinishTab("watermark"); }}
+                    role="menuitem"
+                  >
+                    <Icon name="watermark" size={20} /> Watermark
+                  </button>
+                  <button className="menu__item" onClick={exportImages} role="menuitem">
+                    <Icon name="image" size={20} /> Export as images
+                  </button>
+                  <div className="menu__divider" />
+                  <button className="menu__item" onClick={reset} role="menuitem">
+                    <Icon name="note_add" size={20} /> Open another PDF
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </header>
+  );
 
-      {!pdf ? (
+  if (!pdf) {
+    return (
+      <div className="app">
+        {appBar}
         <div
           className={`dropzone${dragging ? " dropzone--active" : ""}`}
           onDragOver={(e) => {
@@ -461,13 +667,23 @@ export function App() {
             const file = e.dataTransfer.files[0];
             if (file) void openFile(file);
           }}
-          onClick={() => inputRef.current?.click()}
         >
-          <div className="dropzone__icon">📄</div>
-          <h1>Drop a PDF here</h1>
-          <p>or click to browse. Everything runs in your browser — no uploads.</p>
-          {status === "loading" && <p className="dropzone__note">{message}</p>}
-          {status === "error" && <p className="dropzone__error">{message}</p>}
+          <div className="dropzone__card">
+            <div className="dropzone__icon">
+              <Icon name="picture_as_pdf" size={48} />
+            </div>
+            <h1 className="headline-small">Open a PDF to start editing</h1>
+            <p className="body-medium dropzone__sub">
+              Edit text, add notes, redact, and export — all on your device.
+              Nothing is uploaded.
+            </p>
+            <button className="btn btn--filled btn--lg" onClick={() => inputRef.current?.click()}>
+              <Icon name="upload_file" size={20} /> Choose PDF
+            </button>
+            <p className="body-small dropzone__hint">or drag &amp; drop a file here</p>
+            {status === "loading" && <p className="body-small dropzone__note">{message}</p>}
+            {status === "error" && <p className="body-small dropzone__err">{message}</p>}
+          </div>
           <input
             ref={inputRef}
             type="file"
@@ -480,37 +696,52 @@ export function App() {
             }}
           />
         </div>
-      ) : (
-        <>
-          <PropertiesPanel
-            selection={selection}
-            style={activeStyle}
-            redactionColor={redactionColor}
-            onChangeStyle={onChangeStyle}
-            onChangeRedactionColor={onChangeRedactionColor}
-            onDelete={onDelete}
-          />
-          <div className="statusbar">
-            <span className={status === "error" ? "statusbar--error" : ""}>
-              {message}
-            </span>
-            <span className="statusbar__hint">{activeHint}</span>
-          </div>
-          <main className="viewer">
+      </div>
+    );
+  }
+
+  return (
+    <div className="app">
+      {appBar}
+
+      <div className="workspace">
+        <nav className="toolnav" aria-label="Tools">
+          {TOOLS.map((t) => (
+            <button
+              key={t.key}
+              className={`toolnav__btn${tool === t.key ? " toolnav__btn--on" : ""}`}
+              onClick={() => pickTool(t.key)}
+              aria-pressed={tool === t.key}
+            >
+              <span className="toolnav__ind">
+                <Icon name={t.icon} size={24} filled={tool === t.key} />
+              </span>
+              <span className="toolnav__label label-medium">{t.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div
+          className="viewer"
+          ref={vp.viewportRef}
+          {...vp.handlers}
+        >
+          <div className="doc">
             {pdf.pages.map((page) => (
               <PageView
                 key={page.pageIndex}
                 bytes={pdf.bytes}
                 page={page}
-                scale={scale}
+                scale={vp.scale}
                 tool={tool}
+                drawTool={drawTool}
+                drawStyle={drawStyle}
                 edits={edits}
-                textBoxes={textBoxes.filter(
-                  (b) => b.pageIndex === page.pageIndex,
-                )}
-                redactions={redactions.filter(
-                  (r) => r.pageIndex === page.pageIndex,
-                )}
+                textBoxes={textBoxes.filter((b) => b.pageIndex === page.pageIndex)}
+                redactions={redactions.filter((r) => r.pageIndex === page.pageIndex)}
+                annotations={annotations.filter((a) => a.pageIndex === page.pageIndex)}
+                stamps={stamps.filter((s) => s.pageIndex === page.pageIndex)}
+                placing={!!pendingStamp}
                 selection={selection}
                 autoFocusId={autoFocusId}
                 revision={revision}
@@ -519,12 +750,122 @@ export function App() {
                 onChangeTextBoxText={onChangeTextBoxText}
                 onChangeTextBox={onChangeTextBox}
                 onChangeRedaction={onChangeRedaction}
+                onChangeNoteText={onChangeNoteText}
+                onChangeStamp={onChangeStamp}
                 onAddTextBox={onAddTextBox}
                 onAddRedaction={onAddRedaction}
+                onAddAnnotation={onAddAnnotation}
+                onPlaceStamp={onPlaceStamp}
               />
             ))}
-          </main>
-        </>
+          </div>
+
+          {/* Floating zoom control */}
+          <div className="zoombar" role="group" aria-label="Zoom">
+            <button className="icon-btn" onClick={vp.zoomOut} aria-label="Zoom out">
+              <Icon name="remove" size={22} />
+            </button>
+            <button className="zoombar__label label-medium" onClick={vp.resetZoom} title="Reset to fit width">
+              {Math.round(vp.zoom * 100)}%
+            </button>
+            <button className="icon-btn" onClick={vp.zoomIn} aria-label="Zoom in">
+              <Icon name="add" size={22} />
+            </button>
+          </div>
+
+          {tool === "draw" && (
+            <DrawToolbar
+              drawTool={drawTool}
+              setDrawTool={setDrawTool}
+              drawStyle={drawStyle}
+              setDrawStyle={setDrawStyle}
+            />
+          )}
+        </div>
+
+        {selection && (
+          <aside className="panel">
+            <PropertiesPanel
+              selection={selection}
+              style={activeStyle}
+              redactionColor={redactionColor}
+              annotation={selectedAnnotation}
+              onChangeStyle={onChangeStyle}
+              onChangeRedactionColor={onChangeRedactionColor}
+              onChangeAnnotation={onChangeAnnotation}
+              onDelete={onDelete}
+              onClose={() => setSelection(null)}
+            />
+          </aside>
+        )}
+      </div>
+
+      {/* Mobile primary action */}
+      <button
+        className="fab"
+        onClick={download}
+        disabled={status === "exporting"}
+        aria-label="Download PDF"
+      >
+        <Icon name={status === "exporting" ? "hourglass_top" : "download"} size={24} />
+        <span className="fab__label label-large">
+          {status === "exporting" ? "Exporting…" : "Download"}
+        </span>
+      </button>
+
+      {message && (
+        <div className={`snackbar body-medium${status === "error" ? " snackbar--err" : ""}`}>
+          {message}
+        </div>
+      )}
+
+      {sigOpen && (
+        <SignatureDialog
+          onClose={() => setSigOpen(false)}
+          onCreate={(sig) => {
+            setSigOpen(false);
+            setPendingStamp(sig);
+            setStatus("ready");
+            setMessage("Tap the page to place your signature.");
+          }}
+        />
+      )}
+
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) startImagePlacement(f);
+          e.target.value = "";
+        }}
+      />
+
+      {finishTab && (
+        <FinishDialog
+          initialTab={finishTab}
+          onApplyNumbers={applyNumbers}
+          onApplyWatermark={applyWatermark}
+          onClose={() => setFinishTab(null)}
+        />
+      )}
+
+      {organizeOpen && pdf && (
+        <Organize
+          mainBytes={pdf.bytes}
+          fileName={fileName}
+          hasEdits={changeCount > 0}
+          onApply={(bytes, note) => {
+            setOrganizeOpen(false);
+            void openBytes(bytes, fileName, note);
+          }}
+          onExtract={(bytes) =>
+            downloadBytes(bytes, fileName.replace(/\.pdf$/i, "") + "-extract.pdf")
+          }
+          onClose={() => setOrganizeOpen(false)}
+        />
       )}
     </div>
   );

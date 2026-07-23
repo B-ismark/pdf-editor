@@ -62,21 +62,32 @@ export async function renderPage(
   canvas: HTMLCanvasElement,
   scale: number,
 ): Promise<void> {
-  const doc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+  const doc = await getCachedDoc(bytes);
   const page = await doc.getPage(pageIndex + 1);
   const viewport = page.getViewport({ scale });
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not get 2D canvas context");
 
+  // Backing store at scale × devicePixelRatio; the element's display size is
+  // controlled by CSS (the page container), so we don't touch canvas.style.
   const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.floor(viewport.width * dpr);
-  canvas.height = Math.floor(viewport.height * dpr);
-  canvas.style.width = `${viewport.width}px`;
-  canvas.style.height = `${viewport.height}px`;
-  ctx.scale(dpr, dpr);
-
+  canvas.width = Math.max(1, Math.floor(viewport.width * dpr));
+  canvas.height = Math.max(1, Math.floor(viewport.height * dpr));
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   await page.render({ canvasContext: ctx, viewport }).promise;
-  await doc.destroy();
+}
+
+/** Cache of parsed pdf.js documents keyed by the original byte buffer, so
+ * repeated re-renders (e.g. during zoom) don't reparse the whole file. */
+const docCache = new WeakMap<ArrayBuffer, Promise<pdfjsLib.PDFDocumentProxy>>();
+
+function getCachedDoc(bytes: ArrayBuffer): Promise<pdfjsLib.PDFDocumentProxy> {
+  let doc = docCache.get(bytes);
+  if (!doc) {
+    doc = pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+    docCache.set(bytes, doc);
+  }
+  return doc;
 }
 
 /**

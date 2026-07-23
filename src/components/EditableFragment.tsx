@@ -78,7 +78,7 @@ function EditableFragmentImpl({
         lineHeight: 1,
         pointerEvents: interactive ? "auto" : "none",
       }}
-      onMouseDown={() => interactive && onSelect(fragment.id)}
+      onPointerDown={() => interactive && onSelect(fragment.id)}
       onInput={(ev) =>
         onChangeText(fragment.id, ev.currentTarget.textContent ?? "")
       }

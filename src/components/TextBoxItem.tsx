@@ -102,7 +102,7 @@ function TextBoxItemImpl({
           lineHeight: 1,
           pointerEvents: interactive ? "auto" : "none",
         }}
-        onMouseDown={() => interactive && onSelect(box.id)}
+        onPointerDown={() => interactive && onSelect(box.id)}
         onInput={(ev) => onChangeText(box.id, ev.currentTarget.textContent ?? "")}
         onKeyDown={(ev) => {
           if (ev.key === "Enter") ev.preventDefault();
