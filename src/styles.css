@@ -1114,7 +1114,10 @@ body {
 /* Draw contextual toolbar */
 .drawbar {
   position: absolute;
-  top: 12px;
+  /* Sit directly above the tool dock so the draw options read as the dock
+     morphing for the active tool (rather than a detached top bar). */
+  top: auto;
+  bottom: calc(76px + env(safe-area-inset-bottom));
   left: 50%;
   transform: translateX(-50%);
   display: flex;

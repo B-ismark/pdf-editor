@@ -1910,19 +1910,23 @@ export function App() {
             />
           )}
 
-          {/* Mobile: contextual toolbar (instead of auto-opening the sheet) so
-              the selected object stays visible and directly manipulable. */}
-          {compact && selection && selection.kind !== "stamp" && !sheetOpen && (
-            <SelectionBar
-              key={`${selection.kind}-${selection.id}`}
-              selection={selection}
-              annotationKind={selectedAnnotation?.kind}
-              onEdit={editSelection}
-              onStyle={() => setSheetOpen(true)}
-              onDelete={onDelete}
-              onClose={() => setSelection(null)}
-            />
-          )}
+          {/* Contextual quick-bar — the fast path to edits at the object.
+              Mobile: instead of auto-opening the sheet. Desktop: only when the
+              Inspector is collapsed (canvas-max mode); its Style action reopens
+              the Inspector for the full controls. */}
+          {selection &&
+            selection.kind !== "stamp" &&
+            (compact ? !sheetOpen : !inspectorOpen) && (
+              <SelectionBar
+                key={`${selection.kind}-${selection.id}`}
+                selection={selection}
+                annotationKind={selectedAnnotation?.kind}
+                onEdit={editSelection}
+                onStyle={() => (compact ? setSheetOpen(true) : setInspectorOpen(true))}
+                onDelete={onDelete}
+                onClose={() => setSelection(null)}
+              />
+            )}
         </div>
 
         {/* Adaptive Inspector. Desktop: a persistent right column that
