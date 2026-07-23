@@ -6,7 +6,22 @@ import { DrawToolbar } from "./components/DrawToolbar";
 import { SelectionBar } from "./components/SelectionBar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { TooltipHost } from "./components/TooltipHost";
+import { FindBar } from "./components/FindBar";
+import { PageNav } from "./components/PageNav";
+import { CommandPalette, type Command } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
+import { findMatches, extractText, type FindMatch } from "./pdf/find";
+import {
+  annotationBox,
+  boxCX,
+  boxCY,
+  linkBox,
+  redactionBox,
+  stampBox,
+  textBoxBox,
+  type Box,
+} from "./pdf/bbox";
+import { useAutosave } from "./hooks/useAutosave";
 import type { PageNumberOptions, WatermarkOptions } from "./pdf/finishOps";
 import { useHistory } from "./hooks/useHistory";
 import { useMediaQuery } from "./hooks/useMediaQuery";
@@ -28,11 +43,15 @@ const SignatureDialog = lazy(() =>
 const FinishDialog = lazy(() =>
   import("./components/FinishDialog").then((m) => ({ default: m.FinishDialog })),
 );
+const CompressDialog = lazy(() =>
+  import("./components/CompressDialog").then((m) => ({ default: m.CompressDialog })),
+);
 import type {
   Annotation,
   AnnotationTool,
   DocState,
   DrawStyle,
+  LinkAnnot,
   LoadedPdf,
   Redaction,
   Selection,
@@ -70,6 +89,8 @@ const TOOLS: { key: NavKey; label: string; icon: string }[] = [
   { key: "draw", label: "Draw", icon: "draw" },
   { key: "sign", label: "Sign", icon: "signature" },
   { key: "redact", label: "Redact", icon: "select" },
+  { key: "whiteout", label: "Whiteout", icon: "eraser" },
+  { key: "link", label: "Link", icon: "link" },
 ];
 
 // Single-key tool shortcuts (ignored while typing or when a modal is open).
@@ -79,6 +100,8 @@ const TOOL_KEYS: Record<string, NavKey> = {
   d: "draw",
   s: "sign",
   r: "redact",
+  w: "whiteout",
+  l: "link",
 };
 const TOOL_SHORTCUT: Record<NavKey, string> = {
   select: "V",
@@ -86,6 +109,8 @@ const TOOL_SHORTCUT: Record<NavKey, string> = {
   draw: "D",
   sign: "S",
   redact: "R",
+  whiteout: "W",
+  link: "L",
 };
 
 /** True when focus is in a text-entry context, so single-key shortcuts and
@@ -107,6 +132,8 @@ export function App() {
   const [tool, setTool] = useState<Tool>("select");
   const doc = useHistory<DocState>(EMPTY_DOC);
   const { edits, textBoxes, redactions, annotations, stamps } = doc.state;
+  const links = doc.state.links ?? [];
+  const formValues = doc.state.formValues ?? {};
   // Remembered across sessions so the user's choices aren't reset each time.
   const [drawTool, setDrawTool] = usePersistentState("pref.drawTool", "highlight") as [
     AnnotationTool,
@@ -156,6 +183,17 @@ export function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [organizeOpen, setOrganizeOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState("");
+  const [findActive, setFindActive] = useState(0);
+  const [navOpen, setNavOpen] = useState(false);
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [multi, setMulti] = useState<string[]>([]);
+  // Adaptive Workspace: the right Inspector collapses to an edge tab (desktop)
+  // to hand the canvas maximum room; it's never empty (properties when
+  // something is selected, document/finishing actions otherwise).
+  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [compressOpen, setCompressOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuListRef = useRef<HTMLDivElement>(null);
@@ -164,6 +202,7 @@ export function App() {
 
   const vp = useViewport();
   const theme = useTheme();
+  const { restorable, save: saveSession, clear: clearAutosave, dismissRestore } = useAutosave();
   // >=600px gets the persistent side panel + tool rail (Material Medium+);
   // <600px is the compact phone layout (contextual selection bar + on-demand
   // sheet, `sheetOpen` state above).
@@ -197,17 +236,120 @@ export function App() {
     [pdf, fragmentById, edits],
   );
   const changeCount =
-    editedFragmentCount + textBoxes.length + redactions.length + annotations.length + stamps.length;
+    editedFragmentCount + textBoxes.length + redactions.length + annotations.length + stamps.length + links.length + Object.keys(formValues).length;
+
+  // ---- Find in document (Ctrl/⌘+F) ----
+  const matches: FindMatch[] = useMemo(
+    () => (pdf && findOpen && findQuery ? findMatches(pdf.pages, edits, findQuery) : []),
+    [pdf, findOpen, findQuery, edits],
+  );
+  const matchesByPage = useMemo(() => {
+    const m = new Map<number, FindMatch[]>();
+    for (const hit of matches) {
+      const arr = m.get(hit.pageIndex) ?? [];
+      arr.push(hit);
+      m.set(hit.pageIndex, arr);
+    }
+    return m;
+  }, [matches]);
+  const activeMatch = matches[findActive] ?? null;
+
+  // Keep the active index in range as the result set changes.
+  useEffect(() => {
+    if (findActive > matches.length - 1) setFindActive(matches.length ? matches.length - 1 : 0);
+  }, [matches.length, findActive]);
+
+  // Scroll the active match into view (centre it in the scroll surface).
+  useEffect(() => {
+    if (!activeMatch) return;
+    const el = document.querySelector<HTMLElement>(`[data-page-index="${activeMatch.pageIndex}"]`);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [activeMatch]);
+
+  const nextMatch = useCallback(() => {
+    setFindActive((i) => (matches.length ? (i + 1) % matches.length : 0));
+  }, [matches.length]);
+  const prevMatch = useCallback(() => {
+    setFindActive((i) => (matches.length ? (i - 1 + matches.length) % matches.length : 0));
+  }, [matches.length]);
+  const openFind = useCallback(() => {
+    setSelection(null);
+    setFindActive(0);
+    setFindOpen(true);
+  }, []);
+  const closeFind = useCallback(() => {
+    setFindOpen(false);
+    setFindQuery("");
+  }, []);
+
+  /** Redact every current search match (one undo step). */
+  const redactAllMatches = useCallback(() => {
+    if (matches.length === 0) return;
+    doc.set((d) => ({
+      ...d,
+      redactions: [
+        ...d.redactions,
+        ...matches.map((m) => ({
+          id: nextId("rd"),
+          pageIndex: m.pageIndex,
+          x: m.x,
+          y: m.y,
+          width: m.width,
+          height: m.height,
+          color: "#000000",
+        })),
+      ],
+    }));
+    const n = matches.length;
+    setMessage(`Redacted ${n} match${n === 1 ? "" : "es"} of “${findQuery}”.`);
+    setStatus("ready");
+    closeFind();
+  }, [matches, doc, findQuery, closeFind]);
+
+  /** Copy all document text to the clipboard. */
+  const copyAllText = useCallback(async () => {
+    if (!pdf) return;
+    setMenuOpen(false);
+    try {
+      await navigator.clipboard.writeText(extractText(pdf.pages, edits));
+      setStatus("ready");
+      setMessage("Document text copied to clipboard.");
+    } catch {
+      setStatus("error");
+      setMessage("Couldn't copy — your browser blocked clipboard access.");
+    }
+  }, [pdf, edits]);
+
+  /** Download all document text as a .txt file. */
+  const exportTextFile = useCallback(() => {
+    if (!pdf) return;
+    setMenuOpen(false);
+    const blob = new Blob([extractText(pdf.pages, edits)], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = fileName.replace(/\.pdf$/i, "") + ".txt";
+    a.click();
+    URL.revokeObjectURL(url);
+    setStatus("ready");
+    setMessage("Text exported.");
+  }, [pdf, edits, fileName]);
+
+  // ---- Autosave to IndexedDB (debounced) + one-time restore ----
+  useEffect(() => {
+    if (!pdf) return;
+    saveSession(fileName, pdf.bytes, doc.state, changeCount > 0);
+  }, [pdf, fileName, doc.state, changeCount, saveSession]);
 
   const openBytes = useCallback(
-    async (bytes: ArrayBuffer, name: string, note?: string) => {
+    async (bytes: ArrayBuffer, name: string, note?: string, seedDoc?: DocState) => {
       setStatus("loading");
       setMessage(`Loading ${name}…`);
       try {
         const loaded = await loadPdf(bytes);
         setPdf(loaded);
         setFileName(name);
-        doc.reset(EMPTY_DOC);
+        doc.reset(seedDoc ?? EMPTY_DOC);
         setSelection(null);
         setTool("select");
         setRevision((r) => r + 1);
@@ -236,6 +378,24 @@ export function App() {
     [openBytes],
   );
 
+  const restoreSession = useCallback(async () => {
+    if (!restorable) return;
+    const s = restorable;
+    // Bump the id counter past any restored ids so new objects don't collide.
+    const ids = [
+      ...s.doc.textBoxes.map((b) => b.id),
+      ...s.doc.redactions.map((r) => r.id),
+      ...s.doc.annotations.map((a) => a.id),
+      ...s.doc.stamps.map((st) => st.id),
+    ];
+    for (const id of ids) {
+      const n = Number(id.split("-").pop());
+      if (Number.isFinite(n) && n + 1 > counter.current) counter.current = n + 1;
+    }
+    dismissRestore();
+    await openBytes(s.bytes, s.fileName, "Session restored.", s.doc);
+  }, [restorable, dismissRestore, openBytes]);
+
   const downloadBytes = useCallback((bytes: Uint8Array, filename: string) => {
     const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
@@ -255,9 +415,9 @@ export function App() {
   /** Export the current edits to fresh bytes so finishing ops build on them. */
   const bakeCurrent = useCallback(async (): Promise<ArrayBuffer> => {
     const { exportPdf } = await import("./pdf/exporter");
-    const out = await exportPdf(pdf!, { edits, textBoxes, redactions, annotations, stamps });
+    const out = await exportPdf(pdf!, { edits, textBoxes, redactions, annotations, stamps, links, formValues });
     return toAB(out);
-  }, [pdf, edits, textBoxes, redactions, annotations, stamps]);
+  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues]);
 
   const applyNumbers = useCallback(
     async (opts: PageNumberOptions) => {
@@ -294,6 +454,72 @@ export function App() {
     },
     [bakeCurrent, openBytes, fileName],
   );
+
+  const applyCompress = useCallback(
+    async (opts: import("./pdf/finishOps").CompressOptions) => {
+      if (!pdf) return;
+      setCompressOpen(false);
+      setStatus("exporting");
+      setMessage("Compressing…");
+      try {
+        const baked = await bakeCurrent();
+        const { compressPdf } = await import("./pdf/finishOps");
+        const sizes = pdf.pages.map((p) => ({ width: p.viewBox.width, height: p.viewBox.height }));
+        const out = await compressPdf(baked, sizes, opts);
+        const before = pdf.bytes.byteLength;
+        const after = out.byteLength;
+        downloadBytes(out, fileName.replace(/\.pdf$/i, "") + "-compressed.pdf");
+        setStatus("ready");
+        const pct = Math.round((1 - after / before) * 100);
+        const fmt = (n: number) => (n / 1_000_000).toFixed(2) + " MB";
+        setMessage(
+          pct > 0
+            ? `Compressed — ${fmt(before)} → ${fmt(after)} (${pct}% smaller).`
+            : `Compressed to ${fmt(after)}.`,
+        );
+      } catch {
+        setStatus("error");
+        setMessage("Couldn't compress this PDF. Please try again.");
+      }
+    },
+    [pdf, bakeCurrent, fileName, downloadBytes],
+  );
+
+  const runOcr = useCallback(async () => {
+    if (!pdf) return;
+    setMenuOpen(false);
+    setStatus("exporting");
+    setMessage("Reading text (OCR)…");
+    try {
+      const { ocrPages } = await import("./pdf/ocr");
+      const map = await ocrPages(pdf.bytes, pdf.pages, (p, t) =>
+        setMessage(`Reading text… page ${p}/${t}`),
+      );
+      let added = 0;
+      const pages = pdf.pages.map((pg) => {
+        const extra = map.get(pg.pageIndex) ?? [];
+        added += extra.length;
+        // Replace any prior OCR layer so re-running doesn't duplicate words.
+        const kept = pg.fragments.filter((f) => !f.id.startsWith("ocr:"));
+        return { ...pg, fragments: [...kept, ...extra] };
+      });
+      setPdf({ ...pdf, pages });
+      setRevision((r) => r + 1);
+      setStatus("ready");
+      setMessage(
+        added > 0
+          ? `OCR added ${added} words — now searchable and redactable.`
+          : "No recognisable text found.",
+      );
+    } catch (err) {
+      setStatus("error");
+      setMessage(
+        (err as Error)?.name === "OcrAssetsMissing"
+          ? "On-device OCR isn't set up in this build — run `npm run setup-ocr` to enable it."
+          : "OCR failed on this document. Please try again.",
+      );
+    }
+  }, [pdf]);
 
   const exportImages = useCallback(async () => {
     if (!pdf) return;
@@ -387,16 +613,55 @@ export function App() {
   );
 
   const onAddRedaction = useCallback(
-    (pageIndex: number, x: number, y: number, width: number, height: number) => {
+    (pageIndex: number, x: number, y: number, width: number, height: number, cover?: boolean) => {
       const id = nextId("rd");
       doc.set((d) => ({
         ...d,
-        redactions: [...d.redactions, { id, pageIndex, x, y, width, height, color: "#000000" }],
+        redactions: [
+          ...d.redactions,
+          { id, pageIndex, x, y, width, height, color: cover ? "#ffffff" : "#000000", cover },
+        ],
       }));
       // Switch to Select so the new redaction can be moved/resized/recoloured
       // right away (in Redact mode it wouldn't be interactive).
       setTool("select");
       setSelection({ kind: "redaction", id });
+    },
+    [doc],
+  );
+
+  const onAddLink = useCallback(
+    (pageIndex: number, x: number, y: number, width: number, height: number) => {
+      const id = nextId("ln");
+      doc.set((d) => ({
+        ...d,
+        links: [...(d.links ?? []), { id, pageIndex, x, y, width, height, url: "" }],
+      }));
+      setTool("select");
+      setSelection({ kind: "link", id });
+    },
+    [doc],
+  );
+
+  const onChangeLink = useCallback(
+    (id: string, patch: Partial<LinkAnnot>, key: string) => {
+      doc.set(
+        (d) => ({
+          ...d,
+          links: (d.links ?? []).map((l) => (l.id === id ? { ...l, ...patch } : l)),
+        }),
+        key,
+      );
+    },
+    [doc],
+  );
+
+  const onChangeFormValue = useCallback(
+    (name: string, value: string | boolean) => {
+      doc.set(
+        (d) => ({ ...d, formValues: { ...(d.formValues ?? {}), [name]: value } }),
+        `form-${name}`,
+      );
     },
     [doc],
   );
@@ -591,10 +856,19 @@ export function App() {
     return null;
   }, [selection, fragmentById, edits, textBoxes]);
 
-  const redactionColor =
-    selection?.kind === "redaction"
-      ? redactions.find((r) => r.id === selection.id)?.color ?? "#000000"
-      : null;
+  const selectedRedaction =
+    selection?.kind === "redaction" ? redactions.find((r) => r.id === selection.id) ?? null : null;
+  const redactionColor = selectedRedaction?.color ?? null;
+  const selectedLink =
+    selection?.kind === "link" ? links.find((l) => l.id === selection.id) ?? null : null;
+
+  const onChangeLinkUrl = useCallback(
+    (url: string) => {
+      if (selection?.kind !== "link") return;
+      onChangeLink(selection.id, { url }, `lurl-${selection.id}`);
+    },
+    [selection, onChangeLink],
+  );
 
   const onChangeStyle = useCallback(
     (patch: Partial<TextStyle>) => {
@@ -674,8 +948,268 @@ export function App() {
       const id = selection.id;
       doc.set((d) => ({ ...d, stamps: d.stamps.filter((s) => s.id !== id) }));
       setSelection(null);
+    } else if (selection?.kind === "link") {
+      const id = selection.id;
+      doc.set((d) => ({ ...d, links: (d.links ?? []).filter((l) => l.id !== id) }));
+      setSelection(null);
     }
   }, [selection, doc]);
+
+  // Command palette (Ctrl/⌘+K) — a global toggle independent of focus.
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setCmdOpen((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+
+  // ---- Duplicate / copy-paste of overlay objects ----
+  type ClipItem =
+    | { kind: "textbox"; obj: TextBox }
+    | { kind: "redaction"; obj: Redaction }
+    | { kind: "annotation"; obj: Annotation }
+    | { kind: "stamp"; obj: Stamp }
+    | { kind: "link"; obj: LinkAnnot };
+  const clipboard = useRef<ClipItem | null>(null);
+
+  const selectedClip = useCallback((): ClipItem | null => {
+    if (!selection) return null;
+    if (selection.kind === "textbox") {
+      const obj = textBoxes.find((b) => b.id === selection.id);
+      return obj ? { kind: "textbox", obj } : null;
+    }
+    if (selection.kind === "redaction") {
+      const obj = redactions.find((r) => r.id === selection.id);
+      return obj ? { kind: "redaction", obj } : null;
+    }
+    if (selection.kind === "annotation") {
+      const obj = annotations.find((a) => a.id === selection.id);
+      return obj ? { kind: "annotation", obj } : null;
+    }
+    if (selection.kind === "stamp") {
+      const obj = stamps.find((s) => s.id === selection.id);
+      return obj ? { kind: "stamp", obj } : null;
+    }
+    if (selection.kind === "link") {
+      const obj = links.find((l) => l.id === selection.id);
+      return obj ? { kind: "link", obj } : null;
+    }
+    return null;
+  }, [selection, textBoxes, redactions, annotations, stamps, links]);
+
+  /** Add a copy of a clipboard item, offset slightly, and select it. */
+  const pasteItem = useCallback(
+    (item: ClipItem) => {
+      const dx = 12;
+      const dy = -12;
+      if (item.kind === "textbox") {
+        const id = nextId("tb");
+        const b = { ...item.obj, id, x: item.obj.x + dx, y: item.obj.y + dy };
+        doc.set((d) => ({ ...d, textBoxes: [...d.textBoxes, b] }));
+        setSelection({ kind: "textbox", id });
+      } else if (item.kind === "redaction") {
+        const id = nextId("rd");
+        const r = { ...item.obj, id, x: item.obj.x + dx, y: item.obj.y + dy };
+        doc.set((d) => ({ ...d, redactions: [...d.redactions, r] }));
+        setSelection({ kind: "redaction", id });
+      } else if (item.kind === "link") {
+        const id = nextId("ln");
+        const l = { ...item.obj, id, x: item.obj.x + dx, y: item.obj.y + dy };
+        doc.set((d) => ({ ...d, links: [...(d.links ?? []), l] }));
+        setSelection({ kind: "link", id });
+      } else if (item.kind === "stamp") {
+        const id = nextId("st");
+        const s = { ...item.obj, id, x: item.obj.x + dx, y: item.obj.y + dy };
+        doc.set((d) => ({ ...d, stamps: [...d.stamps, s] }));
+        setSelection({ kind: "stamp", id });
+      } else {
+        const id = nextId("an");
+        const a = { ...translateAnnotation(item.obj, dx, dy), id } as Annotation;
+        doc.set((d) => ({ ...d, annotations: [...d.annotations, a] }));
+        setSelection({ kind: "annotation", id });
+      }
+    },
+    [doc],
+  );
+
+  const duplicateSelection = useCallback(() => {
+    const item = selectedClip();
+    if (item) pasteItem(item);
+  }, [selectedClip, pasteItem]);
+
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || isTypingTarget()) return;
+      const key = e.key.toLowerCase();
+      if (key === "d") {
+        if (!selection) return;
+        e.preventDefault();
+        duplicateSelection();
+      } else if (key === "c") {
+        const item = selectedClip();
+        if (!item) return;
+        e.preventDefault();
+        clipboard.current = structuredClone(item);
+      } else if (key === "v") {
+        if (!clipboard.current) return;
+        e.preventDefault();
+        pasteItem(clipboard.current);
+      }
+    };
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, [selection, selectedClip, pasteItem, duplicateSelection]);
+
+  // ---- Multi-select (marquee) + align / distribute ----
+  const multiIds = useMemo(() => new Set(multi), [multi]);
+  const clearMulti = useCallback(() => setMulti([]), []);
+
+  const onMarquee = useCallback((ids: string[]) => {
+    setMulti(ids.length >= 2 ? ids : []);
+  }, []);
+
+  // A single selection or a tool change ends a multi-selection.
+  useEffect(() => {
+    if (selection) setMulti([]);
+  }, [selection]);
+
+  const multiItems = useMemo(() => {
+    const set = new Set(multi);
+    const items: { id: string; kind: string; box: Box }[] = [];
+    textBoxes.forEach((b) => set.has(b.id) && items.push({ id: b.id, kind: "textbox", box: textBoxBox(b) }));
+    redactions.forEach((r) => set.has(r.id) && items.push({ id: r.id, kind: "redaction", box: redactionBox(r) }));
+    annotations.forEach((a) => set.has(a.id) && items.push({ id: a.id, kind: "annotation", box: annotationBox(a) }));
+    stamps.forEach((s) => set.has(s.id) && items.push({ id: s.id, kind: "stamp", box: stampBox(s) }));
+    links.forEach((l) => set.has(l.id) && items.push({ id: l.id, kind: "link", box: linkBox(l) }));
+    return items;
+  }, [multi, textBoxes, redactions, annotations, stamps, links]);
+
+  /** Apply per-id {dx,dy} deltas to every overlay object in one undo step. */
+  const applyDeltas = useCallback(
+    (deltas: Map<string, { dx: number; dy: number }>) => {
+      doc.set((d) => ({
+        ...d,
+        textBoxes: d.textBoxes.map((b) => {
+          const m = deltas.get(b.id);
+          return m ? { ...b, x: b.x + m.dx, y: b.y + m.dy } : b;
+        }),
+        redactions: d.redactions.map((r) => {
+          const m = deltas.get(r.id);
+          return m ? { ...r, x: r.x + m.dx, y: r.y + m.dy } : r;
+        }),
+        annotations: d.annotations.map((a) => {
+          const m = deltas.get(a.id);
+          return m ? translateAnnotation(a, m.dx, m.dy) : a;
+        }),
+        stamps: d.stamps.map((s) => {
+          const m = deltas.get(s.id);
+          return m ? { ...s, x: s.x + m.dx, y: s.y + m.dy } : s;
+        }),
+        links: (d.links ?? []).map((l) => {
+          const m = deltas.get(l.id);
+          return m ? { ...l, x: l.x + m.dx, y: l.y + m.dy } : l;
+        }),
+      }));
+    },
+    [doc],
+  );
+
+  type AlignOp = "left" | "center-h" | "right" | "top" | "middle" | "bottom";
+  const alignMulti = useCallback(
+    (op: AlignOp) => {
+      if (multiItems.length < 2) return;
+      const ls = multiItems.map((i) => i.box.l);
+      const rs = multiItems.map((i) => i.box.r);
+      const bs = multiItems.map((i) => i.box.b);
+      const ts = multiItems.map((i) => i.box.t);
+      const minL = Math.min(...ls), maxR = Math.max(...rs), minB = Math.min(...bs), maxT = Math.max(...ts);
+      const cH = (minL + maxR) / 2, cV = (minB + maxT) / 2;
+      const deltas = new Map<string, { dx: number; dy: number }>();
+      for (const it of multiItems) {
+        let dx = 0, dy = 0;
+        if (op === "left") dx = minL - it.box.l;
+        else if (op === "right") dx = maxR - it.box.r;
+        else if (op === "center-h") dx = cH - boxCX(it.box);
+        else if (op === "top") dy = maxT - it.box.t;
+        else if (op === "bottom") dy = minB - it.box.b;
+        else if (op === "middle") dy = cV - boxCY(it.box);
+        deltas.set(it.id, { dx, dy });
+      }
+      applyDeltas(deltas);
+    },
+    [multiItems, applyDeltas],
+  );
+
+  const distributeMulti = useCallback(
+    (axis: "h" | "v") => {
+      if (multiItems.length < 3) return;
+      const sorted = [...multiItems].sort((a, b) =>
+        axis === "h" ? boxCX(a.box) - boxCX(b.box) : boxCY(a.box) - boxCY(b.box),
+      );
+      const first = axis === "h" ? boxCX(sorted[0].box) : boxCY(sorted[0].box);
+      const last =
+        axis === "h" ? boxCX(sorted[sorted.length - 1].box) : boxCY(sorted[sorted.length - 1].box);
+      const step = (last - first) / (sorted.length - 1);
+      const deltas = new Map<string, { dx: number; dy: number }>();
+      sorted.forEach((it, i) => {
+        const target = first + step * i;
+        const cur = axis === "h" ? boxCX(it.box) : boxCY(it.box);
+        deltas.set(it.id, axis === "h" ? { dx: target - cur, dy: 0 } : { dx: 0, dy: target - cur });
+      });
+      applyDeltas(deltas);
+    },
+    [multiItems, applyDeltas],
+  );
+
+  const deleteMulti = useCallback(() => {
+    const set = new Set(multi);
+    if (set.size === 0) return;
+    doc.set((d) => ({
+      ...d,
+      textBoxes: d.textBoxes.filter((b) => !set.has(b.id)),
+      redactions: d.redactions.filter((r) => !set.has(r.id)),
+      annotations: d.annotations.filter((a) => !set.has(a.id)),
+      stamps: d.stamps.filter((s) => !set.has(s.id)),
+      links: (d.links ?? []).filter((l) => !set.has(l.id)),
+    }));
+    setMulti([]);
+  }, [multi, doc]);
+
+  const duplicateMulti = useCallback(() => {
+    if (multiItems.length === 0) return;
+    const dx = 12, dy = -12;
+    const newIds: string[] = [];
+    doc.set((d) => {
+      const next = { ...d, links: d.links ?? [] };
+      const set = new Set(multi);
+      for (const b of d.textBoxes.filter((x) => set.has(x.id))) {
+        const id = nextId("tb"); newIds.push(id);
+        next.textBoxes = [...next.textBoxes, { ...b, id, x: b.x + dx, y: b.y + dy }];
+      }
+      for (const r of d.redactions.filter((x) => set.has(x.id))) {
+        const id = nextId("rd"); newIds.push(id);
+        next.redactions = [...next.redactions, { ...r, id, x: r.x + dx, y: r.y + dy }];
+      }
+      for (const s of d.stamps.filter((x) => set.has(x.id))) {
+        const id = nextId("st"); newIds.push(id);
+        next.stamps = [...next.stamps, { ...s, id, x: s.x + dx, y: s.y + dy }];
+      }
+      for (const l of next.links.filter((x) => set.has(x.id))) {
+        const id = nextId("ln"); newIds.push(id);
+        next.links = [...next.links, { ...l, id, x: l.x + dx, y: l.y + dy }];
+      }
+      for (const a of d.annotations.filter((x) => set.has(x.id))) {
+        const id = nextId("an"); newIds.push(id);
+        next.annotations = [...next.annotations, { ...translateAnnotation(a, dx, dy), id }];
+      }
+      return next;
+    });
+    setMulti(newIds);
+  }, [multi, multiItems, doc]);
 
   // Move focus into the overflow menu when it opens (ARIA menu pattern).
   useEffect(() => {
@@ -726,8 +1260,10 @@ export function App() {
       setSelection(null);
     } else if (selection?.kind === "stamp" && !stamps.some((s) => s.id === selection.id)) {
       setSelection(null);
+    } else if (selection?.kind === "link" && !links.some((l) => l.id === selection.id)) {
+      setSelection(null);
     }
-  }, [textBoxes, redactions, annotations, stamps, selection]);
+  }, [textBoxes, redactions, annotations, stamps, links, selection]);
 
   // Warn before leaving/reloading the tab while there are unsaved changes.
   // Everything lives in memory (no server, no autosave), so an accidental
@@ -763,6 +1299,28 @@ export function App() {
         redo();
         return;
       }
+      if (mod && key === "f") {
+        e.preventDefault();
+        openFind();
+        return;
+      }
+      if (e.key === "Escape" && findOpen) {
+        e.preventDefault();
+        closeFind();
+        return;
+      }
+      if (multi.length > 0 && !isTypingTarget()) {
+        if (e.key === "Escape") {
+          e.preventDefault();
+          clearMulti();
+          return;
+        }
+        if (e.key === "Delete" || e.key === "Backspace") {
+          e.preventDefault();
+          deleteMulti();
+          return;
+        }
+      }
       // Escape clears the current selection (and closes the mobile sheet /
       // desktop panel, which is driven by selection). Modals stop Escape from
       // reaching here via their own capture-phase handler.
@@ -772,7 +1330,7 @@ export function App() {
         return;
       }
       if (
-        (selection?.kind === "redaction" || selection?.kind === "stamp") &&
+        (selection?.kind === "redaction" || selection?.kind === "stamp" || selection?.kind === "link") &&
         (e.key === "Delete" || e.key === "Backspace")
       ) {
         e.preventDefault();
@@ -816,6 +1374,14 @@ export function App() {
           if (s) {
             e.preventDefault();
             onChangeStamp(s.id, { x: s.x + dx, y: s.y + dy }, `nudge-st-${s.id}`);
+          }
+          return;
+        }
+        if (selection.kind === "link") {
+          const l = links.find((x) => x.id === selection.id);
+          if (l) {
+            e.preventDefault();
+            onChangeLink(l.id, { x: l.x + dx, y: l.y + dy }, `nudge-ln-${l.id}`);
           }
           return;
         }
@@ -867,6 +1433,14 @@ export function App() {
     onChangeRedaction,
     onChangeStamp,
     onMoveAnnotation,
+    openFind,
+    closeFind,
+    findOpen,
+    links,
+    onChangeLink,
+    multi,
+    clearMulti,
+    deleteMulti,
   ]);
 
   const download = useCallback(async () => {
@@ -875,7 +1449,7 @@ export function App() {
     setMessage("Building edited PDF…");
     try {
       const { exportPdf } = await import("./pdf/exporter");
-      const out = await exportPdf(pdf, { edits, textBoxes, redactions, annotations, stamps });
+      const out = await exportPdf(pdf, { edits, textBoxes, redactions, annotations, stamps, links, formValues });
       const blob = new Blob([out as BlobPart], { type: "application/pdf" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -893,7 +1467,7 @@ export function App() {
       setStatus("error");
       setMessage("Couldn't build the edited PDF. Please try again.");
     }
-  }, [pdf, edits, textBoxes, redactions, annotations, stamps, fileName]);
+  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, fileName]);
 
   const doReset = useCallback(() => {
     setPdf(null);
@@ -904,7 +1478,8 @@ export function App() {
     setMessage("");
     setMenuOpen(false);
     setConfirmReset(false);
-  }, [doc]);
+    clearAutosave();
+  }, [doc, clearAutosave]);
 
   const reset = useCallback(() => {
     setMenuOpen(false);
@@ -914,6 +1489,7 @@ export function App() {
 
   const pickTool = (t: NavKey) => {
     setPendingStamp(null);
+    setMulti([]);
     if (t === "sign") {
       setSelection(null);
       setSigOpen(true);
@@ -931,6 +1507,17 @@ export function App() {
         </span>
         <span className="title-large appbar__name">PDF Editor</span>
       </div>
+      {pdf && (
+        <button
+          className={`icon-btn${navOpen ? " icon-btn--on" : ""}`}
+          onClick={() => setNavOpen((v) => !v)}
+          aria-label="Toggle page thumbnails"
+          aria-pressed={navOpen}
+          data-tip="Pages"
+        >
+          <Icon name="panel" size={18} />
+        </button>
+      )}
       {!pdf && <div className="appbar__spacer" />}
       {pdf && (
         <>
@@ -940,6 +1527,9 @@ export function App() {
           </button>
           <button className="icon-btn" onClick={redo} disabled={!doc.canRedo} aria-label="Redo" data-tip="Redo · Ctrl+Shift+Z">
             <Icon name="redo" size={18} />
+          </button>
+          <button className="icon-btn" onClick={() => (findOpen ? closeFind() : openFind())} aria-label="Find" aria-pressed={findOpen} data-tip="Find · Ctrl+F">
+            <Icon name="search" size={18} />
           </button>
           <span className="appbar__changes label-medium">
             {changeCount > 0 ? `${changeCount} change${changeCount === 1 ? "" : "s"}` : ""}
@@ -995,6 +1585,23 @@ export function App() {
                   <button className="menu__item" onClick={exportImages} role="menuitem">
                     <Icon name="image" size={18} /> Export as images
                   </button>
+                  <button
+                    className="menu__item"
+                    onClick={() => { setMenuOpen(false); setSelection(null); setCompressOpen(true); }}
+                    role="menuitem"
+                  >
+                    <Icon name="compress" size={18} /> Compress PDF
+                  </button>
+                  <button className="menu__item" onClick={runOcr} role="menuitem">
+                    <Icon name="scan_text" size={18} /> OCR (recognise text)
+                  </button>
+                  <div className="menu__divider" />
+                  <button className="menu__item" onClick={copyAllText} role="menuitem">
+                    <Icon name="content_copy" size={18} /> Copy all text
+                  </button>
+                  <button className="menu__item" onClick={exportTextFile} role="menuitem">
+                    <Icon name="scan_text" size={18} /> Export text (.txt)
+                  </button>
                   <div className="menu__divider" />
                   <button
                     className="menu__item"
@@ -1031,14 +1638,59 @@ export function App() {
       selection={panelSelection}
       style={activeStyle}
       redactionColor={redactionColor}
+      redactionCover={!!selectedRedaction?.cover}
       annotation={selectedAnnotation}
+      linkUrl={selectedLink?.url ?? null}
       onChangeStyle={onChangeStyle}
       onChangeRedactionColor={onChangeRedactionColor}
+      onChangeLinkUrl={onChangeLinkUrl}
       onChangeAnnotation={onChangeAnnotation}
       onDelete={onDelete}
       onReset={onResetStyle}
       onClose={() => (compact ? setSheetOpen(false) : setSelection(null))}
     />
+  );
+
+  // The Inspector's "nothing selected" state: the document + finishing actions
+  // that used to hide in the overflow menu, now grouped and always in reach.
+  const documentPanel = (
+    <div className="props">
+      <div className="props__header">
+        <span className="props__title title-medium">Document</span>
+      </div>
+      <div className="doclist">
+        <span className="doclist__label label-medium">Organise</span>
+        <button className="doclist__item" onClick={() => { setSelection(null); setOrganizeOpen(true); }}>
+          <Icon name="layers" size={18} /> Reorder / merge pages
+        </button>
+        <button className="doclist__item" onClick={() => imageInputRef.current?.click()}>
+          <Icon name="image" size={18} /> Add image
+        </button>
+        <span className="doclist__label label-medium">Recognise text</span>
+        <button className="doclist__item" onClick={runOcr}>
+          <Icon name="scan_text" size={18} /> OCR (make scans searchable)
+        </button>
+        <button className="doclist__item" onClick={copyAllText}>
+          <Icon name="content_copy" size={18} /> Copy all text
+        </button>
+        <span className="doclist__label label-medium">Finish</span>
+        <button className="doclist__item" onClick={() => { setSelection(null); setFinishTab("numbers"); }}>
+          <Icon name="tag" size={18} /> Page numbers
+        </button>
+        <button className="doclist__item" onClick={() => { setSelection(null); setFinishTab("watermark"); }}>
+          <Icon name="watermark" size={18} /> Watermark
+        </button>
+        <button className="doclist__item" onClick={exportImages}>
+          <Icon name="image" size={18} /> Export as images
+        </button>
+        <button className="doclist__item" onClick={() => { setSelection(null); setCompressOpen(true); }}>
+          <Icon name="compress" size={18} /> Compress PDF
+        </button>
+        <button className="doclist__item" onClick={exportTextFile}>
+          <Icon name="content_copy" size={18} /> Export text (.txt)
+        </button>
+      </div>
+    </div>
   );
 
   if (!pdf) {
@@ -1060,6 +1712,17 @@ export function App() {
             if (file) void openFile(file);
           }}
         >
+          {restorable && (
+            <div className="restore-banner">
+              <span className="restore-banner__icon"><Icon name="rotate" size={22} /></span>
+              <div className="restore-banner__text">
+                <b className="title-small">Restore your last session?</b>
+                <span className="body-small">{restorable.fileName}</span>
+              </div>
+              <button className="btn btn--tonal" onClick={restoreSession}>Restore</button>
+              <button className="btn btn--text" onClick={dismissRestore}>Dismiss</button>
+            </div>
+          )}
           <div className="dropzone__card">
             <div className="dropzone__icon">
               <Icon name="picture_as_pdf" size={30} />
@@ -1098,23 +1761,16 @@ export function App() {
       {appBar}
 
       <div className="workspace">
-        <nav className="toolnav" aria-label="Tools">
-          {TOOLS.map((t) => (
-            <button
-              key={t.key}
-              className={`toolnav__btn${tool === t.key ? " toolnav__btn--on" : ""}`}
-              onClick={() => pickTool(t.key)}
-              aria-pressed={tool === t.key}
-              data-tip={`${t.label} · ${TOOL_SHORTCUT[t.key]}`}
-            >
-              <span className="toolnav__ind">
-                <Icon name={t.icon} size={21} filled={tool === t.key} />
-              </span>
-              <span className="toolnav__label label-medium">{t.label}</span>
-            </button>
-          ))}
-        </nav>
-
+        {navOpen && (
+          <>
+            {compact && <div className="pagenav__scrim" onClick={() => setNavOpen(false)} />}
+            <PageNav
+              bytes={pdf.bytes}
+              pageCount={pdf.pages.length}
+              onClose={compact ? () => setNavOpen(false) : undefined}
+            />
+          </>
+        )}
         <div className="viewer">
           <div
             className={`viewer__scroll${sheetOpen && compact ? " viewer__scroll--sheet" : ""}`}
@@ -1136,7 +1792,12 @@ export function App() {
                 redactions={redactions.filter((r) => r.pageIndex === page.pageIndex)}
                 annotations={annotations.filter((a) => a.pageIndex === page.pageIndex)}
                 stamps={stamps.filter((s) => s.pageIndex === page.pageIndex)}
+                links={links.filter((l) => l.pageIndex === page.pageIndex)}
+                formValues={formValues}
+                multiIds={multiIds}
                 placing={!!pendingStamp}
+                findMatches={matchesByPage.get(page.pageIndex)}
+                activeFindId={activeMatch?.id ?? null}
                 selection={selection}
                 autoFocusId={autoFocusId}
                 editingId={editingId}
@@ -1148,12 +1809,16 @@ export function App() {
                 onChangeTextBoxText={onChangeTextBoxText}
                 onChangeTextBox={onChangeTextBox}
                 onChangeRedaction={onChangeRedaction}
+                onChangeLink={onChangeLink}
                 onChangeNoteText={onChangeNoteText}
                 onMoveAnnotation={onMoveAnnotation}
                 onChangeStamp={onChangeStamp}
                 onDeleteStamp={onDeleteStamp}
                 onAddTextBox={onAddTextBox}
                 onAddRedaction={onAddRedaction}
+                onAddLink={onAddLink}
+                onChangeFormValue={onChangeFormValue}
+                onMarquee={onMarquee}
                 onAddAnnotation={onAddAnnotation}
                 onPlaceStamp={onPlaceStamp}
               />
@@ -1175,6 +1840,65 @@ export function App() {
               <Icon name="add" size={18} />
             </button>
           </div>
+          )}
+
+          {/* Unified tool dock — one home for every tool, identical on desktop
+              and mobile (replaces the split rail / bottom bar). */}
+          {!sheetOpen && (
+            <div className="tooldock" role="toolbar" aria-label="Tools">
+              {TOOLS.map((t, i) => (
+                <span key={t.key} style={{ display: "contents" }}>
+                  {i === 1 && <span className="tooldock__sep" />}
+                  {t.key === "sign" && <span className="tooldock__sep" />}
+                  <button
+                    className={`tooldock__btn${tool === t.key ? " tooldock__btn--on" : ""}`}
+                    onClick={() => pickTool(t.key)}
+                    aria-pressed={tool === t.key}
+                    aria-label={t.label}
+                    data-tip={`${t.label} · ${TOOL_SHORTCUT[t.key]}`}
+                  >
+                    <Icon name={t.icon} size={20} filled={tool === t.key} />
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+
+          {findOpen && (
+            <FindBar
+              query={findQuery}
+              count={matches.length}
+              active={matches.length ? findActive + 1 : 0}
+              onQuery={(q) => {
+                setFindQuery(q);
+                setFindActive(0);
+              }}
+              onNext={nextMatch}
+              onPrev={prevMatch}
+              onRedactAll={redactAllMatches}
+              onClose={closeFind}
+            />
+          )}
+
+          {multi.length >= 2 && (
+            <div className="multibar" role="toolbar" aria-label={`${multi.length} objects selected`}>
+              <span className="multibar__title label-large">{multi.length} selected</span>
+              <span className="multibar__sep" />
+              <button className="icon-btn icon-btn--sm" onClick={() => alignMulti("left")} aria-label="Align left" data-tip="Align left"><Icon name="align_left" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={() => alignMulti("center-h")} aria-label="Align centre" data-tip="Align horizontal centre"><Icon name="align_center_h" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={() => alignMulti("right")} aria-label="Align right" data-tip="Align right"><Icon name="align_right" size={18} /></button>
+              <span className="multibar__sep" />
+              <button className="icon-btn icon-btn--sm" onClick={() => alignMulti("top")} aria-label="Align top" data-tip="Align top"><Icon name="align_top" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={() => alignMulti("middle")} aria-label="Align middle" data-tip="Align vertical centre"><Icon name="align_center_v" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={() => alignMulti("bottom")} aria-label="Align bottom" data-tip="Align bottom"><Icon name="align_bottom" size={18} /></button>
+              <span className="multibar__sep" />
+              <button className="icon-btn icon-btn--sm" onClick={() => distributeMulti("h")} disabled={multi.length < 3} aria-label="Distribute horizontally" data-tip="Distribute horizontally"><Icon name="distribute_h" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={() => distributeMulti("v")} disabled={multi.length < 3} aria-label="Distribute vertically" data-tip="Distribute vertically"><Icon name="distribute_v" size={18} /></button>
+              <span className="multibar__sep" />
+              <button className="icon-btn icon-btn--sm" onClick={duplicateMulti} aria-label="Duplicate" data-tip="Duplicate"><Icon name="duplicate" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={deleteMulti} aria-label="Delete" data-tip="Delete"><Icon name="delete" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={clearMulti} aria-label="Clear selection" data-tip="Clear"><Icon name="close" size={18} /></button>
+            </div>
           )}
 
           {tool === "draw" && (
@@ -1201,13 +1925,34 @@ export function App() {
           )}
         </div>
 
-        {/* Stamps are edited directly on the canvas (no panel). Wide screens
-            get a persistent side panel so the layout doesn't shift. On phones,
-            a single tap shows the contextual SelectionBar (above) — the full
-            properties sheet opens only on demand (its Style action), so it
-            never auto-covers the selected object. */}
+        {/* Adaptive Inspector. Desktop: a persistent right column that
+            collapses to an edge tab; never empty (properties when something is
+            selected, document/finishing actions otherwise). Mobile: keeps the
+            on-demand bottom sheet driven by the contextual SelectionBar. */}
         {isWide ? (
-          <aside className="panel">{propertiesPanel}</aside>
+          inspectorOpen ? (
+            <aside className="inspector">
+              <button
+                className="inspector__collapse icon-btn"
+                onClick={() => setInspectorOpen(false)}
+                aria-label="Collapse panel"
+                data-tip="Collapse"
+              >
+                <Icon name="chevron_right" size={18} />
+              </button>
+              {panelSelection ? propertiesPanel : documentPanel}
+            </aside>
+          ) : (
+            <button
+              className="inspector__tab"
+              onClick={() => setInspectorOpen(true)}
+              aria-label="Open panel"
+              data-tip="Open panel"
+            >
+              <Icon name="sliders" size={18} />
+              <span className="inspector__tablabel">{panelSelection ? "Edit" : "Document"}</span>
+            </button>
+          )
         ) : (
           sheetOpen &&
           panelSelection && (
@@ -1221,21 +1966,6 @@ export function App() {
           )
         )}
       </div>
-
-      {/* Mobile primary action (hidden while the properties sheet is open) */}
-      {!sheetOpen && (
-        <button
-          className="fab"
-          onClick={download}
-          disabled={status === "exporting"}
-          aria-label="Download PDF"
-        >
-          <Icon name={status === "exporting" ? "hourglass_top" : "download"} size={20} />
-          <span className="fab__label label-large">
-            {status === "exporting" ? "Exporting…" : "Download"}
-          </span>
-        </button>
-      )}
 
       {/* Persistent, visually-hidden live regions guarantee the status is
           announced by assistive tech even though the visible snackbar mounts
@@ -1301,6 +2031,47 @@ export function App() {
             onClose={() => setFinishTab(null)}
           />
         </Suspense>
+      )}
+
+      {compressOpen && (
+        <Suspense fallback={null}>
+          <CompressDialog onApply={applyCompress} onClose={() => setCompressOpen(false)} />
+        </Suspense>
+      )}
+
+      {cmdOpen && (
+        <CommandPalette
+          onClose={() => setCmdOpen(false)}
+          commands={
+            [
+              { id: "select", label: "Select tool", hint: "V", icon: "arrow_selector_tool", run: () => pickTool("select") },
+              { id: "text", label: "Add text", hint: "T", icon: "text_fields", run: () => pickTool("text") },
+              { id: "draw", label: "Draw", hint: "D", icon: "draw", run: () => pickTool("draw") },
+              { id: "sign", label: "Sign", hint: "S", icon: "signature", run: () => pickTool("sign") },
+              { id: "redact", label: "Redact", hint: "R", icon: "select", run: () => pickTool("redact") },
+              { id: "whiteout", label: "Whiteout", hint: "W", icon: "eraser", run: () => pickTool("whiteout") },
+              { id: "link", label: "Add link", hint: "L", icon: "link", run: () => pickTool("link") },
+              { id: "duplicate", label: "Duplicate selection", hint: "Ctrl+D", icon: "duplicate", disabled: !selection || selection.kind === "fragment", run: duplicateSelection },
+              { id: "find", label: "Find in document", hint: "Ctrl+F", icon: "search", run: openFind },
+              { id: "pages", label: "Toggle page thumbnails", icon: "panel", run: () => setNavOpen((v) => !v) },
+              { id: "undo", label: "Undo", hint: "Ctrl+Z", icon: "undo", disabled: !doc.canUndo, run: undo },
+              { id: "redo", label: "Redo", hint: "Ctrl+Shift+Z", icon: "redo", disabled: !doc.canRedo, run: redo },
+              { id: "organize", label: "Organize pages", icon: "layers", keywords: "reorder rotate merge split", run: () => { setSelection(null); setOrganizeOpen(true); } },
+              { id: "image", label: "Add image", icon: "image", run: () => imageInputRef.current?.click() },
+              { id: "numbers", label: "Add page numbers", icon: "tag", run: () => { setSelection(null); setFinishTab("numbers"); } },
+              { id: "watermark", label: "Add watermark", icon: "watermark", run: () => { setSelection(null); setFinishTab("watermark"); } },
+              { id: "eximg", label: "Export as images", icon: "image", run: exportImages },
+              { id: "compress", label: "Compress / optimise PDF", icon: "compress", keywords: "shrink reduce size", run: () => setCompressOpen(true) },
+              { id: "ocr", label: "OCR — recognise text", icon: "scan_text", keywords: "scan searchable image", run: runOcr },
+              { id: "copytext", label: "Copy all text", icon: "content_copy", run: copyAllText },
+              { id: "exporttext", label: "Export text (.txt)", icon: "scan_text", run: exportTextFile },
+              { id: "dim", label: dimPages ? "Undim pages" : "Dim pages", icon: "contrast", run: () => setDimPages((v) => !v) },
+              { id: "theme", label: `Theme: ${themeLabel}`, icon: themeIcon, keywords: "dark light system", run: theme.cycle },
+              { id: "download", label: "Download PDF", hint: "", icon: "download", run: download },
+              { id: "open", label: "Open another PDF", icon: "note_add", run: reset },
+            ] as Command[]
+          }
+        />
       )}
 
       {organizeOpen && pdf && (

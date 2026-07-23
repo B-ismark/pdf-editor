@@ -2,7 +2,7 @@ import * as pdfjsLib from "pdfjs-dist";
 // Vite resolves this to a hashed URL for the worker bundle.
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { TextItem, TextStyle } from "pdfjs-dist/types/src/display/api";
-import type { LoadedPdf, PageData, TextFragment } from "./types";
+import type { FormField, LoadedPdf, PageData, TextFragment } from "./types";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -44,10 +44,37 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
       });
     });
 
+    // AcroForm widgets → editable form fields (text + checkbox only).
+    const fields: FormField[] = [];
+    try {
+      const annots = await page.getAnnotations();
+      annots.forEach((a: Record<string, unknown>, k: number) => {
+        if (a.subtype !== "Widget") return;
+        const ft = a.fieldType as string | undefined;
+        const rect = a.rect as number[] | undefined;
+        if (!rect || rect.length < 4) return;
+        const x = Math.min(rect[0], rect[2]);
+        const y = Math.min(rect[1], rect[3]);
+        const width = Math.abs(rect[2] - rect[0]);
+        const height = Math.abs(rect[3] - rect[1]);
+        const name = (a.fieldName as string) || `field-${p}-${k}`;
+        const base = { id: `${p}:field:${k}`, name, pageIndex: p, rect: { x, y, width, height }, readOnly: !!a.readOnly };
+        if (ft === "Tx") {
+          fields.push({ ...base, type: "text", defaultValue: String(a.fieldValue ?? ""), multiline: !!a.multiLine });
+        } else if (ft === "Btn" && a.checkBox) {
+          const on = a.fieldValue != null && a.fieldValue !== "Off" && a.fieldValue !== false;
+          fields.push({ ...base, type: "checkbox", defaultValue: on });
+        }
+      });
+    } catch {
+      /* Annotation parsing is best-effort; ignore malformed forms. */
+    }
+
     pages.push({
       pageIndex: p,
       viewBox: { width: viewport.width, height: viewport.height },
       fragments,
+      fields,
     });
   }
 

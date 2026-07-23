@@ -86,6 +86,17 @@ type-checks). Always `npm run build` before committing.
 - **Finishing ops rebuild the document**, which bakes in (and resets) current
   edits — they call `bakeCurrent()` then reopen the result. Expected.
 
+## OCR (on-device, self-hosted)
+
+OCR uses **tesseract.js**, lazy-loaded in `pdf/ocr.ts`. To honour the no-CDN /
+privacy rule, all OCR assets are served from the app's own origin: run
+`npm run setup-ocr` to copy the worker + wasm core into `public/tesseract/` and
+download the language model into `public/tessdata/` (both git-ignored; the
+deploy workflow runs this step). If the assets are absent, OCR degrades
+gracefully with a "run `npm run setup-ocr`" message. Recognised words are
+appended to a page's `fragments` as a transparent, selectable/searchable text
+layer (so Find and search-and-redact work on scans).
+
 ## Testing (Playwright)
 
 No browser download in the sandbox — use the **pre-installed Chromium**:

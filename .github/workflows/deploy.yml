@@ -28,6 +28,11 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      # Bundle on-device OCR assets from the app's own origin (no runtime CDN).
+      # Non-fatal: if the language-model host is unreachable, the app still
+      # builds and OCR simply reports it isn't set up.
+      - run: npm run setup-ocr
+        continue-on-error: true
       - run: npm run build
       - uses: actions/configure-pages@v5
         # Enable Pages (Actions source) on first run so no manual Settings

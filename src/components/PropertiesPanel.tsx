@@ -6,9 +6,14 @@ interface Props {
   selection: Selection;
   style: TextStyle | null;
   redactionColor: string | null;
+  /** True when the selected redaction is a whiteout cover (not a real redaction). */
+  redactionCover?: boolean;
   annotation: Annotation | null;
+  /** Current URL of the selected link (when selection.kind === "link"). */
+  linkUrl?: string | null;
   onChangeStyle: (patch: Partial<TextStyle>) => void;
   onChangeRedactionColor: (color: string) => void;
+  onChangeLinkUrl?: (url: string) => void;
   onChangeAnnotation: (patch: { color?: string; strokeWidth?: number }) => void;
   onDelete: () => void;
   /** Reset the selected text's style back to the default. */
@@ -37,9 +42,12 @@ export function PropertiesPanel({
   selection,
   style,
   redactionColor,
+  redactionCover,
   annotation,
+  linkUrl,
   onChangeStyle,
   onChangeRedactionColor,
+  onChangeLinkUrl,
   onChangeAnnotation,
   onDelete,
   onReset,
@@ -47,8 +55,12 @@ export function PropertiesPanel({
 }: Props) {
   const title =
     selection?.kind === "redaction"
-      ? "Redaction"
-      : selection?.kind === "textbox"
+      ? redactionCover
+        ? "Whiteout"
+        : "Redaction"
+      : selection?.kind === "link"
+        ? "Link"
+        : selection?.kind === "textbox"
         ? "Text box"
         : selection?.kind === "fragment"
           ? "Text"
@@ -80,6 +92,27 @@ export function PropertiesPanel({
             <span className="field__label label-medium">Fill colour</span>
             <ColorField value={redactionColor ?? "#000000"} onChange={onChangeRedactionColor} />
           </div>
+          <button className="btn btn--danger" onClick={onDelete}>
+            <Icon name="delete" size={16} /> Delete
+          </button>
+        </div>
+      )}
+
+      {selection?.kind === "link" && (
+        <div className="props__section">
+          <div className="field">
+            <span className="field__label label-medium">Link URL</span>
+            <input
+              className="numinput"
+              style={{ width: "100%" }}
+              type="url"
+              inputMode="url"
+              placeholder="https://example.com"
+              value={linkUrl ?? ""}
+              onChange={(e) => onChangeLinkUrl?.(e.target.value)}
+            />
+          </div>
+          <p className="props__empty body-small">Draw a box over anything to make it clickable in the exported PDF.</p>
           <button className="btn btn--danger" onClick={onDelete}>
             <Icon name="delete" size={16} /> Delete
           </button>

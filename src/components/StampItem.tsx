@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { Icon } from "./Icon";
 import { startElementGesture } from "../hooks/useDrag";
+import { clearGuides, setGuides, snapBox } from "../hooks/useSnap";
 import { SelectionFrame, type Geom } from "./SelectionFrame";
 import type { Stamp } from "../pdf/types";
 
@@ -8,6 +9,7 @@ interface Props {
   stamp: Stamp;
   scale: number;
   pageHeight: number;
+  pageWidth: number;
   selected: boolean;
   interactive: boolean;
   onSelect: (id: string) => void;
@@ -19,7 +21,7 @@ const MIN_W = 24;
 
 /** A placed image (signature / picture): draggable, resizable from any edge or
  * corner (corners keep aspect), rotatable, selectable. */
-export function StampItem({ stamp, scale, pageHeight, selected, interactive, onSelect, onChange, onDelete }: Props) {
+export function StampItem({ stamp, scale, pageHeight, pageWidth, selected, interactive, onSelect, onChange, onDelete }: Props) {
   const gesture = useRef(0);
   const boxRef = useRef<HTMLDivElement>(null);
   // Guards the delete badge against the browser's synthesized "ghost click":
@@ -42,7 +44,12 @@ export function StampItem({ stamp, scale, pageHeight, selected, interactive, onS
     startElementGesture(e, {
       selected,
       onSelect: () => onSelect(stamp.id),
-      onMove: (dx, dy) => onChange(stamp.id, { x: s.x + dx / scale, y: s.y - dy / scale }, key),
+      onMove: (dx, dy) => {
+        const sn = snapBox(s.x + dx / scale, s.y - dy / scale, stamp.width, stamp.height, pageWidth, H, 6 / scale);
+        onChange(stamp.id, { x: sn.x, y: sn.y }, key);
+        setGuides(sn.gx, sn.gy);
+      },
+      onEnd: clearGuides,
     });
   };
 

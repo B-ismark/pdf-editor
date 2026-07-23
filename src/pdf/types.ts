@@ -30,12 +30,31 @@ export interface TextFragment {
   fontFamily: string;
 }
 
+/** An interactive AcroForm field detected on a page (text or checkbox). */
+export interface FormField {
+  /** Unique per widget: `${pageIndex}:field:${i}`. */
+  id: string;
+  /** AcroForm field name (the export key). */
+  name: string;
+  pageIndex: number;
+  type: "text" | "checkbox";
+  /** Widget rect in PDF units (bottom-left origin). */
+  rect: { x: number; y: number; width: number; height: number };
+  /** Initial value from the source PDF. */
+  defaultValue: string | boolean;
+  readOnly?: boolean;
+  /** Text fields only: single-line comb/limit hints. */
+  multiline?: boolean;
+}
+
 /** Everything needed to render and edit one page. */
 export interface PageData {
   pageIndex: number;
   /** Unscaled page dimensions in PDF units (== points). */
   viewBox: { width: number; height: number };
   fragments: TextFragment[];
+  /** Interactive form fields on this page (empty if none). */
+  fields: FormField[];
 }
 
 /** The parsed document plus its original bytes (needed to re-export). */
@@ -67,7 +86,12 @@ export interface TextBox {
 }
 
 /** A redaction region. On export the whole page is rasterised and this area
- * is painted solid, so the underlying content is genuinely removed. */
+ * is painted solid, so the underlying content is genuinely removed.
+ *
+ * When `cover` is true it's a *whiteout* instead: a plain filled rectangle
+ * drawn on top as vector content, WITHOUT rasterising the page. That keeps the
+ * rest of the page crisp/selectable, but note the covered content is only
+ * hidden, not removed — use a real redaction (cover falsey) to remove data. */
 export interface Redaction {
   id: string;
   pageIndex: number;
@@ -78,6 +102,8 @@ export interface Redaction {
   height: number;
   /** Fill colour, hex `#rrggbb`. */
   color: string;
+  /** True = whiteout cover (vector, non-destructive); falsey = true redaction. */
+  cover?: boolean;
 }
 
 /** Freehand / vector annotation sub-tools (under the Draw tool). */
@@ -125,6 +151,18 @@ export interface Stamp {
   dataUrl: string;
 }
 
+/** A clickable hyperlink region. Rect is bottom-left in PDF units. */
+export interface LinkAnnot {
+  id: string;
+  pageIndex: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  /** Target URL (http/https/mailto). */
+  url: string;
+}
+
 /** The full editable document state tracked by the undo/redo history. */
 export interface DocState {
   edits: Edits;
@@ -132,10 +170,14 @@ export interface DocState {
   redactions: Redaction[];
   annotations: Annotation[];
   stamps: Stamp[];
+  /** Optional — absent in older persisted sessions. */
+  links?: LinkAnnot[];
+  /** Filled AcroForm values, keyed by field name. */
+  formValues?: Record<string, string | boolean>;
 }
 
 /** Active editing tool. */
-export type Tool = "select" | "text" | "redact" | "draw";
+export type Tool = "select" | "text" | "redact" | "whiteout" | "draw" | "link";
 
 /** What the properties panel is currently targeting. */
 export type Selection =
@@ -144,4 +186,5 @@ export type Selection =
   | { kind: "redaction"; id: string }
   | { kind: "annotation"; id: string }
   | { kind: "stamp"; id: string }
+  | { kind: "link"; id: string }
   | null;
