@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 import { CSS_FONT } from "../pdf/style";
+import { tapSelect } from "../hooks/useDrag";
 import type { TextFragment, TextStyle } from "../pdf/types";
 
 interface Props {
@@ -102,7 +103,7 @@ function EditableFragmentImpl({
           lineHeight: 1,
           pointerEvents: interactive ? "auto" : "none",
         }}
-        onPointerDown={() => interactive && onSelect(fragment.id)}
+        onPointerDown={(e) => interactive && tapSelect(e, () => onSelect(fragment.id))}
         onInput={(ev) => onChangeText(fragment.id, ev.currentTarget.textContent ?? "")}
         onKeyDown={(ev) => {
           if (ev.key === "Enter") ev.preventDefault();

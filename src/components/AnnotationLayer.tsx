@@ -1,4 +1,4 @@
-import { startPointerDrag } from "../hooks/useDrag";
+import { startElementGesture } from "../hooks/useDrag";
 import type { Annotation } from "../pdf/types";
 
 interface Props {
@@ -62,10 +62,11 @@ export function AnnotationLayer({
   // annotation snapshotted at drag start (screen-down = PDF-y-down = negative).
   let gesture = 0;
   const beginDrag = (a: Annotation, e: React.PointerEvent) => {
-    onSelect(a.id);
     const key = `move-an-${a.id}-${++gesture}`;
     const start = a;
-    startPointerDrag(e, {
+    startElementGesture(e, {
+      selected: selectedId === a.id,
+      onSelect: () => onSelect(a.id),
       onMove: (dx, dy) => onMove(translateAnnotation(start, dx / scale, -dy / scale), key),
     });
   };

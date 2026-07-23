@@ -397,6 +397,14 @@ export function App() {
     [doc],
   );
 
+  const onDeleteStamp = useCallback(
+    (id: string) => {
+      doc.set((d) => ({ ...d, stamps: d.stamps.filter((s) => s.id !== id) }));
+      setSelection((sel) => (sel?.kind === "stamp" && sel.id === id ? null : sel));
+    },
+    [doc],
+  );
+
   const startImagePlacement = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = () => {
@@ -834,6 +842,7 @@ export function App() {
                 onChangeNoteText={onChangeNoteText}
                 onMoveAnnotation={onMoveAnnotation}
                 onChangeStamp={onChangeStamp}
+                onDeleteStamp={onDeleteStamp}
                 onAddTextBox={onAddTextBox}
                 onAddRedaction={onAddRedaction}
                 onAddAnnotation={onAddAnnotation}
@@ -866,7 +875,9 @@ export function App() {
           )}
         </div>
 
-        {selection && (
+        {/* Stamps (signatures/images) are manipulated directly on the canvas —
+            no properties sheet, so it never covers the element being dragged. */}
+        {selection && selection.kind !== "stamp" && (
           <>
             {/* Mobile-only scrim: tap outside the sheet to dismiss. */}
             <div className="scrim" onPointerDown={() => setSelection(null)} />

@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { startPointerDrag } from "../hooks/useDrag";
+import { startElementGesture, startPointerDrag } from "../hooks/useDrag";
 import type { Redaction } from "../pdf/types";
 
 interface Props {
@@ -64,16 +64,13 @@ export function RedactionItem({
 
   const beginMove = (e: React.PointerEvent) => {
     if (!interactive) return;
-    onSelect(redaction.id);
     const key = `move-rd-${redaction.id}-${++gesture.current}`;
     const s = { left, top };
-    startPointerDrag(e, {
+    startElementGesture(e, {
+      selected,
+      onSelect: () => onSelect(redaction.id),
       onMove: (dx, dy) =>
-        onChange(
-          redaction.id,
-          cssToPdf(s.left + dx, s.top + dy, width, height),
-          key,
-        ),
+        onChange(redaction.id, cssToPdf(s.left + dx, s.top + dy, width, height), key),
     });
   };
 

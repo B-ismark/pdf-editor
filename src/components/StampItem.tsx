@@ -1,5 +1,6 @@
 import { useRef } from "react";
-import { startPointerDrag } from "../hooks/useDrag";
+import { Icon } from "./Icon";
+import { startElementGesture, startPointerDrag } from "../hooks/useDrag";
 import type { Stamp } from "../pdf/types";
 
 interface Props {
@@ -10,13 +11,14 @@ interface Props {
   interactive: boolean;
   onSelect: (id: string) => void;
   onChange: (id: string, patch: Partial<Stamp>, key: string) => void;
+  onDelete: (id: string) => void;
 }
 
 const MIN_W = 24;
 
 /** A placed image (signature / picture): draggable, corner-resizable (aspect
  * preserved), selectable. */
-export function StampItem({ stamp, scale, pageHeight, selected, interactive, onSelect, onChange }: Props) {
+export function StampItem({ stamp, scale, pageHeight, selected, interactive, onSelect, onChange, onDelete }: Props) {
   const gesture = useRef(0);
   const H = pageHeight;
   const left = stamp.x * scale;
@@ -25,10 +27,11 @@ export function StampItem({ stamp, scale, pageHeight, selected, interactive, onS
   const h = stamp.height * scale;
 
   const beginMove = (e: React.PointerEvent) => {
-    onSelect(stamp.id);
     const key = `move-st-${stamp.id}-${++gesture.current}`;
     const s = { x: stamp.x, y: stamp.y };
-    startPointerDrag(e, {
+    startElementGesture(e, {
+      selected,
+      onSelect: () => onSelect(stamp.id),
       onMove: (dx, dy) => onChange(stamp.id, { x: s.x + dx / scale, y: s.y - dy / scale }, key),
     });
   };
@@ -54,7 +57,25 @@ export function StampItem({ stamp, scale, pageHeight, selected, interactive, onS
     >
       <img src={stamp.dataUrl} alt="" draggable={false} />
       {selected && interactive && (
-        <div className="handle stamp__resize" onPointerDown={beginResize} />
+        <>
+          <button
+            type="button"
+            className="stamp__del"
+            aria-label="Delete"
+            data-tip="Delete"
+            onPointerDown={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+            }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(stamp.id);
+            }}
+          >
+            <Icon name="close" size={14} />
+          </button>
+          <div className="handle stamp__resize" onPointerDown={beginResize} />
+        </>
       )}
     </div>
   );

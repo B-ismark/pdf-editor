@@ -1,4 +1,5 @@
 import { memo, useEffect, useRef } from "react";
+import { tapSelect } from "../hooks/useDrag";
 
 interface Props {
   id: string;
@@ -63,7 +64,7 @@ function NoteItemImpl({
         background: color,
         pointerEvents: interactive ? "auto" : "none",
       }}
-      onPointerDown={() => interactive && onSelect(id)}
+      onPointerDown={(e) => interactive && tapSelect(e, () => onSelect(id))}
       onInput={(e) => onChangeText(id, e.currentTarget.textContent ?? "")}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.preventDefault();

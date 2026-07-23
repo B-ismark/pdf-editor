@@ -38,3 +38,56 @@ export function startPointerDrag(
   window.addEventListener("pointerup", up);
   window.addEventListener("pointercancel", up);
 }
+
+const TAP_SLOP = 10; // px of movement still counted as a tap, not a drag
+
+/**
+ * Touch-friendly tap detection. Fires `onTap` only if the pointer barely
+ * moved, and never stops propagation or sets the drag lock — so a pan gesture
+ * that happens to start on an element passes through to the viewport instead
+ * of selecting it. On mouse, selection is immediate (a click is precise).
+ */
+export function tapSelect(e: React.PointerEvent, onTap: () => void): void {
+  if (e.pointerType !== "touch") {
+    onTap();
+    return;
+  }
+  const sx = e.clientX;
+  const sy = e.clientY;
+  const t0 = performance.now();
+  let moved = false;
+  const move = (ev: PointerEvent) => {
+    if (Math.hypot(ev.clientX - sx, ev.clientY - sy) > TAP_SLOP) moved = true;
+  };
+  const up = () => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", up);
+    window.removeEventListener("pointercancel", up);
+    if (!moved && performance.now() - t0 < 700) onTap();
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", up);
+  window.addEventListener("pointercancel", up);
+}
+
+interface ElementGesture {
+  selected: boolean;
+  onSelect: () => void;
+  onMove: (dx: number, dy: number) => void;
+  onEnd?: () => void;
+}
+
+/**
+ * Select-first element gesture. On touch, an *unselected* element ignores the
+ * drag (letting the page pan under the finger) and only selects on a clean
+ * tap; once selected it can be dragged. On mouse, press-drag always moves it.
+ * This stops a phone user's every stray touch from grabbing/moving elements.
+ */
+export function startElementGesture(e: React.PointerEvent, o: ElementGesture): void {
+  if (e.pointerType === "touch" && !o.selected) {
+    tapSelect(e, o.onSelect);
+    return;
+  }
+  o.onSelect();
+  startPointerDrag(e, { onMove: o.onMove, onEnd: o.onEnd });
+}

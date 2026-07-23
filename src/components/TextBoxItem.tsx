@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 import { CSS_FONT } from "../pdf/style";
-import { startPointerDrag } from "../hooks/useDrag";
+import { startPointerDrag, tapSelect } from "../hooks/useDrag";
 import type { TextBox } from "../pdf/types";
 
 interface Props {
@@ -102,7 +102,7 @@ function TextBoxItemImpl({
           lineHeight: 1,
           pointerEvents: interactive ? "auto" : "none",
         }}
-        onPointerDown={() => interactive && onSelect(box.id)}
+        onPointerDown={(e) => interactive && tapSelect(e, () => onSelect(box.id))}
         onInput={(ev) => onChangeText(box.id, ev.currentTarget.textContent ?? "")}
         onKeyDown={(ev) => {
           if (ev.key === "Enter") ev.preventDefault();
