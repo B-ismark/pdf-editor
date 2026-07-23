@@ -5,7 +5,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { dragState } from "./useDrag";
+import { dragState, tapSuppress } from "./useDrag";
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 6;
@@ -232,6 +232,9 @@ export function useViewport() {
           const prev = lastTap.current;
           if (prev && performance.now() - prev.t < 300 && Math.hypot(x - prev.x, y - prev.y) < 30) {
             lastTap.current = null;
+            // A text element claimed this double-tap to enter edit mode — don't
+            // also zoom the page.
+            if (performance.now() < tapSuppress.zoomUntil) return;
             zoomBy(zoom > 1.2 ? 1 / zoom : 2, x, y);
           } else {
             lastTap.current = { t: performance.now(), x, y };

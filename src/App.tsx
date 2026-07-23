@@ -529,6 +529,17 @@ export function App() {
     setRevision((r) => r + 1);
   }, [selection]);
 
+  /** Select a text element and immediately enter edit mode (double-tap on
+   * touch). Unlike `editSelection`, this takes the target directly so it
+   * doesn't depend on the selection state settling first. */
+  const enterEdit = useCallback((sel: NonNullable<Selection>) => {
+    setSelection(sel);
+    setSheetOpen(false);
+    setEditingId(sel.id);
+    setAutoFocusId(sel.id);
+    setRevision((r) => r + 1);
+  }, []);
+
   // Deselecting also exits edit mode and closes the on-demand sheet.
   useEffect(() => {
     if (!selection) {
@@ -536,6 +547,33 @@ export function App() {
       setSheetOpen(false);
     }
   }, [selection]);
+
+  // When the properties sheet opens on a phone, the fixed bottom sheet can
+  // cover the selected object — so you can't see your style/colour edits land.
+  // Scroll the selection up into the strip that stays visible above the sheet.
+  // Only intervene when it's actually clipped or covered, to avoid a needless
+  // jump; keyed on the id so live restyle re-renders don't re-scroll.
+  const sheetSelId = sheetOpen && compact ? panelSelection?.id ?? null : null;
+  useEffect(() => {
+    if (!sheetSelId) return;
+    const raf = requestAnimationFrame(() => {
+      const scroller = document.querySelector<HTMLElement>(".viewer__scroll");
+      const el = document.querySelector<HTMLElement>(`[data-el-id="${CSS.escape(sheetSelId)}"]`);
+      if (!scroller || !el) return;
+      const sheet = document.querySelector<HTMLElement>(".panel");
+      const scRect = scroller.getBoundingClientRect();
+      // Sheet is bottom-anchored: derive its top from its height so the number
+      // is right even mid slide-up (its transformed rect would read too low).
+      const sheetTop = sheet ? window.innerHeight - sheet.offsetHeight : scRect.bottom;
+      const elRect = el.getBoundingClientRect();
+      const visTop = scRect.top + 8;
+      const visBottom = sheetTop - 12;
+      if (elRect.top >= visTop && elRect.bottom <= visBottom) return; // already clear
+      const target = scRect.top + (sheetTop - scRect.top) * 0.32;
+      scroller.scrollTop += elRect.top - target;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [sheetSelId]);
 
   const selectedAnnotation =
     selection?.kind === "annotation"
@@ -1079,7 +1117,7 @@ export function App() {
 
         <div className="viewer">
           <div
-            className="viewer__scroll"
+            className={`viewer__scroll${sheetOpen && compact ? " viewer__scroll--sheet" : ""}`}
             ref={vp.viewportRef}
             {...vp.handlers}
           >
@@ -1105,6 +1143,7 @@ export function App() {
                 compact={compact}
                 revision={revision}
                 onSelect={onSelect}
+                onEditText={enterEdit}
                 onChangeFragmentText={onChangeFragmentText}
                 onChangeTextBoxText={onChangeTextBoxText}
                 onChangeTextBox={onChangeTextBox}

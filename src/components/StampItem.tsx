@@ -22,6 +22,13 @@ const MIN_W = 24;
 export function StampItem({ stamp, scale, pageHeight, selected, interactive, onSelect, onChange, onDelete }: Props) {
   const gesture = useRef(0);
   const boxRef = useRef<HTMLDivElement>(null);
+  // Guards the delete badge against the browser's synthesized "ghost click":
+  // placing/selecting a stamp is a tap on the page, and the post-tap click is
+  // dispatched to whatever is now under that point — often this freshly-shown
+  // badge, which would instantly delete the just-placed signature. A real tap
+  // on the badge fires pointerdown *on the badge* first; the ghost click does
+  // not. So we only honour a click that a badge pointerdown armed.
+  const delArmed = useRef(false);
   const H = pageHeight;
   const left = stamp.x * scale;
   const top = (H - (stamp.y + stamp.height)) * scale;
@@ -83,9 +90,16 @@ export function StampItem({ stamp, scale, pageHeight, selected, interactive, onS
             onPointerDown={(e) => {
               e.preventDefault();
               e.stopPropagation();
+              delArmed.current = true;
+            }}
+            onPointerCancel={() => {
+              delArmed.current = false;
             }}
             onClick={(e) => {
               e.stopPropagation();
+              // Ignore a ghost click that no on-badge pointerdown armed.
+              if (!delArmed.current) return;
+              delArmed.current = false;
               onDelete(stamp.id);
             }}
           >

@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef } from "react";
-import { tapSelect } from "../hooks/useDrag";
+import { elementTap } from "../hooks/useDrag";
 
 interface Props {
   id: string;
@@ -15,6 +15,8 @@ interface Props {
   autoFocus: boolean;
   revision: number;
   onSelect: (id: string) => void;
+  /** Double-tap (touch) to enter edit mode on mobile. */
+  onEdit?: (id: string) => void;
   onChangeText: (id: string, text: string) => void;
 }
 
@@ -50,6 +52,7 @@ function NoteItemImpl({
   autoFocus,
   revision,
   onSelect,
+  onEdit,
   onChangeText,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
@@ -74,6 +77,7 @@ function NoteItemImpl({
     <div
       ref={ref}
       className={`note${selected ? " note--sel" : ""}`}
+      data-el-id={id}
       contentEditable={interactive && editing}
       suppressContentEditableWarning
       spellCheck={false}
@@ -88,7 +92,13 @@ function NoteItemImpl({
         color: readableText(color),
         pointerEvents: interactive ? "auto" : "none",
       }}
-      onPointerDown={(e) => interactive && tapSelect(e, () => onSelect(id))}
+      onPointerDown={(e) =>
+        interactive &&
+        elementTap(e, {
+          onTap: () => onSelect(id),
+          onDoubleTap: onEdit ? () => onEdit(id) : undefined,
+        })
+      }
       onInput={(e) => onChangeText(id, e.currentTarget.textContent ?? "")}
       onKeyDown={(e) => {
         if (e.key === "Enter") e.preventDefault();

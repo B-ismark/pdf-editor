@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 import { CSS_FONT } from "../pdf/style";
-import { startPointerDrag, tapSelect } from "../hooks/useDrag";
+import { elementTap, startPointerDrag } from "../hooks/useDrag";
 import type { TextBox } from "../pdf/types";
 
 interface Props {
@@ -15,6 +15,8 @@ interface Props {
   /** Bumps on undo/redo so the editable text is re-seeded from state. */
   revision: number;
   onSelect: (id: string) => void;
+  /** Double-tap (touch) to enter edit mode on mobile. */
+  onEdit?: (id: string) => void;
   onChangeText: (id: string, text: string) => void;
   onChange: (id: string, patch: Partial<TextBox>, key: string) => void;
 }
@@ -33,6 +35,7 @@ function TextBoxItemImpl({
   autoFocus,
   revision,
   onSelect,
+  onEdit,
   onChangeText,
   onChange,
 }: Props) {
@@ -88,6 +91,7 @@ function TextBoxItemImpl({
   return (
     <div
       className={`tb-wrap${selected ? " tb-wrap--selected" : ""}`}
+      data-el-id={box.id}
       style={{ left: `${left}px`, top: `${top}px` }}
     >
       <div
@@ -109,7 +113,13 @@ function TextBoxItemImpl({
           lineHeight: 1,
           pointerEvents: interactive ? "auto" : "none",
         }}
-        onPointerDown={(e) => interactive && tapSelect(e, () => onSelect(box.id))}
+        onPointerDown={(e) =>
+          interactive &&
+          elementTap(e, {
+            onTap: () => onSelect(box.id),
+            onDoubleTap: onEdit ? () => onEdit(box.id) : undefined,
+          })
+        }
         onInput={(ev) => onChangeText(box.id, ev.currentTarget.textContent ?? "")}
         onKeyDown={(ev) => {
           if (ev.key === "Enter") ev.preventDefault();

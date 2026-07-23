@@ -219,6 +219,13 @@ body {
   scrollbar-gutter: stable;
   overscroll-behavior: contain;
 }
+/* While the mobile properties sheet is open, reserve scroll room beneath the
+   document so the selected object can be scrolled up into the strip left
+   visible above the sheet (otherwise a page that fully fits can't scroll at
+   all, and the sheet would just cover it). See the scroll-into-view effect. */
+.viewer__scroll--sheet {
+  padding-bottom: 70vh;
+}
 .doc {
   display: flex;
   flex-direction: column;

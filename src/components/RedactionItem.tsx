@@ -92,6 +92,7 @@ export function RedactionItem({
   return (
     <div
       className={`redaction${selected ? " redaction--selected" : ""}`}
+      data-el-id={redaction.id}
       style={{
         left: `${left}px`,
         top: `${top}px`,

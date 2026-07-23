@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 import { CSS_FONT } from "../pdf/style";
-import { tapSelect } from "../hooks/useDrag";
+import { elementTap } from "../hooks/useDrag";
 import type { TextFragment, TextStyle } from "../pdf/types";
 
 interface Props {
@@ -24,6 +24,8 @@ interface Props {
   /** Bumps on undo/redo so the editable text is re-seeded from state. */
   revision: number;
   onSelect: (id: string) => void;
+  /** Double-tap (touch) to enter edit mode on mobile. */
+  onEdit?: (id: string) => void;
   onChangeText: (id: string, text: string) => void;
 }
 
@@ -45,6 +47,7 @@ function EditableFragmentImpl({
   autoFocus,
   revision,
   onSelect,
+  onEdit,
   onChangeText,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
@@ -113,6 +116,7 @@ function EditableFragmentImpl({
         suppressContentEditableWarning
         spellCheck={false}
         data-id={fragment.id}
+        data-el-id={fragment.id}
         title={fragment.original}
         role={interactive ? "textbox" : undefined}
         aria-multiline="false"
@@ -129,7 +133,13 @@ function EditableFragmentImpl({
           lineHeight: 1,
           pointerEvents: interactive ? "auto" : "none",
         }}
-        onPointerDown={(e) => interactive && tapSelect(e, () => onSelect(fragment.id))}
+        onPointerDown={(e) =>
+          interactive &&
+          elementTap(e, {
+            onTap: () => onSelect(fragment.id),
+            onDoubleTap: onEdit ? () => onEdit(fragment.id) : undefined,
+          })
+        }
         onInput={(ev) => onChangeText(fragment.id, ev.currentTarget.textContent ?? "")}
         onKeyDown={(ev) => {
           if (ev.key === "Enter") ev.preventDefault();
