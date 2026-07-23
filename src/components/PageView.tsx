@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { renderPage } from "../pdf/loader";
-import { isFragmentModified } from "../pdf/exporter";
-import { resolveFragmentStyle } from "../pdf/style";
+import { isFragmentModified, resolveFragmentStyle } from "../pdf/style";
 import type {
   Annotation,
   AnnotationTool,

@@ -4,6 +4,7 @@ import {
   DEFAULT_STYLE,
   cssFont,
   hexToRgb,
+  isFragmentModified,
   resolveFragmentStyle,
   standardFontKey,
 } from "./style";
@@ -14,7 +15,6 @@ import type {
   Redaction,
   Stamp,
   TextBox,
-  TextFragment,
   TextStyle,
 } from "./types";
 
@@ -159,15 +159,6 @@ function drawRasterAnnots(
       ctx.fillText(a.text, X(a.x) + pad, Y(a.y) + pad);
     }
   }
-}
-
-/** Is this fragment edit meaningful (changed text or any style override)? */
-export function isFragmentModified(
-  fragment: TextFragment,
-  edit: { text: string; style: Partial<TextStyle> } | undefined,
-): boolean {
-  if (!edit) return false;
-  return edit.text !== fragment.original || Object.keys(edit.style).length > 0;
 }
 
 /** Drop characters the standard (WinAnsi) fonts cannot encode. */

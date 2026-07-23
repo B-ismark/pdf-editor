@@ -756,6 +756,8 @@ body {
   place-items: center;
   width: 24px;
   height: 24px;
+  padding: 0; /* reset UA button padding so the glyph stays centred */
+  line-height: 0;
   border: 2px solid var(--surface-container-lowest);
   border-radius: var(--radius-full);
   background: var(--error);
@@ -835,6 +837,8 @@ body {
   height: 22px;
   display: grid;
   place-items: center;
+  padding: 0;
+  line-height: 0;
   border: none;
   border-radius: var(--radius-full);
   background: var(--inverse-surface);

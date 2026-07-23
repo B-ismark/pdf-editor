@@ -77,6 +77,17 @@ export function fragmentSize(fragment: TextFragment): number {
   return size > 0.1 ? size : fragment.height || 12;
 }
 
+/** Is this fragment edit meaningful (changed text or any style override)?
+ * Kept here (a pdf-lib-free module) so the render path can import it without
+ * pulling the heavy exporter/pdf-lib into the initial bundle. */
+export function isFragmentModified(
+  fragment: TextFragment,
+  edit: { text: string; style: Partial<TextStyle> } | undefined,
+): boolean {
+  if (!edit) return false;
+  return edit.text !== fragment.original || Object.keys(edit.style).length > 0;
+}
+
 /** Resolve a fragment's effective style (detected base + user overrides). */
 export function resolveFragmentStyle(
   fragment: TextFragment,

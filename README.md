@@ -18,8 +18,13 @@ and is **mobile- and tablet-first**:
 - **Touch-first canvas** — one finger pans/scrolls (never edits by accident),
   two fingers pinch-zoom, double-tap toggles fit ⇄ 2×, with app-managed
   zoom anchoring and 48px touch targets / enlarged drag handles on touch.
-- **Self-contained** — inline SVG icons and graceful system-font fallback, so
-  the UI renders fully even if web fonts are blocked or offline.
+- **Self-contained** — the bundled [Lucide] icon set (no CDN) and a graceful
+  system-font fallback, so the UI renders fully even if web fonts are blocked
+  or offline.
+- **Light / dark / system theme** — a toggle in the app bar; the choice is
+  remembered and applied before first paint (no flash), and *system* follows
+  the OS live.
+- **Custom tooltips** for icon-only actions (fast, on-brand; skipped on touch).
 
 <img src="docs/screenshot-mobile.png" alt="Mobile layout" width="280" align="right" />
 
@@ -48,6 +53,10 @@ and is **mobile- and tablet-first**:
   dragging, resizing, and typing collapse into single steps).
 - **Download** — writes your changes back to a new PDF, preserving everything
   you didn't touch.
+- **Remembers your preferences** — new text boxes inherit your last font / size
+  / colour, the draw tool and style persist across sessions, and signatures are
+  saved to a small reusable gallery (all in `localStorage`; a "Reset style"
+  action clears the text defaults).
 
 Everything runs locally with the [File API]; the PDF never leaves your machine.
 
@@ -175,3 +184,4 @@ React · TypeScript · Vite · [PDF.js] · [pdf-lib]
 [File API]: https://developer.mozilla.org/en-US/docs/Web/API/File
 [PDF.js]: https://mozilla.github.io/pdf.js/
 [pdf-lib]: https://pdf-lib.js.org/
+[Lucide]: https://lucide.dev/
