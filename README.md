@@ -118,6 +118,17 @@ First-time setup (once per repo): in **Settings → Pages**, set **Source** to
 automatically. `vite.config.ts` uses a relative `base` (`"./"`) so assets
 resolve correctly under the project subpath.
 
+## Analytics & privacy
+
+The app itself collects **nothing** — no analytics, no telemetry, no cookies,
+no external calls. Your PDFs and edits never leave your browser, by design.
+
+To get a rough sense of usage without breaking that promise, use GitHub's
+built-in traffic stats: on the repository, open **Insights → Traffic** to see
+**unique visitors** and page views for the last 14 days. Because there are no
+accounts, this counts unique browsers/devices rather than distinct people, and
+it's measured server-side by GitHub Pages — nothing is added to the app itself.
+
 ## Using the editor
 
 | Tool | What it does |
