@@ -90,6 +90,9 @@ function EditableFragmentImpl({
         spellCheck={false}
         data-id={fragment.id}
         title={fragment.original}
+        role={interactive ? "textbox" : undefined}
+        aria-multiline="false"
+        aria-label={interactive ? `Editable text: ${fragment.original}` : undefined}
         style={{
           left: `${left}px`,
           top: `${top}px`,

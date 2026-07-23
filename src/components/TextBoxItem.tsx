@@ -93,6 +93,9 @@ function TextBoxItemImpl({
         suppressContentEditableWarning
         spellCheck={false}
         data-placeholder="Type…"
+        role={interactive ? "textbox" : undefined}
+        aria-multiline="false"
+        aria-label="Text box"
         style={{
           fontSize: `${fontPx}px`,
           fontFamily: CSS_FONT[box.style.font],

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PageView, type AnnotSpec } from "./components/PageView";
+import { translateAnnotation } from "./components/AnnotationLayer";
 import { PropertiesPanel } from "./components/PropertiesPanel";
 import { Organize } from "./components/Organize";
 import { DrawToolbar } from "./components/DrawToolbar";
@@ -49,6 +50,35 @@ const TOOLS: { key: NavKey; label: string; icon: string }[] = [
   { key: "sign", label: "Sign", icon: "signature" },
   { key: "redact", label: "Redact", icon: "select" },
 ];
+
+// Single-key tool shortcuts (ignored while typing or when a modal is open).
+const TOOL_KEYS: Record<string, NavKey> = {
+  v: "select",
+  t: "text",
+  d: "draw",
+  s: "sign",
+  r: "redact",
+};
+const TOOL_SHORTCUT: Record<NavKey, string> = {
+  select: "V",
+  text: "T",
+  draw: "D",
+  sign: "S",
+  redact: "R",
+};
+
+/** True when focus is in a text-entry context, so single-key shortcuts and
+ * arrow-nudge must not hijack the keystroke. */
+function isTypingTarget(): boolean {
+  const el = document.activeElement as HTMLElement | null;
+  if (!el) return false;
+  return (
+    el.isContentEditable ||
+    el.tagName === "INPUT" ||
+    el.tagName === "TEXTAREA" ||
+    el.tagName === "SELECT"
+  );
+}
 
 export function App() {
   const [pdf, setPdf] = useState<LoadedPdf | null>(null);
@@ -621,6 +651,7 @@ export function App() {
       ) {
         e.preventDefault();
         onDelete();
+        return;
       }
       // Delete a selected annotation (but not while editing a sticky note).
       if (
@@ -630,11 +661,87 @@ export function App() {
       ) {
         e.preventDefault();
         onDelete();
+        return;
+      }
+
+      // Arrow-key nudge for a selected non-text element. Text boxes/notes keep
+      // their native caret movement, so they're intentionally excluded.
+      // Shift = a larger step. PDF's y-axis points up.
+      const arrow =
+        e.key === "ArrowLeft" ? ([-1, 0] as const)
+        : e.key === "ArrowRight" ? ([1, 0] as const)
+        : e.key === "ArrowUp" ? ([0, 1] as const)
+        : e.key === "ArrowDown" ? ([0, -1] as const)
+        : null;
+      if (arrow && selection && !mod && !isTypingTarget()) {
+        const step = e.shiftKey ? 10 : 1;
+        const dx = arrow[0] * step;
+        const dy = arrow[1] * step;
+        if (selection.kind === "redaction") {
+          const r = redactions.find((x) => x.id === selection.id);
+          if (r) {
+            e.preventDefault();
+            onChangeRedaction(r.id, { x: r.x + dx, y: r.y + dy }, `nudge-rd-${r.id}`);
+          }
+          return;
+        }
+        if (selection.kind === "stamp") {
+          const s = stamps.find((x) => x.id === selection.id);
+          if (s) {
+            e.preventDefault();
+            onChangeStamp(s.id, { x: s.x + dx, y: s.y + dy }, `nudge-st-${s.id}`);
+          }
+          return;
+        }
+        if (
+          selection.kind === "annotation" &&
+          selectedAnnotation &&
+          selectedAnnotation.kind !== "note"
+        ) {
+          e.preventDefault();
+          onMoveAnnotation(
+            translateAnnotation(selectedAnnotation, dx, dy),
+            `nudge-an-${selectedAnnotation.id}`,
+          );
+          return;
+        }
+      }
+
+      // Single-key tool shortcuts — only when not typing and no modal is open.
+      if (
+        !mod &&
+        !e.shiftKey &&
+        !isTypingTarget() &&
+        !document.querySelector('[aria-modal="true"]')
+      ) {
+        const t = TOOL_KEYS[key];
+        if (t) {
+          e.preventDefault();
+          setPendingStamp(null);
+          if (t === "sign") {
+            setSelection(null);
+            setSigOpen(true);
+          } else {
+            setTool(t);
+            if (t !== "select") setSelection(null);
+          }
+        }
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [selection, selectedAnnotation, onDelete, undo, redo]);
+  }, [
+    selection,
+    selectedAnnotation,
+    onDelete,
+    undo,
+    redo,
+    redactions,
+    stamps,
+    onChangeRedaction,
+    onChangeStamp,
+    onMoveAnnotation,
+  ]);
 
   const download = useCallback(async () => {
     if (!pdf) return;
@@ -846,6 +953,7 @@ export function App() {
               className={`toolnav__btn${tool === t.key ? " toolnav__btn--on" : ""}`}
               onClick={() => pickTool(t.key)}
               aria-pressed={tool === t.key}
+              data-tip={`${t.label} · ${TOOL_SHORTCUT[t.key]}`}
             >
               <span className="toolnav__ind">
                 <Icon name={t.icon} size={21} filled={tool === t.key} />

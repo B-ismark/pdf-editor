@@ -57,6 +57,9 @@ function NoteItemImpl({
       suppressContentEditableWarning
       spellCheck={false}
       data-placeholder="Note…"
+      role={interactive ? "textbox" : undefined}
+      aria-multiline="false"
+      aria-label="Sticky note"
       style={{
         left: `${x * scale}px`,
         top: `${(pageHeight - y) * scale}px`,
