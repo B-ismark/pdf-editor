@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
+import { useModal } from "../hooks/useModal";
 import type { NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/finishOps";
 
 interface Props {
@@ -25,10 +26,19 @@ export function FinishDialog({ initialTab = "numbers", onApplyNumbers, onApplyWa
   const [opacity, setOpacity] = useState(0.2);
   const [angle, setAngle] = useState(45);
   const [wmSize, setWmSize] = useState(60);
+  const modalRef = useModal<HTMLDivElement>(onClose);
 
   return (
     <div className="dialog-scrim" onPointerDown={onClose}>
-      <div className="dialog" onPointerDown={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Finishing touches"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
         <div className="dialog__head">
           <span className="title-large">Finishing touches</span>
           <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">

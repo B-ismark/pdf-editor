@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useSignatures } from "../hooks/useSignatures";
+import { useModal } from "../hooks/useModal";
 
 interface Props {
   onCreate: (sig: { dataUrl: string; w: number; h: number }) => void;
@@ -100,10 +101,19 @@ export function SignatureDialog({ onCreate, onClose }: Props) {
   };
 
   const canInsert = tab === "draw" || (tab === "type" && typed.trim()) || (tab === "upload" && uploaded);
+  const modalRef = useModal<HTMLDivElement>(onClose);
 
   return (
     <div className="dialog-scrim" onPointerDown={onClose}>
-      <div className="dialog" onPointerDown={(e) => e.stopPropagation()}>
+      <div
+        ref={modalRef}
+        tabIndex={-1}
+        className="dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Add signature"
+        onPointerDown={(e) => e.stopPropagation()}
+      >
         <div className="dialog__head">
           <span className="title-large">Add signature</span>
           <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">

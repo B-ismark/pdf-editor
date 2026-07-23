@@ -1,3 +1,5 @@
+import { useModal } from "../hooks/useModal";
+
 interface Props {
   title: string;
   message: string;
@@ -18,9 +20,18 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: Props) {
+  const ref = useModal<HTMLDivElement>(onCancel);
   return (
     <div className="dialog-scrim" onPointerDown={onCancel}>
-      <div className="dialog dialog--sm" onPointerDown={(e) => e.stopPropagation()} role="alertdialog" aria-modal="true">
+      <div
+        ref={ref}
+        tabIndex={-1}
+        className="dialog dialog--sm"
+        onPointerDown={(e) => e.stopPropagation()}
+        role="alertdialog"
+        aria-modal="true"
+        aria-label={title}
+      >
         <span className="title-large">{title}</span>
         <p className="body-medium confirm__msg">{message}</p>
         <div className="dialog__actions">

@@ -84,6 +84,8 @@ export function App() {
   const [organizeOpen, setOrganizeOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const menuListRef = useRef<HTMLDivElement>(null);
   const counter = useRef(0);
   const nextId = (prefix: string) => `${prefix}-${counter.current++}`;
 
@@ -519,6 +521,37 @@ export function App() {
     }
   }, [selection, doc]);
 
+  // Move focus into the overflow menu when it opens (ARIA menu pattern).
+  useEffect(() => {
+    if (!menuOpen) return;
+    menuListRef.current
+      ?.querySelector<HTMLElement>('[role="menuitem"]')
+      ?.focus();
+  }, [menuOpen]);
+
+  const onMenuKeyDown = useCallback((e: React.KeyboardEvent) => {
+    const items = Array.from(
+      menuListRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]') ?? [],
+    );
+    if (items.length === 0) return;
+    const idx = items.indexOf(document.activeElement as HTMLButtonElement);
+    const focusAt = (n: number) => {
+      e.preventDefault();
+      items[(n + items.length) % items.length].focus();
+    };
+    if (e.key === "ArrowDown") focusAt(idx + 1);
+    else if (e.key === "ArrowUp") focusAt(idx - 1);
+    else if (e.key === "Home") focusAt(0);
+    else if (e.key === "End") focusAt(items.length - 1);
+    else if (e.key === "Escape") {
+      e.preventDefault();
+      setMenuOpen(false);
+      menuBtnRef.current?.focus();
+    } else if (e.key === "Tab") {
+      setMenuOpen(false);
+    }
+  }, []);
+
   const undo = useCallback(() => {
     doc.undo();
     setRevision((r) => r + 1);
@@ -572,6 +605,14 @@ export function App() {
       if (mod && key === "y") {
         e.preventDefault();
         redo();
+        return;
+      }
+      // Escape clears the current selection (and closes the mobile sheet /
+      // desktop panel, which is driven by selection). Modals stop Escape from
+      // reaching here via their own capture-phase handler.
+      if (e.key === "Escape" && selection) {
+        e.preventDefault();
+        setSelection(null);
         return;
       }
       if (
@@ -674,13 +715,13 @@ export function App() {
             <span>{status === "exporting" ? "Exporting…" : "Download"}</span>
           </button>
           <div className="menu">
-            <button className="icon-btn" onClick={() => setMenuOpen((v) => !v)} aria-label="More" aria-expanded={menuOpen} data-tip="More actions">
+            <button ref={menuBtnRef} className="icon-btn" onClick={() => setMenuOpen((v) => !v)} aria-label="More actions" aria-haspopup="menu" aria-expanded={menuOpen} data-tip="More actions">
               <Icon name="more_vert" size={18} />
             </button>
             {menuOpen && (
               <>
                 <div className="menu__scrim" onClick={() => setMenuOpen(false)} />
-                <div className="menu__list" role="menu">
+                <div className="menu__list" role="menu" ref={menuListRef} onKeyDown={onMenuKeyDown}>
                   <button
                     className="menu__item"
                     onClick={() => {

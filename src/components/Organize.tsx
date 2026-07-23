@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { Thumbnail } from "./Thumbnail";
 import { ConfirmDialog } from "./ConfirmDialog";
+import { useModal } from "../hooks/useModal";
 import { buildFromPlan, pageCount, type PlanEntry } from "../pdf/pageOps";
 
 interface Props {
@@ -33,6 +34,7 @@ export function Organize({
   const [confirmApply, setConfirmApply] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const addCounter = useRef(0);
+  const modalRef = useModal<HTMLDivElement>(onClose);
 
   // Seed the plan from the main document's page count.
   useEffect(() => {
@@ -127,7 +129,14 @@ export function Organize({
   };
 
   return (
-    <div className="organize">
+    <div
+      className="organize"
+      ref={modalRef}
+      tabIndex={-1}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Organize pages"
+    >
       <header className="organize__bar">
         <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">
           <Icon name="close" size={20} />

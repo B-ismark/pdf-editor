@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { acquireEscapeLayer } from "../hooks/useModal";
 
 interface Props {
   value: string;
@@ -42,8 +43,21 @@ export function ColorField({ value, onChange, small }: Props) {
       const t = e.target as Node;
       if (!swatchRef.current?.contains(t) && !popRef.current?.contains(t)) setOpen(false);
     };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setOpen(false);
+        swatchRef.current?.focus();
+      }
+    };
+    const releaseEscape = acquireEscapeLayer();
     document.addEventListener("pointerdown", onDoc);
-    return () => document.removeEventListener("pointerdown", onDoc);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      releaseEscape();
+      document.removeEventListener("pointerdown", onDoc);
+      document.removeEventListener("keydown", onKey, true);
+    };
   }, [open]);
 
   return (
@@ -58,7 +72,7 @@ export function ColorField({ value, onChange, small }: Props) {
         aria-expanded={open}
       />
       {open && pos && (
-        <div ref={popRef} className="colorfield__pop" style={{ left: pos.left, top: pos.top }} role="dialog">
+        <div ref={popRef} className="colorfield__pop" style={{ left: pos.left, top: pos.top }} role="dialog" aria-label="Choose colour">
           <div className="colorfield__grid">
             {PRESETS.map((c) => (
               <button
