@@ -89,10 +89,15 @@ function TextBoxItemImpl({
     const key = `resize-tb-${box.id}-${++gesture.current}`;
     const startPx = fontPx;
     startPointerDrag(e, {
-      onMove: (_dx, dy) => {
+      onMove: (dx, dy) => {
+        // Bottom-right corner handle: dragging outward (down/right) grows the
+        // text, inward (up/left) shrinks it. Averaging both axes lets the size
+        // follow a natural diagonal drag instead of only vertical motion —
+        // which is what made shrinking feel unresponsive on touch.
+        const delta = (dx + dy) / 2;
         const size = Math.min(
           MAX_SIZE,
-          Math.max(MIN_SIZE, (startPx + dy) / scale),
+          Math.max(MIN_SIZE, (startPx + delta) / scale),
         );
         onChange(box.id, { style: { ...box.style, size } }, key);
       },

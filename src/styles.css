@@ -522,6 +522,19 @@ body {
   cursor: pointer;
 }
 
+/* Size field: a slider flanked by −/+ steppers for precise, touch-friendly
+   nudging (dragging a range thumb to an exact small size is fiddly on phones). */
+.size-row { display: flex; align-items: center; gap: 4px; }
+.size-row .slider { flex: 1 1 auto; }
+.size-step {
+  width: 40px;
+  height: 44px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-container-high);
+  color: var(--on-surface-variant);
+}
+.size-step:active { background: var(--surface-container-highest); }
+
 /* Colour swatch */
 .swatch { position: relative; width: 48px; height: 48px; cursor: pointer; }
 .swatch input[type="color"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }

@@ -37,6 +37,9 @@ const FONTS: { key: FontKey; label: string }[] = [
   { key: "mono", label: "Mono" },
 ];
 
+/** Keep stepper nudges within the size slider's range. */
+const clampSize = (size: number) => Math.min(96, Math.max(6, Math.round(size)));
+
 /** Contextual controls for the selected element. */
 export function PropertiesPanel({
   selection,
@@ -200,14 +203,33 @@ export function PropertiesPanel({
             <span className="field__label label-medium">
               Size <b>{Math.round(style.size)}</b>
             </span>
-            <input
-              className="slider"
-              type="range"
-              min={6}
-              max={96}
-              value={Math.min(96, Math.max(6, Math.round(style.size)))}
-              onChange={(e) => onChangeStyle({ size: Number(e.target.value) })}
-            />
+            <div className="size-row">
+              <button
+                className="icon-btn size-step"
+                onClick={() => onChangeStyle({ size: clampSize(style.size - 1) })}
+                aria-label="Decrease text size"
+                data-tip="Smaller"
+              >
+                <Icon name="remove" size={18} />
+              </button>
+              <input
+                className="slider"
+                type="range"
+                min={6}
+                max={96}
+                value={Math.min(96, Math.max(6, Math.round(style.size)))}
+                onChange={(e) => onChangeStyle({ size: Number(e.target.value) })}
+                aria-label="Text size"
+              />
+              <button
+                className="icon-btn size-step"
+                onClick={() => onChangeStyle({ size: clampSize(style.size + 1) })}
+                aria-label="Increase text size"
+                data-tip="Larger"
+              >
+                <Icon name="add" size={18} />
+              </button>
+            </div>
           </div>
 
           <div className="field field--row">
