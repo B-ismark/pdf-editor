@@ -111,7 +111,7 @@ The app is a static client-side bundle, deployed to **GitHub Pages** by the
 workflow in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) on
 every push to `main`.
 
-Live site: **https://b-ismark.github.io/AI-repos/**
+Live site: **https://b-ismark.github.io/pdf-editor/**
 
 First-time setup (once per repo): in **Settings → Pages**, set **Source** to
 **GitHub Actions**. After that, each push to `main` rebuilds and redeploys

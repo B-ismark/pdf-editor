@@ -8,7 +8,7 @@ should save you from re-scanning everything.
 A **fully client-side, in-browser PDF editor** (React + TypeScript + Vite).
 Upload a PDF and edit text in place, add text/notes/shapes, sign, redact,
 organize pages, and download. **No server, no uploads** — privacy is the point.
-Deployed as a static site to GitHub Pages: https://b-ismark.github.io/AI-repos/
+Deployed as a static site to GitHub Pages: https://b-ismark.github.io/pdf-editor/
 
 See `README.md` for the user-facing feature list and the detailed
 "Limitations" section (fonts approximated, redaction rasterizes the page, no
