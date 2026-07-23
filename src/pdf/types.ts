@@ -163,6 +163,28 @@ export interface LinkAnnot {
   url: string;
 }
 
+/** Where a page number sits on the page. */
+export type NumberPosition =
+  | "top-left" | "top-center" | "top-right"
+  | "bottom-left" | "bottom-center" | "bottom-right";
+
+/** Page-numbering options, applied to every page at export time. */
+export interface PageNumberOptions {
+  position: NumberPosition;
+  start: number;
+  size: number;
+  color: string;
+}
+
+/** Diagonal text watermark options, applied to every page at export time. */
+export interface WatermarkOptions {
+  text: string;
+  size: number;
+  color: string;
+  opacity: number;
+  angle: number;
+}
+
 /** The full editable document state tracked by the undo/redo history. */
 export interface DocState {
   edits: Edits;
@@ -174,6 +196,10 @@ export interface DocState {
   links?: LinkAnnot[];
   /** Filled AcroForm values, keyed by field name. */
   formValues?: Record<string, string | boolean>;
+  /** Document-wide page numbering (drawn on every page at export). */
+  pageNumbers?: PageNumberOptions | null;
+  /** Document-wide diagonal watermark (drawn on every page at export). */
+  watermark?: WatermarkOptions | null;
 }
 
 /** Active editing tool. */

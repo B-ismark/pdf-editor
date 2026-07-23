@@ -2,12 +2,17 @@ import { useState } from "react";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
 import { useModal } from "../hooks/useModal";
-import type { NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/finishOps";
+import type { NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/types";
 
 interface Props {
   initialTab?: "numbers" | "watermark";
+  /** Current settings, so re-opening the dialog reflects what's applied. */
+  currentNumbers?: PageNumberOptions | null;
+  currentWatermark?: WatermarkOptions | null;
   onApplyNumbers: (opts: PageNumberOptions) => void;
   onApplyWatermark: (opts: WatermarkOptions) => void;
+  onClearNumbers: () => void;
+  onClearWatermark: () => void;
   onClose: () => void;
 }
 
@@ -16,16 +21,25 @@ const POSITIONS: NumberPosition[] = [
   "bottom-left", "bottom-center", "bottom-right",
 ];
 
-export function FinishDialog({ initialTab = "numbers", onApplyNumbers, onApplyWatermark, onClose }: Props) {
+export function FinishDialog({
+  initialTab = "numbers",
+  currentNumbers,
+  currentWatermark,
+  onApplyNumbers,
+  onApplyWatermark,
+  onClearNumbers,
+  onClearWatermark,
+  onClose,
+}: Props) {
   const [tab, setTab] = useState(initialTab);
-  const [position, setPosition] = useState<NumberPosition>("bottom-center");
-  const [start, setStart] = useState(1);
-  const [numColor, setNumColor] = useState("#444444");
-  const [text, setText] = useState("DRAFT");
-  const [wmColor, setWmColor] = useState("#888888");
-  const [opacity, setOpacity] = useState(0.2);
-  const [angle, setAngle] = useState(45);
-  const [wmSize, setWmSize] = useState(60);
+  const [position, setPosition] = useState<NumberPosition>(currentNumbers?.position ?? "bottom-center");
+  const [start, setStart] = useState(currentNumbers?.start ?? 1);
+  const [numColor, setNumColor] = useState(currentNumbers?.color ?? "#444444");
+  const [text, setText] = useState(currentWatermark?.text ?? "DRAFT");
+  const [wmColor, setWmColor] = useState(currentWatermark?.color ?? "#888888");
+  const [opacity, setOpacity] = useState(currentWatermark?.opacity ?? 0.2);
+  const [angle, setAngle] = useState(currentWatermark?.angle ?? 45);
+  const [wmSize, setWmSize] = useState(currentWatermark?.size ?? 60);
   const modalRef = useModal<HTMLDivElement>(onClose);
 
   return (
@@ -110,13 +124,23 @@ export function FinishDialog({ initialTab = "numbers", onApplyNumbers, onApplyWa
         <div className="dialog__actions">
           <button className="btn" onClick={onClose}>Cancel</button>
           {tab === "numbers" ? (
-            <button className="btn btn--filled" onClick={() => onApplyNumbers({ position, start, size: 11, color: numColor })}>
-              Apply
-            </button>
+            <>
+              {currentNumbers && (
+                <button className="btn" onClick={onClearNumbers}>Remove</button>
+              )}
+              <button className="btn btn--filled" onClick={() => onApplyNumbers({ position, start, size: 11, color: numColor })}>
+                {currentNumbers ? "Update" : "Apply"}
+              </button>
+            </>
           ) : (
-            <button className="btn btn--filled" disabled={!text.trim()} onClick={() => onApplyWatermark({ text, size: wmSize, color: wmColor, opacity, angle })}>
-              Apply
-            </button>
+            <>
+              {currentWatermark && (
+                <button className="btn" onClick={onClearWatermark}>Remove</button>
+              )}
+              <button className="btn btn--filled" disabled={!text.trim()} onClick={() => onApplyWatermark({ text, size: wmSize, color: wmColor, opacity, angle })}>
+                {currentWatermark ? "Update" : "Apply"}
+              </button>
+            </>
           )}
         </div>
       </div>

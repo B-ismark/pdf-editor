@@ -22,7 +22,7 @@ import { AnnotationFrame } from "./AnnotationFrame";
 import { dragState } from "../hooks/useDrag";
 import { useGuides } from "../hooks/useSnap";
 import { annotationBox, intersects, linkBox, redactionBox, stampBox, textBoxBox, type Box } from "../pdf/bbox";
-import type { LinkAnnot, Stamp } from "../pdf/types";
+import type { LinkAnnot, PageNumberOptions, Stamp, WatermarkOptions } from "../pdf/types";
 import type { FindMatch } from "../pdf/find";
 import { LinkItem } from "./LinkItem";
 import { FormFieldLayer } from "./FormFieldLayer";
@@ -44,6 +44,9 @@ interface Props {
   stamps: Stamp[];
   links: LinkAnnot[];
   formValues: Record<string, string | boolean>;
+  /** Document-wide finishing layers, previewed live (drawn for real at export). */
+  pageNumbers: PageNumberOptions | null;
+  watermark: WatermarkOptions | null;
   /** Ids currently in a multi-selection (highlighted, not individually chromed). */
   multiIds: Set<string>;
   placing: boolean;
@@ -93,7 +96,7 @@ interface Gesture {
 export function PageView(props: Props) {
   const {
     bytes, page, scale, tool, drawTool, drawStyle, edits, textBoxes, redactions,
-    annotations, stamps, links, formValues, multiIds, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, revision, onSelect, onEditText,
+    annotations, stamps, links, formValues, pageNumbers, watermark, multiIds, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, revision, onSelect, onEditText,
     onChangeFragmentText, onChangeTextBoxText, onChangeTextBox, onChangeRedaction, onChangeLink,
     onChangeNoteText, onMoveAnnotation, onChangeStamp, onDeleteStamp, onAddTextBox, onAddRedaction, onAddLink, onChangeFormValue, onMarquee, onAddAnnotation,
     onPlaceStamp,
@@ -280,6 +283,15 @@ export function PageView(props: Props) {
             </div>
           )}
 
+          {/* Live preview of the document-wide finishing layers. Purely
+              informational — the real thing is drawn by the exporter. */}
+          <FinishPreview
+            pageNumbers={pageNumbers}
+            watermark={watermark}
+            pageNumber={(pageNumbers?.start ?? 1) + page.pageIndex}
+            scale={scale}
+          />
+
           <AnnotationLayer
             annotations={nonNote}
             scale={scale}
@@ -458,6 +470,58 @@ export function PageView(props: Props) {
           {/* Live draw preview */}
           {g && <DrawPreview g={g} color={drawStyle.color} width={drawStyle.width} scale={scale} />}
         </div>
+      )}
+    </div>
+  );
+}
+
+/** Non-interactive on-canvas preview of page numbers + watermark. Positions
+ * mirror the exporter (28pt margins, centred watermark). Screen y is down, so
+ * the watermark rotates by the negated PDF angle. */
+function FinishPreview({
+  pageNumbers,
+  watermark,
+  pageNumber,
+  scale,
+}: {
+  pageNumbers: PageNumberOptions | null;
+  watermark: WatermarkOptions | null;
+  pageNumber: number;
+  scale: number;
+}) {
+  if (!pageNumbers && !(watermark && watermark.text.trim())) return null;
+  const m = 28 * scale;
+  const numStyle: React.CSSProperties = { position: "absolute", lineHeight: 1 };
+  if (pageNumbers) {
+    if (pageNumbers.position.startsWith("top")) numStyle.top = m;
+    else numStyle.bottom = m;
+    if (pageNumbers.position.endsWith("left")) numStyle.left = m;
+    else if (pageNumbers.position.endsWith("right")) numStyle.right = m;
+    else {
+      numStyle.left = 0;
+      numStyle.right = 0;
+      numStyle.textAlign = "center";
+    }
+  }
+  return (
+    <div className="finishlayer" aria-hidden="true">
+      {watermark && watermark.text.trim() && (
+        <span
+          className="finishlayer__wm"
+          style={{
+            color: watermark.color,
+            opacity: watermark.opacity,
+            fontSize: watermark.size * scale,
+            transform: `translate(-50%, -50%) rotate(${-watermark.angle}deg)`,
+          }}
+        >
+          {watermark.text}
+        </span>
+      )}
+      {pageNumbers && (
+        <span className="finishlayer__num" style={{ ...numStyle, color: pageNumbers.color, fontSize: pageNumbers.size * scale }}>
+          {pageNumber}
+        </span>
       )}
     </div>
   );

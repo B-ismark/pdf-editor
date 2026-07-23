@@ -1291,6 +1291,23 @@ body {
   outline: 1.5px solid #e8710a;
 }
 
+/* Live preview of export-time finishing layers (page numbers + watermark).
+   Non-interactive — the real layers are drawn by the exporter. */
+.finishlayer { position: absolute; inset: 0; pointer-events: none; z-index: 2; overflow: hidden; }
+.finishlayer__wm {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  white-space: nowrap;
+  font-weight: 700;
+  font-family: Helvetica, Arial, sans-serif;
+  transform-origin: center;
+}
+.finishlayer__num {
+  font-family: Helvetica, Arial, sans-serif;
+  padding: 0 4px;
+}
+
 .drawbar__tools { display: flex; gap: 2px; flex: none; }
 .drawbar__sep { width: 1px; height: 28px; background: var(--outline-variant); margin: 0 2px; flex: none; }
 .drawbar__width { display: flex; align-items: center; flex: none; }

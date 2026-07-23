@@ -13,10 +13,12 @@ import type {
   Edits,
   LinkAnnot,
   LoadedPdf,
+  PageNumberOptions,
   Redaction,
   Stamp,
   TextBox,
   TextStyle,
+  WatermarkOptions,
 } from "./types";
 
 /** Pixels per PDF unit used when rasterising redacted pages (≈216 dpi). */
@@ -31,6 +33,47 @@ export interface ExportInput {
   links?: LinkAnnot[];
   /** Filled AcroForm values keyed by field name. */
   formValues?: Record<string, string | boolean>;
+  /** Document-wide page numbering, drawn on every output page. */
+  pageNumbers?: PageNumberOptions | null;
+  /** Document-wide diagonal watermark, drawn on every output page. */
+  watermark?: WatermarkOptions | null;
+}
+
+/** Draw a page number onto a finished page (vector or rasterised alike). */
+function drawPageNumber(page: PDFPage, font: PDFFont, label: string, opts: PageNumberOptions): void {
+  const c = hexToRgb(opts.color);
+  const margin = 28;
+  const { width, height } = page.getSize();
+  const tw = font.widthOfTextAtSize(label, opts.size);
+  const top = opts.position.startsWith("top");
+  const y = top ? height - margin - opts.size : margin;
+  const x = opts.position.endsWith("left")
+    ? margin
+    : opts.position.endsWith("right")
+      ? width - margin - tw
+      : width / 2 - tw / 2;
+  page.drawText(label, { x, y, size: opts.size, font, color: rgb(c.r, c.g, c.b) });
+}
+
+/** Stamp a diagonal text watermark centred on a finished page. */
+function drawWatermark(page: PDFPage, font: PDFFont, opts: WatermarkOptions): void {
+  if (!opts.text.trim()) return;
+  const c = hexToRgb(opts.color);
+  const rad = (opts.angle * Math.PI) / 180;
+  const len = font.widthOfTextAtSize(opts.text, opts.size);
+  const { width, height } = page.getSize();
+  // Start point so the text's midpoint lands at the page centre.
+  const x = width / 2 - (len / 2) * Math.cos(rad);
+  const y = height / 2 - (len / 2) * Math.sin(rad);
+  page.drawText(opts.text, {
+    x,
+    y,
+    size: opts.size,
+    font,
+    color: rgb(c.r, c.g, c.b),
+    opacity: opts.opacity,
+    rotate: degrees(opts.angle),
+  });
 }
 
 /** Fill the source document's AcroForm from user values and flatten it, so the
@@ -266,7 +309,7 @@ export async function exportPdf(
   input: ExportInput,
   onProgress?: (page: number, total: number) => void,
 ): Promise<Uint8Array> {
-  const { edits, textBoxes, redactions, annotations, stamps, links = [], formValues = {} } = input;
+  const { edits, textBoxes, redactions, annotations, stamps, links = [], formValues = {}, pageNumbers, watermark } = input;
   const src = await PDFDocument.load(loaded.bytes.slice(0));
   fillAndFlattenForm(src, formValues);
   const out = await PDFDocument.create();
@@ -282,6 +325,7 @@ export async function exportPdf(
   };
 
   const helv = await getFont("Helvetica");
+  const wmFont = watermark ? await getFont("HelveticaBold") : null;
 
   let done = 0;
   for (const pageData of loaded.pages) {
@@ -297,9 +341,19 @@ export async function exportPdf(
     const pageCovers = pageRedactions.filter((r) => r.cover);
     const needsRaster = pageRedactions.some((r) => !r.cover);
 
+    // Both paths produce a finished PDFPage; page numbers, watermark, and link
+    // annotations are then applied uniformly on top. `done` is the 1-based
+    // output position, so the page-number label follows the (possibly
+    // reordered) export order rather than the original page index.
+    const applyPageLayers = (page: PDFPage) => {
+      if (pageNumbers) drawPageNumber(page, helv, String(pageNumbers.start + done - 1), pageNumbers);
+      if (watermark && wmFont) drawWatermark(page, wmFont, watermark);
+      addLinkAnnots(out, page, pageLinks);
+    };
+
     if (needsRaster) {
       const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, pageBoxes, pageRedactions, pageAnnots, pageStamps);
-      addLinkAnnots(out, rasterPage, pageLinks);
+      applyPageLayers(rasterPage);
       continue;
     }
 
@@ -371,7 +425,7 @@ export async function exportPdf(
       page.drawRectangle({ x: cov.x, y: cov.y, width: cov.width, height: cov.height, color: rgb(c.r, c.g, c.b) });
     }
 
-    addLinkAnnots(out, page, pageLinks);
+    applyPageLayers(page);
   }
 
   return out.save();
