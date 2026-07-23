@@ -21,7 +21,18 @@ const PAD = 24; // px of breathing room around the page at fit-width
  * relayout.
  */
 export function useViewport() {
-  const viewportRef = useRef<HTMLDivElement>(null);
+  // The scroll container is rendered conditionally (only once a PDF is open),
+  // so it mounts *after* this hook first runs. A callback ref stores the node
+  // in state the moment it attaches, which lets the effects below (resize
+  // observer, wheel listener) run against a real element instead of silently
+  // no-op'ing on a null ref that never updates.
+  const elRef = useRef<HTMLDivElement | null>(null);
+  const [el, setEl] = useState<HTMLDivElement | null>(null);
+  const viewportRef = useCallback((node: HTMLDivElement | null) => {
+    elRef.current = node;
+    setEl(node);
+  }, []);
+
   const [containerWidth, setContainerWidth] = useState(0);
   const [pageWidthPts, setPageWidthPts] = useState(0);
   const [zoom, setZoom] = useState(1);
@@ -34,14 +45,13 @@ export function useViewport() {
 
   // Track the container's width.
   useEffect(() => {
-    const el = viewportRef.current;
     if (!el) return;
     const update = () => setContainerWidth(el.clientWidth);
     update();
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [el]);
 
   // Pending scroll anchor applied after a zoom-driven relayout. We store the
   // fraction of the scrollable extent under the anchor point (rather than a
@@ -50,20 +60,20 @@ export function useViewport() {
     null,
   );
   useLayoutEffect(() => {
-    const el = viewportRef.current;
+    const node = elRef.current;
     const a = anchor.current;
-    if (!el || !a) return;
-    el.scrollLeft = a.rx * el.scrollWidth - a.ax;
-    el.scrollTop = a.ry * el.scrollHeight - a.ay;
+    if (!node || !a) return;
+    node.scrollLeft = a.rx * node.scrollWidth - a.ax;
+    node.scrollTop = a.ry * node.scrollHeight - a.ay;
     anchor.current = null;
   }, [scale]);
 
   const captureAnchor = (ax: number, ay: number) => {
-    const el = viewportRef.current;
-    if (!el) return;
+    const node = elRef.current;
+    if (!node) return;
     anchor.current = {
-      rx: el.scrollWidth ? (el.scrollLeft + ax) / el.scrollWidth : 0,
-      ry: el.scrollHeight ? (el.scrollTop + ay) / el.scrollHeight : 0,
+      rx: node.scrollWidth ? (node.scrollLeft + ax) / node.scrollWidth : 0,
+      ry: node.scrollHeight ? (node.scrollTop + ay) / node.scrollHeight : 0,
       ax,
       ay,
     };
@@ -71,11 +81,11 @@ export function useViewport() {
 
   /** Apply a zoom factor keeping the given screen point stationary. */
   const zoomBy = useCallback((factor: number, clientX?: number, clientY?: number) => {
-    const el = viewportRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const ax = clientX !== undefined ? clientX - rect.left : el.clientWidth / 2;
-    const ay = clientY !== undefined ? clientY - rect.top : el.clientHeight / 2;
+    const node = elRef.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
+    const ax = clientX !== undefined ? clientX - rect.left : node.clientWidth / 2;
+    const ay = clientY !== undefined ? clientY - rect.top : node.clientHeight / 2;
     setZoom((z) => {
       const target = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * factor));
       if (target !== z) captureAnchor(ax, ay);
@@ -124,10 +134,10 @@ export function useViewport() {
       if (dragState.active) return;
       if (pointers.current.size === 1) {
         // One-finger pan (touch-action:none means we scroll the viewport).
-        const el = viewportRef.current;
-        if (el) {
-          el.scrollLeft -= e.clientX - prev.x;
-          el.scrollTop -= e.clientY - prev.y;
+        const node = elRef.current;
+        if (node) {
+          node.scrollLeft -= e.clientX - prev.x;
+          node.scrollTop -= e.clientY - prev.y;
         }
       }
       if (pointers.current.size === 2 && pinchStart.current) {
@@ -136,14 +146,14 @@ export function useViewport() {
         const midX = (p1.x + p2.x) / 2;
         const midY = (p1.y + p2.y) / 2;
         const target = pinchStart.current.zoom * (dist / pinchStart.current.dist);
-        const el = viewportRef.current;
-        if (!el) return;
-        const rect = el.getBoundingClientRect();
+        const node = elRef.current;
+        if (!node) return;
+        const rect = node.getBoundingClientRect();
         captureAnchor(midX - rect.left, midY - rect.top);
         setZoom(() => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, target)));
       }
     },
-    [scale],
+    [],
   );
 
   const endPointer = useCallback(
@@ -169,15 +179,20 @@ export function useViewport() {
     [zoom, zoomBy],
   );
 
-  const onWheel = useCallback(
-    (e: React.WheelEvent) => {
+  // Ctrl/⌘ + wheel = zoom the document (and stop the browser page-zoom).
+  // Must be a native, non-passive listener — a React onWheel can be passive,
+  // so preventDefault() there is ignored and the whole page zooms instead.
+  useEffect(() => {
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
-        zoomBy(e.deltaY < 0 ? 1.12 : 1 / 1.12, e.clientX, e.clientY);
+        zoomBy(e.deltaY < 0 ? 1.1 : 1 / 1.1, e.clientX, e.clientY);
       }
-    },
-    [zoomBy],
-  );
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [el, zoomBy]);
 
   return {
     viewportRef,
@@ -193,7 +208,6 @@ export function useViewport() {
       onPointerMove,
       onPointerUp: endPointer,
       onPointerCancel: endPointer,
-      onWheel,
     },
   };
 }

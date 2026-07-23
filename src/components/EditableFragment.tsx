@@ -58,34 +58,57 @@ function EditableFragmentImpl({
 
   const fontFamily = show ? CSS_FONT[style.font] : fragment.fontFamily;
 
+  // Cover sized to the ORIGINAL glyph box so the rasterised original text is
+  // fully hidden (no peeking / duplication), independent of the new text.
+  const origFontPx = Math.hypot(c, d) * scale;
+  const cover = {
+    left: e * scale - 1.5,
+    top: (pageHeight - f) * scale - origFontPx * 1.02,
+    width: fragment.width * scale + 3,
+    height: origFontPx * 1.35,
+  };
+
   return (
-    <div
-      ref={ref}
-      className={`fragment${show ? " fragment--shown" : ""}${selected ? " fragment--selected" : ""}`}
-      contentEditable={interactive}
-      suppressContentEditableWarning
-      spellCheck={false}
-      data-id={fragment.id}
-      title={fragment.original}
-      style={{
-        left: `${left}px`,
-        top: `${top}px`,
-        fontSize: `${fontPx}px`,
-        fontFamily,
-        fontWeight: show && style.bold ? "bold" : "normal",
-        fontStyle: show && style.italic ? "italic" : "normal",
-        color: show ? style.color : "transparent",
-        lineHeight: 1,
-        pointerEvents: interactive ? "auto" : "none",
-      }}
-      onPointerDown={() => interactive && onSelect(fragment.id)}
-      onInput={(ev) =>
-        onChangeText(fragment.id, ev.currentTarget.textContent ?? "")
-      }
-      onKeyDown={(ev) => {
-        if (ev.key === "Enter") ev.preventDefault();
-      }}
-    />
+    <>
+      {show && (
+        <div
+          className={`fragment__cover${selected ? " fragment__cover--sel" : ""}`}
+          aria-hidden="true"
+          style={{
+            left: `${cover.left}px`,
+            top: `${cover.top}px`,
+            width: `${cover.width}px`,
+            height: `${cover.height}px`,
+          }}
+        />
+      )}
+      <div
+        ref={ref}
+        className="fragment"
+        contentEditable={interactive}
+        suppressContentEditableWarning
+        spellCheck={false}
+        data-id={fragment.id}
+        title={fragment.original}
+        style={{
+          left: `${left}px`,
+          top: `${top}px`,
+          fontSize: `${fontPx}px`,
+          fontFamily,
+          fontWeight: show && style.bold ? "bold" : "normal",
+          fontStyle: show && style.italic ? "italic" : "normal",
+          color: show ? style.color : "transparent",
+          background: show ? "#fff" : undefined,
+          lineHeight: 1,
+          pointerEvents: interactive ? "auto" : "none",
+        }}
+        onPointerDown={() => interactive && onSelect(fragment.id)}
+        onInput={(ev) => onChangeText(fragment.id, ev.currentTarget.textContent ?? "")}
+        onKeyDown={(ev) => {
+          if (ev.key === "Enter") ev.preventDefault();
+        }}
+      />
+    </>
   );
 }
 

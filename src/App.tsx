@@ -15,6 +15,7 @@ import {
   type WatermarkOptions,
 } from "./pdf/finishOps";
 import { useHistory } from "./hooks/useHistory";
+import { useTheme } from "./hooks/useTheme";
 import { useViewport } from "./hooks/useViewport";
 import { loadPdf } from "./pdf/loader";
 import { exportPdf, isFragmentModified } from "./pdf/exporter";
@@ -73,6 +74,15 @@ export function App() {
   const nextId = (prefix: string) => `${prefix}-${counter.current++}`;
 
   const vp = useViewport();
+  const theme = useTheme();
+  const themeIcon =
+    theme.mode === "light" ? "light_mode" : theme.mode === "dark" ? "dark_mode" : "system_mode";
+  const themeLabel =
+    theme.mode === "light"
+      ? "Light theme"
+      : theme.mode === "dark"
+        ? "Dark theme"
+        : "System theme";
 
   const fragmentById = useMemo(() => {
     const map = new Map<string, TextFragment>();
@@ -582,6 +592,7 @@ export function App() {
         </span>
         <span className="title-large appbar__name">PDF Editor</span>
       </div>
+      {!pdf && <div className="appbar__spacer" />}
       {pdf && (
         <>
           <div className="appbar__spacer" />
@@ -655,6 +666,14 @@ export function App() {
           </div>
         </>
       )}
+      <button
+        className="icon-btn"
+        onClick={theme.cycle}
+        aria-label={`Theme: ${themeLabel}. Click to change.`}
+        title={themeLabel}
+      >
+        <Icon name={themeIcon} size={22} />
+      </button>
     </header>
   );
 

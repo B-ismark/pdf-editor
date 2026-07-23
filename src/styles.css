@@ -491,9 +491,14 @@ body {
   padding: 0 1px;
   border-radius: 2px;
 }
-.fragment:hover { background: color-mix(in srgb, var(--primary) 12%, transparent); }
-.fragment--shown { background: #fff; }
-.fragment--selected { box-shadow: 0 0 0 1.5px var(--primary); }
+.fragment:hover { background: color-mix(in srgb, var(--primary) 14%, transparent); }
+.fragment__cover {
+  position: absolute;
+  background: #fff;
+  border-radius: 2px;
+  pointer-events: none;
+}
+.fragment__cover--sel { box-shadow: 0 0 0 1.5px var(--primary); }
 
 /* ============ Text boxes ============ */
 .tb-wrap { position: absolute; }
