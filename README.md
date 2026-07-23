@@ -53,6 +53,19 @@ npm run preview  # serve the production build
 
 Then open the printed URL and drop in a PDF.
 
+## Deployment
+
+The app is a static client-side bundle, deployed to **GitHub Pages** by the
+workflow in [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) on
+every push to `main`.
+
+Live site: **https://b-ismark.github.io/AI-repos/**
+
+First-time setup (once per repo): in **Settings → Pages**, set **Source** to
+**GitHub Actions**. After that, each push to `main` rebuilds and redeploys
+automatically. `vite.config.ts` uses a relative `base` (`"./"`) so assets
+resolve correctly under the project subpath.
+
 ## Using the editor
 
 | Tool | What it does |
