@@ -50,6 +50,9 @@ const FinishDialog = lazy(() =>
 const CompressDialog = lazy(() =>
   import("./components/CompressDialog").then((m) => ({ default: m.CompressDialog })),
 );
+const SignCertDialog = lazy(() =>
+  import("./components/SignCertDialog").then((m) => ({ default: m.SignCertDialog })),
+);
 import type {
   Annotation,
   AnnotationTool,
@@ -223,6 +226,7 @@ export function App() {
   // something is selected, document/finishing actions otherwise).
   const [inspectorOpen, setInspectorOpen] = useState(true);
   const [compressOpen, setCompressOpen] = useState(false);
+  const [signCertOpen, setSignCertOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuListRef = useRef<HTMLDivElement>(null);
@@ -584,6 +588,25 @@ export function App() {
     compressLossless.current = null;
   }, [fileName, downloadBytes]);
 
+  // Digitally sign the finished document (adbe.pkcs7.detached). Bakes current
+  // edits first — signing is the last step, since any later change invalidates
+  // the signature. Errors propagate to the dialog so it can show them.
+  const signWithCert = useCallback(
+    async (
+      identity: import("./pdf/sign").SignIdentity,
+      meta: import("./pdf/sign").SignMeta,
+    ): Promise<void> => {
+      if (!pdf) throw new Error("No document");
+      const baked = await bakeCurrent();
+      const { signPdf } = await import("./pdf/sign");
+      const signed = await signPdf(baked, identity, meta);
+      downloadBytes(signed, fileName.replace(/\.pdf$/i, "") + "-signed.pdf");
+      setStatus("ready");
+      setMessage("Signed the document and downloaded it.");
+    },
+    [pdf, bakeCurrent, fileName, downloadBytes],
+  );
+
   const runOcr = useCallback(async () => {
     if (!pdf) return;
     setMenuOpen(false);
@@ -680,6 +703,7 @@ export function App() {
       { id: "watermark", group: "finish", label: "Watermark", icon: "watermark", keywords: "draft stamp", run: () => { setSelection(null); setFinishTab("watermark"); } },
       { id: "eximg", group: "finish", label: "Export as images", icon: "image", keywords: "png zip export", run: exportImages },
       { id: "compress", group: "finish", label: "Compress PDF", icon: "compress", keywords: "shrink reduce size optimise", run: openCompress },
+      { id: "sign-cert", group: "finish", label: "Sign with certificate", icon: "signature", keywords: "digital signature pades certificate p12 sign", run: () => { setSelection(null); setSignCertOpen(true); } },
     ],
     [runOcr, copyAllText, exportTextFile, exportImages, openCompress],
   );
@@ -2075,6 +2099,12 @@ export function App() {
       {compressOpen && (
         <Suspense fallback={null}>
           <CompressDialog onEstimate={estimateCompress} onDownload={downloadCompress} onClose={() => setCompressOpen(false)} />
+        </Suspense>
+      )}
+
+      {signCertOpen && (
+        <Suspense fallback={null}>
+          <SignCertDialog onSign={signWithCert} onClose={() => setSignCertOpen(false)} />
         </Suspense>
       )}
 
