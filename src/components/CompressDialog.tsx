@@ -3,46 +3,55 @@ import { Icon } from "./Icon";
 import { useModal } from "../hooks/useModal";
 import type { CompressOptions } from "../pdf/finishOps";
 
-interface Estimate {
-  before: number;
-  after: number;
-  helped: boolean;
-}
+/** A chosen compression strategy. */
+export type CompressPreset = { kind: "lossless" } | { kind: "raster"; opts: CompressOptions };
+
+/** The measured result of a strategy (no download yet). */
+export type CompressEstimate =
+  | { kind: "lossless"; size: number }
+  | { kind: "raster"; before: number; after: number; helped: boolean };
 
 interface Props {
-  /** Compress at the given preset and report the resulting size (no download). */
-  onEstimate: (opts: CompressOptions) => Promise<Estimate>;
+  /** Apply the strategy and report the resulting size (no download). */
+  onEstimate: (preset: CompressPreset) => Promise<CompressEstimate>;
   /** Download the most recently estimated result. */
   onDownload: () => void;
   onClose: () => void;
 }
 
-const PRESETS: { key: string; label: string; hint: string; opts: CompressOptions }[] = [
-  { key: "high", label: "High quality", hint: "≈150 dpi · crisp", opts: { scale: 2, quality: 0.82 } },
-  { key: "balanced", label: "Balanced", hint: "≈110 dpi · good for sharing", opts: { scale: 1.5, quality: 0.7 } },
-  { key: "small", label: "Smallest", hint: "≈72 dpi · email-friendly", opts: { scale: 1, quality: 0.6 } },
+interface Choice {
+  key: string;
+  label: string;
+  hint: string;
+  preset: CompressPreset;
+}
+
+const CHOICES: Choice[] = [
+  { key: "lossless", label: "Keep text", hint: "Lossless · stays selectable & searchable", preset: { kind: "lossless" } },
+  { key: "high", label: "High quality", hint: "≈150 dpi · crisp images", preset: { kind: "raster", opts: { scale: 2, quality: 0.82 } } },
+  { key: "balanced", label: "Balanced", hint: "≈110 dpi · good for sharing", preset: { kind: "raster", opts: { scale: 1.5, quality: 0.7 } } },
+  { key: "small", label: "Smallest", hint: "≈72 dpi · email-friendly", preset: { kind: "raster", opts: { scale: 1, quality: 0.6 } } },
 ];
 
 const fmt = (n: number) => (n < 1_000_000 ? Math.round(n / 1000) + " KB" : (n / 1_000_000).toFixed(2) + " MB");
 
-/** Pick a compression preset and preview the resulting size before downloading.
- * Compression rasterises pages (text becomes an image), which is called out so
- * the trade-off is clear. */
+/** Pick a compression strategy and preview the resulting size before
+ * downloading. Rasterising presets flatten pages to images (smaller, but text
+ * is no longer selectable); "Keep text" losslessly re-optimises the document. */
 export function CompressDialog({ onEstimate, onDownload, onClose }: Props) {
   const [sel, setSel] = useState("balanced");
   const [busy, setBusy] = useState(false);
-  const [est, setEst] = useState<Estimate | null>(null);
+  const [est, setEst] = useState<CompressEstimate | null>(null);
   const [errored, setErrored] = useState(false);
   const modalRef = useModal<HTMLDivElement>(onClose);
 
-  // Re-estimate whenever the preset changes; clears any stale preview first.
   const pick = async (key: string) => {
     setSel(key);
     setEst(null);
     setErrored(false);
     setBusy(true);
     try {
-      const result = await onEstimate(PRESETS.find((p) => p.key === key)!.opts);
+      const result = await onEstimate(CHOICES.find((c) => c.key === key)!.preset);
       setEst(result);
     } catch {
       setErrored(true);
@@ -51,13 +60,14 @@ export function CompressDialog({ onEstimate, onDownload, onClose }: Props) {
     }
   };
 
-  // Preview the default preset as soon as the dialog opens.
+  // Preview the default choice as soon as the dialog opens.
   useEffect(() => {
     void pick("balanced");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const pct = est && est.before > 0 ? Math.round((1 - est.after / est.before) * 100) : 0;
+  const rasterPct = est?.kind === "raster" && est.before > 0 ? Math.round((1 - est.after / est.before) * 100) : 0;
+  const isLossless = sel === "lossless";
 
   return (
     <div className="dialog-scrim" onPointerDown={onClose}>
@@ -77,45 +87,49 @@ export function CompressDialog({ onEstimate, onDownload, onClose }: Props) {
           </button>
         </div>
         <div className="compress__presets">
-          {PRESETS.map((p) => (
+          {CHOICES.map((c) => (
             <button
-              key={p.key}
-              className={`compress__preset${sel === p.key ? " compress__preset--on" : ""}`}
-              onClick={() => void pick(p.key)}
-              aria-pressed={sel === p.key}
+              key={c.key}
+              className={`compress__preset${sel === c.key ? " compress__preset--on" : ""}`}
+              onClick={() => void pick(c.key)}
+              aria-pressed={sel === c.key}
               disabled={busy}
             >
-              <span className="compress__preset-label">{p.label}</span>
-              <span className="compress__preset-hint body-small">{p.hint}</span>
+              <span className="compress__preset-label">{c.label}</span>
+              <span className="compress__preset-hint body-small">{c.hint}</span>
             </button>
           ))}
         </div>
 
-        {/* Live size preview for the selected preset. */}
+        {/* Live size preview for the selected choice. */}
         <div className="compress__estimate body-medium" aria-live="polite">
           {busy ? (
             <><span className="spinner spinner--sm" aria-hidden="true" /> Estimating size…</>
           ) : errored ? (
             <span className="compress__estimate-err">Couldn't estimate — try again.</span>
-          ) : est ? (
+          ) : est?.kind === "lossless" ? (
+            <><Icon name="check" size={15} /> <strong>{fmt(est.size)}</strong> · text stays selectable</>
+          ) : est?.kind === "raster" ? (
             est.helped ? (
-              <><Icon name="compress" size={15} /> {fmt(est.before)} → <strong>{fmt(est.after)}</strong> · {pct}% smaller</>
+              <><Icon name="compress" size={15} /> {fmt(est.before)} → <strong>{fmt(est.after)}</strong> · {rasterPct}% smaller</>
             ) : (
-              <>Already compact — {fmt(est.before)}. Compressing would grow it to {fmt(est.after)}, so the original is kept.</>
+              <>Rasterising wouldn't help ({fmt(est.after)}); the text version at {fmt(est.before)} will be used.</>
             )
           ) : (
-            <>Pick a preset to preview the size.</>
+            <>Pick an option to preview the size.</>
           )}
         </div>
 
         <p className="confirm__msg body-small">
-          Compression flattens each page to an image, so the exported copy won't be text-editable.
+          {isLossless
+            ? "Keeps every page selectable and searchable — just re-optimised and stripped of hidden metadata."
+            : "Rasterising flattens each page to an image, so the exported copy won't be text-editable."}{" "}
           Your working document is untouched.
         </p>
         <div className="dialog__actions">
           <button className="btn btn--text" onClick={onClose}>Cancel</button>
           <button className="btn btn--filled" onClick={onDownload} disabled={busy || !est}>
-            <Icon name="download" size={16} /> {est && !est.helped ? "Download original" : "Download"}
+            <Icon name="download" size={16} /> Download
           </button>
         </div>
       </div>

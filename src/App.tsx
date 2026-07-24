@@ -513,7 +513,7 @@ export function App() {
   // then download the previewed bytes. The baked bytes don't depend on the
   // preset, so they're cached across estimates for the life of the dialog.
   const compressBaked = useRef<{ buf: ArrayBuffer; sizes: { width: number; height: number }[]; before: number } | null>(null);
-  const compressOut = useRef<{ bytes: Uint8Array; helped: boolean; before: number; after: number } | null>(null);
+  const compressOut = useRef<{ bytes: Uint8Array; lossless: boolean; helped: boolean; before: number; after: number } | null>(null);
 
   const openCompress = useCallback(() => {
     setSelection(null);
@@ -523,22 +523,29 @@ export function App() {
   }, []);
 
   const estimateCompress = useCallback(
-    async (opts: import("./pdf/finishOps").CompressOptions): Promise<{ before: number; after: number; helped: boolean }> => {
+    async (preset: import("./components/CompressDialog").CompressPreset): Promise<import("./components/CompressDialog").CompressEstimate> => {
       if (!pdf) throw new Error("No document");
       if (!compressBaked.current) {
+        // The baked document already re-serialises through pdf-lib with object
+        // streams and stripped metadata, keeping selectable text — that IS the
+        // lossless result, and the size to beat for the rasterising presets.
         const baked = await bakeCurrent();
         const sizes = pdf.pages.map((p) => ({ width: p.viewBox.width, height: p.viewBox.height }));
         compressBaked.current = { buf: baked, sizes, before: baked.byteLength };
       }
       const { buf, sizes, before } = compressBaked.current;
+      if (preset.kind === "lossless") {
+        compressOut.current = { bytes: new Uint8Array(buf), lossless: true, helped: false, before, after: before };
+        return { kind: "lossless", size: before };
+      }
       const { compressPdf } = await import("./pdf/finishOps");
-      const compressed = await compressPdf(buf, sizes, opts);
+      const compressed = await compressPdf(buf, sizes, preset.opts);
       const after = compressed.byteLength;
       // Rasterising a text/vector PDF can produce a *larger* file. Keep whichever
       // is smaller so "compress" never hands back a bigger download.
       const helped = after < before;
-      compressOut.current = { bytes: helped ? compressed : new Uint8Array(buf), helped, before, after };
-      return { before, after, helped };
+      compressOut.current = { bytes: helped ? compressed : new Uint8Array(buf), lossless: false, helped, before, after };
+      return { kind: "raster", before, after, helped };
     },
     [pdf, bakeCurrent],
   );
@@ -548,13 +555,16 @@ export function App() {
     if (!out) return;
     setCompressOpen(false);
     const base = fileName.replace(/\.pdf$/i, "");
-    downloadBytes(out.bytes, base + (out.helped ? "-compressed.pdf" : ".pdf"));
+    const suffix = out.lossless ? "-optimized.pdf" : out.helped ? "-compressed.pdf" : ".pdf";
+    downloadBytes(out.bytes, base + suffix);
     setStatus("ready");
     const fmt = (n: number) => (n < 1_000_000 ? Math.round(n / 1000) + " KB" : (n / 1_000_000).toFixed(2) + " MB");
     setMessage(
-      out.helped
-        ? `Compressed — ${fmt(out.before)} → ${fmt(out.after)} (${Math.round((1 - out.after / out.before) * 100)}% smaller).`
-        : `Already compact — kept the original ${fmt(out.before)}.`,
+      out.lossless
+        ? `Optimized, text kept — ${fmt(out.before)}.`
+        : out.helped
+          ? `Compressed — ${fmt(out.before)} → ${fmt(out.after)} (${Math.round((1 - out.after / out.before) * 100)}% smaller).`
+          : `Already compact — kept the text version at ${fmt(out.before)}.`,
     );
     compressBaked.current = null;
     compressOut.current = null;
