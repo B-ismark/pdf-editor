@@ -24,15 +24,27 @@ async function main() {
   await mkdir(tessDir, { recursive: true });
   await mkdir(langDir, { recursive: true });
 
-  // Worker + the SIMD-LSTM core (matches what tesseract.js requests by default).
+  // Worker + LSTM wasm cores. tesseract.js picks a core variant at RUNTIME
+  // from the browser's CPU features: plain, `simd`, or `relaxedsimd`. Modern
+  // Chrome/Edge/Safari support relaxed SIMD and request the `relaxedsimd`
+  // core, so shipping only one variant makes OCR 404 (and fail) on most
+  // devices. Copy every LSTM variant — whichever the browser chooses is then
+  // present. (Each variant is a `.wasm.js` glue file plus its `.wasm`.)
   const worker = require.resolve("tesseract.js/dist/worker.min.js");
-  const coreJs = require.resolve("tesseract.js-core/tesseract-core-simd-lstm.wasm.js");
-  const coreWasm = join(dirname(coreJs), "tesseract-core-simd-lstm.wasm");
-
   await copyFile(worker, join(tessDir, "worker.min.js"));
-  await copyFile(coreJs, join(tessDir, "tesseract-core-simd-lstm.wasm.js"));
-  await copyFile(coreWasm, join(tessDir, "tesseract-core-simd-lstm.wasm"));
-  console.log("✓ Copied Tesseract worker + core into public/tesseract");
+
+  const CORE_VARIANTS = [
+    "tesseract-core-lstm", // baseline (no SIMD)
+    "tesseract-core-simd-lstm", // SIMD
+    "tesseract-core-relaxedsimd-lstm", // relaxed SIMD (most modern browsers)
+  ];
+  for (const name of CORE_VARIANTS) {
+    const coreJs = require.resolve(`tesseract.js-core/${name}.wasm.js`);
+    const coreWasm = join(dirname(coreJs), `${name}.wasm`);
+    await copyFile(coreJs, join(tessDir, `${name}.wasm.js`));
+    await copyFile(coreWasm, join(tessDir, `${name}.wasm`));
+  }
+  console.log(`✓ Copied Tesseract worker + ${CORE_VARIANTS.length} wasm cores into public/tesseract`);
 
   const langFile = join(langDir, `${LANG}.traineddata.gz`);
   try {

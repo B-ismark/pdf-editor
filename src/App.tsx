@@ -616,7 +616,7 @@ export function App() {
     setMessage("Reading text (OCR)…");
     try {
       const { ocrPages } = await import("./pdf/ocr");
-      const map = await ocrPages(
+      const { perPage, pagesFailed } = await ocrPages(
         pdf.bytes,
         pdf.pages,
         (p, t) =>
@@ -625,7 +625,7 @@ export function App() {
       );
       let added = 0;
       const pages = pdf.pages.map((pg) => {
-        const extra = map.get(pg.pageIndex) ?? [];
+        const extra = perPage.get(pg.pageIndex) ?? [];
         added += extra.length;
         // Replace any prior OCR layer so re-running doesn't duplicate words.
         const kept = pg.fragments.filter((f) => !f.id.startsWith("ocr:"));
@@ -633,10 +633,11 @@ export function App() {
       });
       setPdf({ ...pdf, pages });
       setStatus("ready");
+      const partial = pagesFailed > 0 ? ` (${pagesFailed} page(s) couldn't be read)` : "";
       setMessage(
         added > 0
-          ? `OCR added ${added} words — now searchable and redactable.`
-          : "No recognisable text found.",
+          ? `OCR added ${added} words — now searchable and redactable.${partial}`
+          : `No recognisable text found.${partial}`,
       );
     } catch (err) {
       const name = (err as Error)?.name;
@@ -648,8 +649,16 @@ export function App() {
         setStatus("error");
         setMessage("Text recognition isn't available in this version.");
       } else {
+        // Surface the real cause in the console — the UI message is deliberately
+        // generic, but we need the underlying error to diagnose field reports.
+        console.error("OCR failed:", err);
+        const timedOut = /timed out/i.test((err as Error)?.message ?? "");
         setStatus("error");
-        setMessage("OCR couldn't finish on this document. It may be very large or image-heavy — try again.");
+        setMessage(
+          timedOut
+            ? "OCR timed out on this document — it may be very large or image-heavy. Try again, or split it into fewer pages."
+            : "OCR couldn't finish on this document. It may be very large or image-heavy — try again.",
+        );
       }
     } finally {
       setOnCancel(null);

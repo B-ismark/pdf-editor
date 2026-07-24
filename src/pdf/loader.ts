@@ -184,7 +184,12 @@ export async function renderPageToCanvas(
   pageIndex: number,
   scale: number,
 ): Promise<HTMLCanvasElement> {
-  const doc = await pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+  // Reuse the cached parse instead of re-reading (and re-cloning) the whole
+  // file on every call. OCR and redaction-rasterisation call this once per
+  // page; a fresh getDocument()+slice per page turned an N-page document into
+  // N full parses and N buffer copies — the dominant cost (and a common
+  // out-of-memory / timeout cause) on large or image-heavy PDFs.
+  const doc = await getCachedDoc(bytes);
   const page = await doc.getPage(pageIndex + 1);
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement("canvas");
@@ -193,6 +198,5 @@ export async function renderPageToCanvas(
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not get 2D canvas context");
   await page.render({ canvasContext: ctx, viewport }).promise;
-  await doc.destroy();
   return canvas;
 }

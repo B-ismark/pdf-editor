@@ -69,22 +69,56 @@ async function assetsPresent(): Promise<boolean> {
   }
 }
 
-/** Render scale for OCR — higher is more accurate but slower. */
+/** Preferred render scale for OCR — higher is more accurate but slower. */
 const OCR_SCALE = 2;
+
+/** Canvas safety limits. Browsers cap both the largest side and the total
+ * pixel area of a canvas; mobile Safari is the tightest (~16.7M px area). A
+ * page rasterised past the limit comes back blank or fails to allocate, which
+ * looks like "OCR found nothing" or a hard error. We reduce the render scale
+ * per page so the backing store always stays inside these bounds. */
+const MAX_CANVAS_DIM = 8192;
+const MAX_CANVAS_AREA = 16_777_216;
+
+/** Largest render scale (≤ preferred) that keeps a page's canvas within the
+ * browser's limits, given its size at scale 1 (PDF points). For ordinary
+ * pages this returns the preferred scale unchanged; only unusually large page
+ * boxes are scaled down — and since those are physically large, even a reduced
+ * scale still yields thousands of pixels, so OCR stays legible rather than
+ * failing outright. */
+function safeOcrScale(widthPt: number, heightPt: number): number {
+  let scale = Math.min(OCR_SCALE, MAX_CANVAS_DIM / widthPt, MAX_CANVAS_DIM / heightPt);
+  if (widthPt * heightPt * scale * scale > MAX_CANVAS_AREA) {
+    scale = Math.sqrt(MAX_CANVAS_AREA / (widthPt * heightPt));
+  }
+  return Math.max(0.1, scale);
+}
+
+/** Outcome of an OCR run: recognised words per page, plus how many pages the
+ * engine couldn't read (so the caller can report partial success honestly). */
+export interface OcrResult {
+  perPage: Map<number, TextFragment[]>;
+  pagesRead: number;
+  pagesFailed: number;
+  total: number;
+}
 
 /**
  * Recognise text on the given pages and return new TextFragments per page
  * (PDF units, bottom-left origin). Appending these to a page's fragments turns
  * a scanned image into a searchable, redactable, selectable text layer.
  *
- * Runs entirely on-device via a self-hosted Tesseract worker.
+ * Runs entirely on-device via a self-hosted Tesseract worker. A page that
+ * times out or fails to render is skipped (and counted) rather than aborting
+ * the whole document — so one pathological page can't discard every other
+ * page's results.
  */
 export async function ocrPages(
   bytes: ArrayBuffer,
   pages: PageData[],
   onProgress?: OcrProgress,
   signal?: AbortSignal,
-): Promise<Map<number, TextFragment[]>> {
+): Promise<OcrResult> {
   if (signal?.aborted) throw new OcrCancelled();
   if (!(await assetsPresent())) throw new OcrAssetsMissing();
 
@@ -101,23 +135,49 @@ export async function ocrPages(
     "Loading OCR engine",
   );
 
-  const result = new Map<number, TextFragment[]>();
+  const perPage = new Map<number, TextFragment[]>();
+  let pagesFailed = 0;
   try {
     for (let p = 0; p < pages.length; p++) {
       if (signal?.aborted) throw new OcrCancelled();
       onProgress?.(p + 1, pages.length, "Reading text");
       const page = pages[p];
-      const canvas = await renderPageToCanvas(bytes, page.pageIndex, OCR_SCALE);
-      const { data } = await withTimeout(
-        worker.recognize(canvas, {}, { blocks: true }),
-        PAGE_TIMEOUT,
-        `Recognising page ${p + 1}`,
-      );
-      const frags = wordsToFragments(collectWords(data), page, OCR_SCALE);
-      result.set(page.pageIndex, frags);
+      let canvas: HTMLCanvasElement | null = null;
+      try {
+        const scale = safeOcrScale(page.viewBox.width, page.viewBox.height);
+        canvas = await renderPageToCanvas(bytes, page.pageIndex, scale);
+        const { data } = await withTimeout(
+          worker.recognize(canvas, {}, { blocks: true }),
+          PAGE_TIMEOUT,
+          `Recognising page ${p + 1}`,
+        );
+        perPage.set(page.pageIndex, wordsToFragments(collectWords(data), page, scale));
+      } catch (err) {
+        // Cancellation must propagate; a per-page failure is isolated.
+        if (signal?.aborted || (err as Error)?.name === "OcrCancelled") throw new OcrCancelled();
+        pagesFailed++;
+        console.warn(`OCR skipped page ${page.pageIndex + 1}:`, err);
+      } finally {
+        // Release the (potentially very large) backing store right away instead
+        // of waiting for GC — matters when OCR-ing many pages on a phone.
+        if (canvas) {
+          canvas.width = 0;
+          canvas.height = 0;
+        }
+      }
     }
   } finally {
     await worker.terminate();
   }
-  return result;
+
+  // Every page failed → this isn't "no text found", it's a real failure.
+  if (pagesFailed === pages.length && pages.length > 0) {
+    throw new Error(`OCR failed on all ${pages.length} page(s).`);
+  }
+  return {
+    perPage,
+    pagesRead: pages.length - pagesFailed,
+    pagesFailed,
+    total: pages.length,
+  };
 }
