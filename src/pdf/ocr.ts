@@ -1,4 +1,5 @@
 import { renderPageToCanvas } from "./loader";
+import { collectWords, wordsToFragments } from "./ocrText";
 import type { PageData, TextFragment } from "./types";
 
 /** Progress callback: 1-based page, total pages, and a coarse status. */
@@ -71,27 +72,6 @@ async function assetsPresent(): Promise<boolean> {
 /** Render scale for OCR — higher is more accurate but slower. */
 const OCR_SCALE = 2;
 
-interface OcrWord {
-  text: string;
-  bbox: { x0: number; y0: number; x1: number; y1: number };
-}
-
-/** Pull the recognised words out of a Tesseract result, tolerating the
- * different shapes across versions (flat `words`, or nested in `blocks`). */
-function collectWords(data: unknown): OcrWord[] {
-  const d = data as { words?: OcrWord[]; blocks?: unknown[] };
-  if (Array.isArray(d.words) && d.words.length) return d.words;
-  const out: OcrWord[] = [];
-  for (const block of (d.blocks ?? []) as { paragraphs?: unknown[] }[]) {
-    for (const para of (block.paragraphs ?? []) as { lines?: unknown[] }[]) {
-      for (const line of (para.lines ?? []) as { words?: OcrWord[] }[]) {
-        for (const w of line.words ?? []) out.push(w);
-      }
-    }
-  }
-  return out;
-}
-
 /**
  * Recognise text on the given pages and return new TextFragments per page
  * (PDF units, bottom-left origin). Appending these to a page's fragments turns
@@ -133,28 +113,7 @@ export async function ocrPages(
         PAGE_TIMEOUT,
         `Recognising page ${p + 1}`,
       );
-      const H = page.viewBox.height;
-      const frags: TextFragment[] = [];
-      const words = collectWords(data);
-      words.forEach((w, i) => {
-        if (!w.text || !w.text.trim()) return;
-        const x = w.bbox.x0 / OCR_SCALE;
-        const wPdf = (w.bbox.x1 - w.bbox.x0) / OCR_SCALE;
-        const hPdf = (w.bbox.y1 - w.bbox.y0) / OCR_SCALE;
-        // Tesseract y is top-down; convert the baseline (word bottom) to y-up.
-        const baseline = H - w.bbox.y1 / OCR_SCALE;
-        const size = Math.max(6, hPdf);
-        frags.push({
-          id: `ocr:${page.pageIndex}:${i}`,
-          pageIndex: page.pageIndex,
-          itemIndex: 100000 + i,
-          original: w.text,
-          transform: [size, 0, 0, size, x, baseline],
-          width: wPdf,
-          height: hPdf,
-          fontFamily: "sans-serif",
-        });
-      });
+      const frags = wordsToFragments(collectWords(data), page, OCR_SCALE);
       result.set(page.pageIndex, frags);
     }
   } finally {
