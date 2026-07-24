@@ -1,6 +1,7 @@
 import { PDFDocument } from "pdf-lib";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
+import { loadJpegEncoder } from "./jpeg";
 import { yieldToUI } from "./yield";
 
 // Page numbering and watermark are no longer separate document-rebuild passes;
@@ -18,7 +19,8 @@ export interface CompressOptions {
  * Shrink a PDF by rasterising every page to a JPEG and rebuilding. This throws
  * away the vector/text layer (so it's best for sharing/printing, not further
  * editing) but reliably cuts size on image-heavy or bloated PDFs. Runs entirely
- * on-device.
+ * on-device, encoding with MozJPEG when available (smaller files at the same
+ * quality) and the browser's JPEG encoder otherwise.
  */
 export async function compressPdf(
   bytes: ArrayBuffer,
@@ -27,11 +29,12 @@ export async function compressPdf(
   onProgress?: (page: number, total: number) => void,
 ): Promise<Uint8Array> {
   const out = await PDFDocument.create({ updateMetadata: false });
+  const encodeJpeg = await loadJpegEncoder(opts.quality);
   for (let i = 0; i < pageSizes.length; i++) {
     onProgress?.(i + 1, pageSizes.length);
     await yieldToUI();
     const canvas = await renderPageToCanvas(bytes, i, opts.scale);
-    const jpg = canvas.toDataURL("image/jpeg", opts.quality);
+    const jpg = await encodeJpeg(canvas);
     const img = await out.embedJpg(jpg);
     const { width, height } = pageSizes[i];
     const page = out.addPage([width, height]);
