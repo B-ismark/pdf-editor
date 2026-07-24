@@ -100,26 +100,66 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
   return { bytes, pages };
 }
 
-/** Render one page to a canvas at the given scale. */
-export async function renderPage(
+/** A page render in progress, with a way to abort it. */
+export interface RenderHandle {
+  /** Resolves when the page has painted; rejects on error or cancellation. */
+  promise: Promise<void>;
+  /** Abort the render. Safe to call at any point (before or during paint). */
+  cancel: () => void;
+}
+
+/** True if an error is pdf.js's benign "this render was cancelled" signal. */
+export function isRenderCancelled(err: unknown): boolean {
+  return !!err && typeof err === "object" && (err as { name?: string }).name === "RenderingCancelledException";
+}
+
+/**
+ * Render one page to a canvas at the given scale.
+ *
+ * Returns a {@link RenderHandle} rather than a bare promise: pdf.js throws
+ * "Cannot use the same canvas during multiple render() operations" if a second
+ * `render()` starts on a canvas whose previous render is still in flight. That
+ * happens whenever the inputs change mid-render — e.g. merging in another PDF
+ * swaps `bytes` while pages are still painting. Callers must `cancel()` the
+ * previous handle before starting a new render on the same canvas so the
+ * in-flight pdf.js task is torn down first.
+ */
+export function renderPage(
   bytes: ArrayBuffer,
   pageIndex: number,
   canvas: HTMLCanvasElement,
   scale: number,
-): Promise<void> {
-  const doc = await getCachedDoc(bytes);
-  const page = await doc.getPage(pageIndex + 1);
-  const viewport = page.getViewport({ scale });
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Could not get 2D canvas context");
+): RenderHandle {
+  let cancelled = false;
+  let task: { cancel: () => void } | null = null;
 
-  // Backing store at scale × devicePixelRatio; the element's display size is
-  // controlled by CSS (the page container), so we don't touch canvas.style.
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = Math.max(1, Math.floor(viewport.width * dpr));
-  canvas.height = Math.max(1, Math.floor(viewport.height * dpr));
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  await page.render({ canvasContext: ctx, viewport }).promise;
+  const promise = (async () => {
+    const doc = await getCachedDoc(bytes);
+    if (cancelled) return;
+    const page = await doc.getPage(pageIndex + 1);
+    if (cancelled) return;
+    const viewport = page.getViewport({ scale });
+    const ctx = canvas.getContext("2d");
+    if (!ctx) throw new Error("Could not get 2D canvas context");
+
+    // Backing store at scale × devicePixelRatio; the element's display size is
+    // controlled by CSS (the page container), so we don't touch canvas.style.
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.max(1, Math.floor(viewport.width * dpr));
+    canvas.height = Math.max(1, Math.floor(viewport.height * dpr));
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const renderTask = page.render({ canvasContext: ctx, viewport });
+    task = renderTask;
+    await renderTask.promise;
+  })();
+
+  return {
+    promise,
+    cancel: () => {
+      cancelled = true;
+      task?.cancel();
+    },
+  };
 }
 
 /** Cache of parsed pdf.js documents keyed by the original byte buffer, so

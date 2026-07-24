@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { renderPage } from "../pdf/loader";
+import { renderPage, isRenderCancelled } from "../pdf/loader";
 import { isFragmentModified, resolveFragmentStyle } from "../pdf/style";
 import type {
   Annotation,
@@ -111,8 +111,11 @@ export function PageView(props: Props) {
     let cancelled = false;
     const canvas = canvasRef.current;
     if (!canvas) return;
+    let handle: ReturnType<typeof renderPage> | null = null;
     const timer = setTimeout(() => {
-      renderPage(bytes, page.pageIndex, canvas, scale)
+      if (cancelled) return;
+      handle = renderPage(bytes, page.pageIndex, canvas, scale);
+      handle.promise
         .then(() => {
           if (!cancelled) {
             setPainted(true);
@@ -120,12 +123,17 @@ export function PageView(props: Props) {
           }
         })
         .catch((err) => {
-          if (!cancelled) setError(String(err));
+          // Cancellation is expected when inputs change mid-render (e.g. merge);
+          // it's not a failure to surface.
+          if (!cancelled && !isRenderCancelled(err)) setError(String(err));
         });
     }, 90);
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      // Tear down the in-flight pdf.js render so the next effect run can reuse
+      // this canvas without colliding with a live render() operation.
+      handle?.cancel();
     };
   }, [bytes, page.pageIndex, scale]);
 

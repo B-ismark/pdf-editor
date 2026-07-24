@@ -398,22 +398,32 @@ body {
 /* ============ Floating zoom control ============ */
 .zoombar {
   position: absolute;
-  /* Mobile: bottom-left, clear of the bottom nav bar (the FAB owns
-     bottom-right). Desktop override below moves it to bottom-right. */
-  left: 16px;
-  bottom: calc(76px + env(safe-area-inset-bottom));
+  /* Top-right corner — the only zone no other floating surface claims. The
+     whole bottom edge is the tool cluster (dock + draw options), and every
+     contextual toolbar (find / multi-select / selection) is top-centre, so a
+     bottom-anchored zoom pill was inevitably covered by the draw bar. Pinning
+     it to the top-right keeps it permanently clear of the tool cluster; on
+     phones it also yields to a top-centre bar when one is showing (App gates
+     rendering) so the two never overlap on a narrow screen. */
+  top: 12px;
+  right: 12px;
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 4px;
+  padding: 3px;
   border-radius: var(--radius-full);
-  background: var(--surface-container-high);
+  background: color-mix(in srgb, var(--surface-container-high) 92%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
   box-shadow: var(--shadow-2);
-  z-index: 15;
+  /* Above the snackbar (50): a transient top-centre toast can reach the corner
+     on a narrow screen, and the zoom read-out should stay legible over the
+     toast's (empty) right padding rather than being covered by it. */
+  z-index: 55;
 }
 .zoombar__label {
-  min-width: 48px;
-  height: 44px;
+  min-width: 46px;
+  height: 40px;
   border: none;
   background: transparent;
   color: var(--on-surface);
@@ -1714,7 +1724,7 @@ body {
 
   /* Clear the floating tool dock at the bottom. */
   .viewer__scroll { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
-  .zoombar { left: auto; right: 16px; bottom: 16px; }
+  .zoombar { top: 16px; right: 16px; }
 
   .scrim { display: none; }
   .panel {

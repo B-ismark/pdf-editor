@@ -1770,9 +1770,11 @@ export function App() {
             </div>
           </div>
 
-          {/* Pinned zoom control (bottom-right, does not scroll) — hidden
-              while the mobile properties sheet covers the bottom. */}
-          {!sheetOpen && (
+          {/* Pinned zoom control (top-right, does not scroll). On phones it
+              yields to whichever top-centre contextual bar is showing (find /
+              multi-select / selection) so the two never overlap on a narrow
+              screen; the bottom tool cluster never reaches it. */}
+          {!(compact && (findOpen || multi.length >= 2 || (selection && selection.kind !== "stamp" && !sheetOpen))) && (
           <div className="zoombar" role="group" aria-label="Zoom">
             <button className="icon-btn" onClick={vp.zoomOut} aria-label="Zoom out" data-tip="Zoom out">
               <Icon name="remove" size={18} />
