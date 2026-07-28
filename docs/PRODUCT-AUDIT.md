@@ -434,12 +434,12 @@ checkout without devDependencies, and `continue-on-error` is gone — a failure
 now means something is genuinely wrong with the build rather than with someone
 else's server.
 
-With that in place, OCR was verified end-to-end against a new image-only fixture
-(an image-only page with zero extractable text): it recovered all four rendered
-words, requested only `tessdata/` and `tesseract/` paths on our own origin,
-raised no CSP violations, and made the scan findable. The run also confirmed the
-runtime picks the `relaxedsimd` core, which is why all three wasm variants have
-to be shipped.
+With that in place, OCR was verified end-to-end against a new fixture — one page
+whose only content is a bitmap of text, with no extractable text layer at all. It
+recovered all four rendered words, requested only `tessdata/` and `tesseract/`
+paths on our own origin, raised no CSP violations, and made the scan findable.
+The run also confirmed the runtime picks the `relaxedsimd` core, which is why all
+three wasm variants have to be shipped.
 
 One note on the fixture: the first version drew its text with a hand-rolled 5×7
 pixel font, and Tesseract read **1 of 3 words** from it. Tesseract is trained on
