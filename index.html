@@ -12,14 +12,22 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#6750a4" />
-    <title>PDF Text Editor</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Roboto+Flex:opsz,wght@8..144,400;8..144,500;8..144,700&display=swap"
-      rel="stylesheet"
+    <link rel="icon" href="./favicon.svg" type="image/svg+xml" />
+    <!-- Match the browser chrome to the theme actually in use. -->
+    <meta name="theme-color" content="#fef7ff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#141218" media="(prefers-color-scheme: dark)" />
+    <title>PDF Editor — edit PDFs in your browser</title>
+    <meta
+      name="description"
+      content="Edit PDF text, annotate, sign, redact and reorganise pages entirely in your browser. No uploads, no accounts — the file never leaves your device."
     />
+    <!--
+      No web fonts. A CDN stylesheet would send every visitor's IP, User-Agent
+      and Referer to a third party on page load, which flatly contradicts the
+      "nothing leaves your device" promise this app is built on — and would be
+      blocked in the offline/locked-down environments it should still work in.
+      The type scale runs on the system font stack (see theme.css).
+    -->
   </head>
   <body>
     <script>

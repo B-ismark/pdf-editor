@@ -1,5 +1,6 @@
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
+import { isRejectedUrl } from "../pdf/url";
 import type { Annotation, FontKey, Selection, TextStyle } from "../pdf/types";
 
 interface Props {
@@ -56,6 +57,7 @@ export function PropertiesPanel({
   onReset,
   onClose,
 }: Props) {
+  const linkRejected = isRejectedUrl(linkUrl ?? "");
   const title =
     selection?.kind === "redaction"
       ? redactionCover
@@ -104,18 +106,34 @@ export function PropertiesPanel({
       {selection?.kind === "link" && (
         <div className="props__section">
           <div className="field">
-            <span className="field__label label-medium">Link URL</span>
+            <label className="field__label label-medium" htmlFor="link-url">
+              Link URL
+            </label>
             <input
+              id="link-url"
               className="numinput"
               style={{ width: "100%" }}
               type="url"
               inputMode="url"
               placeholder="https://example.com"
               value={linkUrl ?? ""}
+              aria-invalid={linkRejected || undefined}
+              aria-describedby="link-url-note"
               onChange={(e) => onChangeLinkUrl?.(e.target.value)}
             />
           </div>
-          <p className="props__empty body-small">Draw a box over anything to make it clickable in the exported PDF.</p>
+          {/* Only http(s), mailto and tel are exportable — a `javascript:` or
+              `data:` URI would be live active content in the recipient's
+              reader, so it's refused rather than quietly dropped at export. */}
+          <p
+            id="link-url-note"
+            className={`props__empty body-small${linkRejected ? " props__warn" : ""}`}
+            role={linkRejected ? "alert" : undefined}
+          >
+            {linkRejected
+              ? "That address can't be used in a PDF link. Use a web (https://), email (mailto:) or phone (tel:) address."
+              : "Draw a box over anything to make it clickable in the exported PDF."}
+          </p>
           <button className="btn btn--danger" onClick={onDelete}>
             <Icon name="delete" size={16} /> Delete
           </button>
@@ -139,6 +157,7 @@ export function PropertiesPanel({
                 min={1}
                 max={12}
                 value={annotation.strokeWidth}
+                aria-label="Stroke width"
                 onChange={(e) => onChangeAnnotation({ strokeWidth: Number(e.target.value) })}
               />
             </div>

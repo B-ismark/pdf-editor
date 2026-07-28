@@ -1,6 +1,7 @@
 import { PDFCheckBox, PDFDocument, PDFString, PDFTextField, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
+import { safeLinkUrl } from "./url";
 import { createSourceFontEmbedder, type SourceFontEmbedder } from "./fontEmbed";
 import { yieldToUI } from "./yield";
 import {
@@ -100,10 +101,16 @@ function fillAndFlattenForm(src: PDFDocument, formValues: Record<string, string 
 }
 
 /** Attach clickable URI link annotations to a page (works on vector and
- * rasterised pages alike — links sit above the content). */
+ * rasterised pages alike — links sit above the content).
+ *
+ * URLs go through `safeLinkUrl` here as well as in the UI: this is the only
+ * place a URI reaches the file, so it's where the allow-list has to hold even
+ * if a value arrives from a restored session or a future call site. A rejected
+ * scheme (`javascript:`, `data:`, `file:`, …) drops the annotation rather than
+ * writing an active action into a document the user is about to share. */
 function addLinkAnnots(out: PDFDocument, page: PDFPage, links: LinkAnnot[]): void {
   for (const l of links) {
-    const url = l.url.trim();
+    const url = safeLinkUrl(l.url);
     if (!url) continue;
     const dict = out.context.obj({
       Type: "Annot",
@@ -121,6 +128,21 @@ async function embedStamp(out: PDFDocument, dataUrl: string) {
   return dataUrl.startsWith("data:image/png")
     ? out.embedPng(dataUrl)
     : out.embedJpg(dataUrl);
+}
+
+/** Encode a canvas to PNG bytes without a base64 round-trip. Falls back to
+ * `toDataURL` on the (rare) browser where `toBlob` isn't available. */
+async function canvasPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
+  if (typeof canvas.toBlob !== "function") {
+    return Uint8Array.from(atob(canvas.toDataURL("image/png").split(",")[1]), (c) =>
+      c.charCodeAt(0),
+    );
+  }
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/png"),
+  );
+  if (!blob) throw new Error("Could not encode the page image");
+  return new Uint8Array(await blob.arrayBuffer());
 }
 
 /** Load a data-URL image element (for the raster path). */
@@ -507,13 +529,25 @@ async function rasterisePage(
     const style = resolveFragmentStyle(fragment, edit!.style);
     const x = fragment.transform[4];
     const y = fragment.transform[5];
+    // Measure the replacement text instead of estimating it. The old estimate
+    // (`text.length * size * 0.2`) under-reports badly for anything wider than
+    // narrow lowercase — wide glyphs, capitals, most non-Latin scripts — so the
+    // cover fell short of the replacement and the *original* text stayed visible
+    // beyond it. On this path that's a redaction failure, not a cosmetic one:
+    // the raster is all that survives into the output, so whatever it shows is
+    // permanent and whatever the user thought they had overwritten is not.
+    ctx.font = cssFont(style, style.size * S);
+    const lines = edit!.text.split("\n");
+    const widest = Math.max(...lines.map((line) => ctx.measureText(line).width / S));
+    // Extra lines step downward from the baseline, so the cover has to grow with
+    // them or the replacement text lands on top of un-covered original glyphs.
+    const coverHeight = style.size * 1.2 + (lines.length - 1) * style.size * TEXTBOX_LINE_HEIGHT;
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(
       (x - style.size * 0.05) * S,
       (H - (y + style.size * 0.98)) * S,
-      (Math.max(fragment.width, edit!.text.length * style.size * 0.2) +
-        style.size * 0.1) * S,
-      style.size * 1.2 * S,
+      (Math.max(fragment.width, widest) + style.size * 0.1) * S,
+      coverHeight * S,
     );
     drawText(edit!.text, x, y, style);
   }
@@ -545,7 +579,13 @@ async function rasterisePage(
     ctx.fillRect(r.x * S, (H - (r.y + r.height)) * S, r.width * S, r.height * S);
   }
 
-  const png = await out.embedPng(canvas.toDataURL("image/png"));
+  // Via a Blob, not `toDataURL()`. A redacted A4 page at 3× is ~7 MP, whose PNG
+  // becomes a ~10-30 MB base64 *string* that pdf-lib then decodes back to bytes
+  // — two large copies plus the base64 33% overhead, all on the main thread and
+  // all held at once. `toBlob` hands over the encoded bytes directly, which on a
+  // document with several redacted pages is the difference between exporting and
+  // an out-of-memory tab.
+  const png = await out.embedPng(await canvasPngBytes(canvas));
   const wPt = pageData.viewBox.width;
   const hPt = pageData.viewBox.height;
   const page = out.addPage([wPt, hPt]);

@@ -18,9 +18,10 @@ and is **mobile- and tablet-first**:
 - **Touch-first canvas** — one finger pans/scrolls (never edits by accident),
   two fingers pinch-zoom, double-tap toggles fit ⇄ 2×, with app-managed
   zoom anchoring and 48px touch targets / enlarged drag handles on touch.
-- **Self-contained** — the bundled [Lucide] icon set (no CDN) and a graceful
-  system-font fallback, so the UI renders fully even if web fonts are blocked
-  or offline.
+- **Self-contained** — the bundled [Lucide] icon set and the platform's own UI
+  font, with **no CDN, web font, or third-party request of any kind**, so the UI
+  renders identically offline, on a locked-down network, and without telling
+  anyone you opened it.
 - **Light / dark / system theme** — a toggle in the app bar; the choice is
   remembered and applied before first paint (no flash), and *system* follows
   the OS live.
@@ -101,9 +102,18 @@ npm install
 npm run dev      # start the dev server
 npm run build    # type-check + production build to dist/
 npm run preview  # serve the production build
+
+npm run fixtures # generate the test PDFs (once)
+npm run check    # end-to-end checks against dist/ in a real browser
 ```
 
 Then open the printed URL and drop in a PDF.
+
+`npm run check` verifies the properties a type-checker can't see: that no request
+leaves the origin, that the CSP is in force, that a redacted page really has no
+recoverable text layer, that no `javascript:` URI or authoring metadata reaches an
+exported file, that a long document doesn't rasterise itself end to end, and that
+the phone layout doesn't collide. Run it after `npm run build`.
 
 ## Deployment
 
@@ -122,6 +132,28 @@ resolve correctly under the project subpath.
 
 The app itself collects **nothing** — no analytics, no telemetry, no cookies,
 no external calls. Your PDFs and edits never leave your browser, by design.
+
+That's enforced, not just intended. The page ships a **Content-Security-Policy**
+with `default-src 'self'` and `connect-src 'self'`, so the browser itself blocks
+any request to an outside host — including one a future dependency might try to
+make. There are no web fonts and no CDN references, so opening the app makes
+exactly one set of requests, all to the origin serving it. `npm run check`
+asserts this in a real browser on every run.
+
+Two things are stored locally, both under your control:
+
+- **Preferences** (`localStorage`) — theme, last text style, draw tool, saved
+  signatures.
+- **A session copy** (IndexedDB) — the open PDF and your edits, so a crash or an
+  accidental reload doesn't lose your work. Because that's a real copy of your
+  document on the device, the overflow menu has a **Save session on this device**
+  toggle; switching it off deletes what's already stored. The restore prompt also
+  offers **Delete** alongside **Restore**.
+
+Downloaded files are scrubbed before you get them: document metadata, timestamps,
+XMP, embedded JavaScript and files, auto-run actions, and any annotation action
+that isn't a plain link are all stripped, and link URLs are limited to
+`http(s)`, `mailto:` and `tel:` so an exported PDF can't carry active content.
 
 To get a rough sense of usage without breaking that promise, use GitHub's
 built-in traffic stats: on the repository, open **Insights → Traffic** to see

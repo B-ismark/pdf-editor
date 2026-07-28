@@ -55,9 +55,14 @@
   --radius-xxl: 48px;
   --radius-full: 9999px;
 
-  /* ---- Typography ---- */
-  --font-brand: "Roboto Flex", "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
-  --font-plain: "Roboto Flex", "Roboto", system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* ---- Typography ----
+     System-font-first by design. Naming a web font first would either produce a
+     silent fallback (the font is never loaded — no CDN, see index.html) or
+     invite one back in; the platform UI font is also what users have already
+     scaled to their preferred size. "Roboto" stays in the stack because it *is*
+     the system font on Android/ChromeOS. */
+  --font-brand: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-plain: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
 
   /* ---- Motion: easing ---- */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
