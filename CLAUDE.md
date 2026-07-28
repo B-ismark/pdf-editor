@@ -33,7 +33,7 @@ npm run check      # end-to-end checks against dist/ (starts its own preview)
 
 There is **no unit-test runner / linter** configured. Verification is
 `npm run build` (which type-checks) plus **`npm run check`**
-(`scripts/check.mjs`) — 24 end-to-end assertions in real Chromium against the
+(`scripts/check.mjs`) — 31 end-to-end assertions in real Chromium against the
 built bundle. **Run both before committing.** The checks cover the invariants
 type-checking can't see, and each one exists because it broke once:
 
@@ -44,6 +44,9 @@ type-checking can't see, and each one exists because it broke once:
   neither a `javascript:` URI nor authoring metadata reaches the exported bytes;
 - a redacted page has no extractable text while its neighbours keep theirs;
 - autosave stores a session and the toggle erases it;
+- OCR turns an image-only page into findable text, loading its engine and
+  language model from our own origin only (skipped if assets aren't installed);
+- the active Find match is scrolled on screen and clear of the find bar;
 - on a phone, the status message clears the zoom pill and the tool dock.
 
 If you add a feature that touches privacy, the export bytes, or per-page
@@ -140,10 +143,26 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each of them.
 
 OCR uses **tesseract.js**, lazy-loaded in `pdf/ocr.ts`. To honour the no-CDN /
 privacy rule, all OCR assets are served from the app's own origin: run
-`npm run setup-ocr` to copy the worker + wasm core into `public/tesseract/` and
-download the language model into `public/tessdata/` (both git-ignored; the
-deploy workflow runs this step). If the assets are absent, OCR degrades
-gracefully with a "run `npm run setup-ocr`" message. Recognised words are
+`npm run setup-ocr` to copy the worker + wasm cores into `public/tesseract/` and
+the language model into `public/tessdata/` (both git-ignored; the deploy workflow
+runs this step). If the assets are absent, OCR degrades gracefully with a
+"run `npm run setup-ocr`" message.
+
+**Every OCR asset comes from an installed package**, including the language
+model (`@tesseract.js-data/eng`, the `4.0.0_best_int` variant). It used to be
+downloaded from `tessdata.projectnaptha.com` with `continue-on-error: true` in
+CI, which meant any outage or block on that one host produced a *green* deploy
+where OCR was dead and users saw "Text recognition isn't available in this
+version". Sourcing it from npm makes the bytes lockfile-pinned and lets the
+workflow step fail loudly. Don't reintroduce a network fetch on this path.
+
+`npm run check` exercises OCR end-to-end against `.fixtures/scanned.pdf` (an
+image-only page with no text layer) whenever the assets are installed, and skips
+those checks otherwise. The fixture's bitmap is rendered by a real browser in a
+real typeface — a hand-rolled pixel font was tried and Tesseract read 1 of 3
+words from it, which makes for a useless assertion.
+
+Recognised words are
 appended to a page's `fragments` as a transparent, selectable/searchable text
 layer (so Find and search-and-redact work on scans).
 

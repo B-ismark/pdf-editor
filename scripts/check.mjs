@@ -21,13 +21,14 @@ const BASE = `http://localhost:${PORT}/`;
 const FIXTURES = new URL("../.fixtures/", import.meta.url);
 const SAMPLE = new URL("sample.pdf", FIXTURES).pathname;
 const LONG = new URL("long.pdf", FIXTURES).pathname;
+const SCANNED = new URL("scanned.pdf", FIXTURES).pathname;
 // The sandbox has Chromium pre-installed; fall back to Playwright's own lookup.
 const EXEC = [
   "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
   "/opt/pw-browsers/chromium/chrome-linux/chrome",
 ].find(existsSync);
 
-if (!existsSync(SAMPLE) || !existsSync(LONG)) {
+if (!existsSync(SAMPLE) || !existsSync(LONG) || !existsSync(SCANNED)) {
   console.error("Missing fixtures — run `npm run fixtures` first.");
   process.exit(2);
 }
@@ -287,6 +288,89 @@ try {
       JSON.stringify(await keys()),
     );
 
+    await ctx.close();
+  }
+
+  // ------------------------------------------------------------------ OCR
+  // Skipped rather than failed when the assets aren't installed, so the suite
+  // still runs on a checkout that hasn't done `npm run setup-ocr`.
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const { page, errors, external } = await instrument(ctx);
+    await page.goto(BASE, { waitUntil: "networkidle" });
+    const assetsReady = await page.evaluate(async () => {
+      try {
+        const res = await fetch("./tessdata/eng.traineddata.gz", { method: "HEAD" });
+        return res.ok && !(res.headers.get("content-type") ?? "").includes("text/html");
+      } catch {
+        return false;
+      }
+    });
+
+    if (!assetsReady) {
+      console.log("  skip  OCR checks (run `npm run setup-ocr` to include them)");
+    } else {
+      await openDoc(page, SCANNED);
+      check(
+        "a scanned page starts with no text layer",
+        (await page.locator('.page [role="textbox"]').count()) === 0,
+      );
+
+      await page.click('[aria-label="More actions"]');
+      await page.locator('[role="menuitem"]', { hasText: "OCR" }).click();
+      // Wait for a terminal status rather than a fixed delay — engine start-up
+      // dominates and varies.
+      await page
+        .locator(".snackbar__msg", { hasText: /OCR added|No recognisable|couldn't|isn't available|timed out/ })
+        .waitFor({ timeout: 180_000 });
+      const status = await page.locator(".snackbar__msg").innerText();
+
+      const words = await page.evaluate(() =>
+        [...document.querySelectorAll('.page [role="textbox"]')]
+          .map((e) => e.textContent.trim())
+          .filter(Boolean),
+      );
+      check("OCR recovers the words on a scan", words.includes("INVOICE"), `${status} → ${JSON.stringify(words)}`);
+      check(
+        "OCR assets load from our own origin only",
+        external.length === 0,
+        external.join(", "),
+      );
+      check("OCR raised no console errors or CSP violations", errors.length === 0, errors.slice(0, 2).join(" | "));
+
+      // The whole point of the OCR layer: the scan becomes findable.
+      await page.keyboard.press("Control+f");
+      await page.locator(".findbar input").fill("INVOICE");
+      await page.waitForTimeout(900);
+      check(
+        "the OCR'd text is findable",
+        /\b1\/1\b/.test(await page.locator(".findbar").innerText()),
+        (await page.locator(".findbar").innerText()).replace(/\s+/g, " "),
+      );
+    }
+    await ctx.close();
+  }
+
+  // ------------------------------------------------------- find positioning
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const { page } = await instrument(ctx);
+    await openDoc(page, SAMPLE);
+    await page.keyboard.press("Control+f");
+    // A phrase near the bottom of page 1 — centring the *page* would leave it
+    // off screen, which is the regression this guards.
+    await page.locator(".findbar input").fill("Line 24");
+    await page.waitForTimeout(1500);
+    const visible = await page.evaluate(() => {
+      const hit = document.querySelector(".findhit--active");
+      const scroller = document.querySelector(".viewer__scroll");
+      if (!hit || !scroller) return null;
+      const h = hit.getBoundingClientRect();
+      const s = scroller.getBoundingClientRect();
+      return { inside: h.top >= s.top && h.bottom <= s.bottom, clearOfFindBar: h.top > s.top + 60 };
+    });
+    check("the active find match is scrolled on screen", !!visible?.inside, JSON.stringify(visible));
+    check("the active find match clears the find bar", !!visible?.clearOfFindBar);
     await ctx.close();
   }
 

@@ -3,7 +3,8 @@
 **Scope:** the whole app (`src/`, `index.html`, `vite.config.ts`, the deploy
 workflow) reviewed along five independent axes rather than one: **privacy**,
 **security**, **performance**, **correctness / export integrity**, and
-**UX / accessibility**, plus a look at supply chain and verification practice.
+**UX / accessibility**, plus supply chain and verification practice.
+**22 findings, 21 fixed**, one deferred with reasoning (#18).
 
 **Method:** static review of every module, then behavioural verification in a
 real browser (Chromium, desktop + phone, light + dark) against the built bundle
@@ -17,7 +18,8 @@ pass deliberately looks elsewhere: at the promises the product makes about
 privacy and permanence, at what it costs to run, and at what actually ends up
 in the file the user hands to someone else.
 
-**Date:** 2026-07-28
+**Date:** 2026-07-28. Findings #20-22 come from a second pass that exercised
+OCR once its assets could be obtained; the first pass had recorded that as a gap.
 
 ---
 
@@ -44,6 +46,9 @@ in the file the user hands to someone else.
 | 17 | UX | No favicon, no description, theme-color ignores dark mode | 🟢 P3 | ✅ Fixed |
 | 18 | Supply chain | `vite` / `esbuild` advisories (dev server only) | 🟡 P2 | ◑ Documented |
 | 19 | Process | No automated verification of any kind | 🟠 P1 | ✅ Fixed |
+| 20 | Reliability | OCR language model fetched from one CDN, failure silent | 🟠 P1 | ✅ Fixed |
+| 21 | UX | Find scrolls the page, not the match — matches stay off screen | 🟠 P1 | ✅ Fixed |
+| 22 | Docs | README claims OCR doesn't exist | 🟢 P3 | ✅ Fixed |
 
 Severity is about user impact: 🔴 breaks a promise or a whole class of
 documents · 🟠 real exposure or failure for many users · 🟡 noticeable ·
@@ -365,7 +370,7 @@ properties are exactly the ones a type-checker cannot see: whether a request
 leaves the origin, whether a redacted page still has a text layer, whether a
 `javascript:` URI made it into the file, how much memory a long document costs.
 
-**Fixed** with `npm run fixtures && npm run check` (`scripts/check.mjs`): 24
+**Fixed** with `npm run fixtures && npm run check` (`scripts/check.mjs`): 31
 end-to-end assertions against the built bundle in a real browser, covering
 every invariant this audit relied on —
 
@@ -376,6 +381,9 @@ every invariant this audit relied on —
   `javascript:` URI or authoring metadata in the exported bytes;
 - a redacted page with no extractable text, while its neighbours keep theirs;
 - autosave storing a session and the toggle erasing it;
+- OCR recovering text from an image-only page, from same-origin assets only,
+  and the result being findable (skipped when the assets aren't installed);
+- the active Find match landing on screen and clear of the find bar;
 - phone geometry: the status message clears both the zoom control and the dock.
 
 Fixtures are generated rather than committed, so the checks can assert against
@@ -384,14 +392,81 @@ known page contents. `playwright` resolves transitively through the existing
 
 ---
 
+## OCR (added after the first pass)
+
+The initial pass couldn't exercise OCR — `npm run setup-ocr` downloads the
+language model from `tessdata.projectnaptha.com`, which this network blocks — so
+it was reviewed statically and recorded as a gap. Closing that gap turned up two
+further findings.
+
+### 20. 🟠 The OCR model came from one CDN, and its failure was silent
+
+`setup-ocr` fetched `eng.traineddata.gz` from a single community host, and the
+deploy workflow ran that step with `continue-on-error: true`. The combination is
+the worst of both: any outage, rate limit, or network policy on that one host
+produces a **green deploy in which OCR is simply dead**, with users told "Text
+recognition isn't available in this version" and nothing in the build log
+explaining why. It also meant the shipped model was unpinned — whatever the host
+served that day.
+
+**Fixed** by taking the model from `@tesseract.js-data/eng` (the same data,
+published by the tesseract.js maintainer) as a devDependency: resolved through
+the registry `npm ci` already requires, hash-pinned in the lockfile, and cached
+by CI. The `4.0.0_best_int` variant is 2.9 MB against the old `_fast` model's
+~2 MB and is more accurate. The direct download remains as a fallback for a
+checkout without devDependencies, and `continue-on-error` is gone — a failure
+now means something is genuinely wrong with the build rather than with someone
+else's server.
+
+With that in place, OCR was verified end-to-end against a new image-only fixture
+(`.fixtures/scanned.pdf`, zero extractable text): it recovered all four rendered
+words, requested only `tessdata/` and `tesseract/` paths on our own origin,
+raised no CSP violations, and made the scan findable. The run also confirmed the
+runtime picks the `relaxedsimd` core, which is why all three wasm variants have
+to be shipped.
+
+One note on the fixture: the first version drew its text with a hand-rolled 5×7
+pixel font, and Tesseract read **1 of 3 words** from it. Tesseract is trained on
+real type, so the fixture now renders the words in a real typeface via the
+browser the checks already need. A fixture that a working feature fails is worse
+than no fixture.
+
+### 21. 🟠 Find scrolled the page, not the match
+
+Caught in a screenshot of the OCR run: the sole match was reported as `1/1` and
+highlighted — behind the find bar.
+
+```js
+document.querySelector(`[data-page-index="${activeMatch.pageIndex}"]`)
+  ?.scrollIntoView({ block: "center" });
+```
+
+It centred the *page*, ignoring where on it the match sat. That's only correct
+when a page is shorter than the viewport; at fit-width an A4 page is taller than
+most, so a match near the top or bottom of a page stayed off screen entirely —
+and stepping through several matches on the same page looked like *Next* doing
+nothing at all. Since OCR makes scans searchable, this sits directly on the path
+the previous finding just enabled.
+
+**Fixed** by positioning the match itself a third of the way down the scroll
+surface, which also keeps it clear of the find bar. Computed from the match's PDF
+coordinates rather than by querying the highlight element, because a far-off
+page's overlay isn't mounted under the render window — but its page *frame*
+always is, so the rect is reliable.
+
+### 22. 🟢 The README said OCR didn't exist
+
+"**No password encryption or OCR.** … OCR would need a heavy WASM engine; both
+are out of scope" — written before OCR shipped, and never updated. The
+Limitations list also stated flatly that scanned PDFs have no text layer to
+edit. Corrected, with OCR added to the feature list and the honest caveat that
+recognition is good but not perfect, so anything being redacted on the strength
+of it should be checked.
+
+---
+
 ## Not changed, and why
 
-- **OCR could not be exercised.** `public/tessdata/` is generated by
-  `npm run setup-ocr`, which needs network access the sandbox doesn't have, so
-  the OCR path was reviewed statically only. Its CSP requirement
-  (`'wasm-unsafe-eval'`, same-origin `connect-src`) is satisfied and the
-  neighbouring WASM consumer — image compression via `@jsquash/jpeg` — is
-  covered by the checks, so the policy is exercised even though OCR isn't.
 - **Main-thread rasterisation.** `yieldToUI` turns the export freeze into
   per-page bursts but the work is still on the main thread. Moving it to a
   worker with `OffscreenCanvas` is the real fix and a substantial change;

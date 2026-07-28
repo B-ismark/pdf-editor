@@ -6,7 +6,7 @@
  * which page (to prove a redacted page really lost it), and on having a document
  * long enough that unbounded page rendering would be obvious.
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 
 const OUT = new URL("../.fixtures/", import.meta.url);
@@ -48,4 +48,56 @@ for (const [name, pages] of [
 ]) {
   writeFileSync(new URL(name, OUT), await build(pages));
   console.log(`wrote .fixtures/${name} (${pages} pages)`);
+}
+
+/** Words the scanned fixture renders as pixels, for the OCR check to recover. */
+export const SCANNED_WORDS = ["INVOICE", "Total", "Amount", "Due"];
+
+writeFileSync(new URL("scanned.pdf", OUT), await buildScanned());
+console.log("wrote .fixtures/scanned.pdf (1 page, image only)");
+
+/**
+ * A "scan": one page whose only content is a bitmap of rendered text, with no
+ * text layer at all. This is the input OCR exists for, and the only way to prove
+ * OCR did something is to start from a page where extraction returns nothing.
+ *
+ * The bitmap is produced by drawing the words onto a canvas in a real browser,
+ * in a real typeface, at a size and weight a scanner would produce. A
+ * hand-rolled pixel font was tried first and is a poor target — Tesseract is
+ * trained on actual type, and read 1 of 3 words from blocky 1px-stroke glyphs.
+ * Using the browser that `npm run check` already needs costs nothing extra and
+ * makes the OCR assertion meaningful rather than a coin flip.
+ */
+async function buildScanned() {
+  const { chromium } = await import("playwright");
+  const exec = [
+    "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+    "/opt/pw-browsers/chromium/chrome-linux/chrome",
+  ].find((p) => existsSync(p));
+
+  const browser = await chromium.launch(exec ? { executablePath: exec } : {});
+  const page = await browser.newPage();
+  const dataUrl = await page.evaluate((words) => {
+    // 1240x1754 ≈ A4 at 150 dpi, a typical scan resolution.
+    const canvas = document.createElement("canvas");
+    canvas.width = 1240;
+    canvas.height = 1754;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#111";
+    ctx.textBaseline = "top";
+    ctx.font = "bold 96px Helvetica, Arial, sans-serif";
+    ctx.fillText(words[0], 120, 200);
+    ctx.font = "64px Helvetica, Arial, sans-serif";
+    words.slice(1).forEach((w, i) => ctx.fillText(w, 120, 400 + i * 110));
+    return canvas.toDataURL("image/png");
+  }, SCANNED_WORDS);
+  await browser.close();
+
+  const doc = await PDFDocument.create();
+  const png = await doc.embedPng(dataUrl);
+  const pdfPage = doc.addPage([595, 842]);
+  pdfPage.drawImage(png, { x: 0, y: 0, width: 595, height: 842 });
+  return doc.save();
 }

@@ -45,6 +45,10 @@ and is **mobile- and tablet-first**:
   Stamps are draggable and resizable.
 - **Redact** — the *Redact* tool draws a solid box over a region and truly
   removes the underlying content on export (see below).
+- **OCR a scan** — *OCR — recognise text* reads an image-only PDF and adds an
+  invisible text layer, so a scan becomes searchable, selectable, and
+  redactable. Runs entirely on-device: the engine and the language model are
+  served from this app's own origin, never a CDN.
 - **Organize pages** — a thumbnail view to reorder, rotate, and delete pages,
   merge in another PDF, or extract selected pages to a new file.
 - **Finishing touches** — add page numbers, stamp a diagonal watermark, or
@@ -228,14 +232,15 @@ A pragmatic, client-side editor — worth knowing where the seams are:
 - **White background assumed** behind edited text on non-redacted pages;
   coloured or image backgrounds will show a white patch. (Redaction fill colour
   is configurable.)
-- **Layout is not reflowed**, images/vector graphics aren't editable, rotated
-  text isn't repositioned in the overlay, and scanned PDFs have no text layer
-  to edit.
+- **Layout is not reflowed**, and images/vector graphics aren't editable, nor is
+  rotated text repositioned in the overlay.
+- **Scanned PDFs have no text layer** until you run **OCR — recognise text**
+  from the overflow menu, which adds one on-device (see below). Recognition is
+  good, not perfect: check anything you intend to redact.
 - **Page numbers / watermark / organize** rebuild the document, so they bake in
   (and reset) the current text edits — do them as a finishing step.
-- **No password encryption or OCR.** pdf-lib can't write encrypted PDFs, and
-  OCR would need a heavy WASM engine; both are out of scope for this
-  server-free build.
+- **No password encryption.** pdf-lib can't write encrypted PDFs, so that's out
+  of scope for this server-free build.
 
 ## Tech
 
