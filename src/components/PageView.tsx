@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { renderPage, isRenderCancelled } from "../pdf/loader";
+import { useRenderWindow } from "../hooks/useRenderWindow";
 import { isFragmentModified, resolveFragmentStyle } from "../pdf/style";
 import type {
   Annotation,
@@ -94,7 +95,9 @@ interface Gesture {
   pts: { x: number; y: number }[];
 }
 
-export function PageView(props: Props) {
+export const PageView = memo(PageViewInner);
+
+function PageViewInner(props: Props) {
   const {
     bytes, page, scale, tool, drawTool, drawStyle, edits, textBoxes, redactions,
     annotations, stamps, links, formValues, pageNumbers, watermark, multiIds, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, onSelect, onEditText, onFinishEdit,
@@ -108,11 +111,24 @@ export function PageView(props: Props) {
   const [error, setError] = useState<string | null>(null);
   const [painted, setPainted] = useState(false);
   const [g, setG] = useState<Gesture | null>(null);
+  // Only pages within a band around the viewport are rasterised and get their
+  // overlay mounted; the wrapper below always keeps its full size so scroll
+  // position, page anchors, and the scrollbar are unaffected.
+  const { ref: frameRef, near } = useRenderWindow<HTMLDivElement>();
 
   useEffect(() => {
     let cancelled = false;
     const canvas = canvasRef.current;
     if (!canvas) return;
+    if (!near) {
+      // Scrolled well away: hand the canvas' backing store back to the browser.
+      // Leaving it allocated is what made memory grow with document length —
+      // a full-page raster is several megabytes, times every page ever visited.
+      canvas.width = 0;
+      canvas.height = 0;
+      setPainted(false);
+      return;
+    }
     let handle: ReturnType<typeof renderPage> | null = null;
     const timer = setTimeout(() => {
       if (cancelled) return;
@@ -137,7 +153,7 @@ export function PageView(props: Props) {
       // this canvas without colliding with a live render() operation.
       handle?.cancel();
     };
-  }, [bytes, page.pageIndex, scale]);
+  }, [bytes, page.pageIndex, scale, near]);
 
   const W = page.viewBox.width * scale;
   const Hpx = page.viewBox.height * scale;
@@ -257,12 +273,18 @@ export function PageView(props: Props) {
   const notes = annotations.filter((a) => a.kind === "note") as Extract<Annotation, { kind: "note" }>[];
 
   return (
-    <div className="page" data-page-index={page.pageIndex} style={{ width: W, height: Hpx }} aria-busy={!painted && !error}>
+    <div
+      ref={frameRef}
+      className="page"
+      data-page-index={page.pageIndex}
+      style={{ width: W, height: Hpx }}
+      aria-busy={!painted && !error}
+    >
       <canvas ref={canvasRef} className="page__canvas" />
       {!painted && !error && <div className="page__skeleton" aria-hidden="true" />}
       {error ? (
         <div className="page__error">Failed to render page: {error}</div>
-      ) : (
+      ) : !near ? null : (
         <div
           ref={overlayRef}
           className="page__overlay"

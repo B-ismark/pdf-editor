@@ -481,6 +481,8 @@ body {
 }
 .props__title { color: var(--on-surface); }
 .props__empty { color: var(--on-surface-variant); margin: 8px 0; }
+/* Inline validation copy (e.g. a link URL we refuse to export). */
+.props__warn { color: var(--error); }
 .props__section { display: flex; flex-direction: column; gap: 15px; }
 .props__row-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 
@@ -1816,6 +1818,14 @@ body {
 }
 
 @media (max-width: 599px) {
+  /* The status snackbar is top-anchored on phones (the bottom edge belongs to
+     the tool dock), but so is the pinned zoom pill — and a 92vw centred
+     snackbar spans the full width of a phone, so the two were landing on top
+     of each other and the zoom percentage became unreadable whenever a status
+     message showed. Drop the snackbar below the zoom pill's band (app bar 52 +
+     the pill's 12px inset + its 54px height, plus a little breathing room). */
+  .snackbar { top: calc(128px + env(safe-area-inset-top)); }
+
   /* Download stays in the app bar on every breakpoint (no more FAB) — icon-only
      on phones to save room. */
   .appbar__download { padding: 0; width: 44px; }

@@ -91,7 +91,9 @@ export function LinkItem({ link, scale, pageHeight, pageWidth, selected, interac
         cursor: interactive ? "move" : "default",
       }}
       onPointerDown={beginMove}
-      title={link.url || "No URL yet"}
+      // The app's own tooltip, not a native `title` — consistent styling, and
+      // it's suppressed on touch where a `title` never appears anyway.
+      data-tip={link.url || "No URL yet"}
     >
       <span className="linkbox__chip">
         <Icon name="link" size={12} />

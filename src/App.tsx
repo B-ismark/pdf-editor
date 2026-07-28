@@ -14,6 +14,7 @@ import { findMatches, extractText, type FindMatch } from "./pdf/find";
 import { boxCX, boxCY } from "./pdf/bbox";
 import { findUnsafeCovers, type CoverWarning } from "./pdf/redactionSafety";
 import { useAutosave } from "./hooks/useAutosave";
+import { downloadBytes, downloadText } from "./download";
 import type { PageNumberOptions, WatermarkOptions } from "./pdf/types";
 import { useHistory } from "./hooks/useHistory";
 import { useMediaQuery } from "./hooks/useMediaQuery";
@@ -21,6 +22,7 @@ import { usePersistentState, usePersistentFlag } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
 import { useViewport } from "./hooks/useViewport";
 import { loadPdf, looksLikePdf } from "./pdf/loader";
+import { prepareImageStamp } from "./pdf/imageStamp";
 import {
   OVERLAYS,
   OVERLAY_LIST,
@@ -77,6 +79,28 @@ type Status = "idle" | "loading" | "ready" | "exporting" | "working" | "error";
 type NavKey = Tool | "sign";
 
 const EMPTY_DOC: DocState = { edits: {}, textBoxes: [], redactions: [], annotations: [], stamps: [] };
+
+// Stable identities for the "field absent from an older DocState" case. Fresh
+// `[]` / `{}` literals here would be a new object on every render, which defeats
+// the memo on PageView and re-renders every page of the document per keystroke.
+const NO_LINKS: LinkAnnot[] = [];
+const NO_FORM_VALUES: Record<string, string | boolean> = {};
+
+/** Group per-page overlay objects once per change instead of re-filtering the
+ * whole list N times (once per page) on every render. Pages with nothing on
+ * them share one frozen empty array, so their props stay referentially equal. */
+const NO_ITEMS: never[] = [];
+function bucketByPage<T extends { pageIndex: number }>(items: T[]): Map<number, T[]> {
+  const map = new Map<number, T[]>();
+  for (const item of items) {
+    const arr = map.get(item.pageIndex);
+    if (arr) arr.push(item);
+    else map.set(item.pageIndex, [item]);
+  }
+  return map;
+}
+const pageItems = <T,>(map: Map<number, T[]>, pageIndex: number): T[] =>
+  map.get(pageIndex) ?? NO_ITEMS;
 
 /** Turn a raw thrown error into plain-language guidance (audit #12). */
 function pdfOpenError(err: unknown): string {
@@ -168,8 +192,8 @@ export function App() {
   const [tool, setTool] = useState<Tool>("select");
   const doc = useHistory<DocState>(EMPTY_DOC);
   const { edits, textBoxes, redactions, annotations, stamps } = doc.state;
-  const links = doc.state.links ?? [];
-  const formValues = doc.state.formValues ?? {};
+  const links = doc.state.links ?? NO_LINKS;
+  const formValues = doc.state.formValues ?? NO_FORM_VALUES;
   const pageNumbers = doc.state.pageNumbers ?? null;
   const watermark = doc.state.watermark ?? null;
   // Remembered across sessions so the user's choices aren't reset each time.
@@ -189,6 +213,12 @@ export function App() {
   // Dim the (always-white) page canvas to cut glare, esp. in dark mode.
   // Preview-only — never affects the exported PDF.
   const [dimPages, setDimPages] = usePersistentFlag("pref.dimPages", false);
+  // Autosave keeps a copy of the open document in IndexedDB so a crash or an
+  // accidental reload doesn't lose the work. That is a real copy of a possibly
+  // sensitive file sitting on the device, so it has to be the user's call — and
+  // switching it off has to actually erase what's already stored, not just stop
+  // adding to it.
+  const [autosaveOn, setAutosaveOn] = usePersistentFlag("pref.autosave", true);
   const [sigOpen, setSigOpen] = useState(false);
   const [finishTab, setFinishTab] = useState<"numbers" | "watermark" | null>(null);
   const [pendingStamp, setPendingStamp] = useState<{ dataUrl: string; w: number; h: number } | null>(null);
@@ -235,7 +265,7 @@ export function App() {
 
   const vp = useViewport();
   const theme = useTheme();
-  const { restorable, save: saveSession, dismissRestore } = useAutosave();
+  const { restorable, save: saveSession, clear: clearSession, dismissRestore } = useAutosave();
   // >=600px gets the persistent side panel + tool rail (Material Medium+);
   // <600px is the compact phone layout (contextual selection bar + on-demand
   // sheet, `sheetOpen` state above).
@@ -252,6 +282,13 @@ export function App() {
       : theme.mode === "dark"
         ? "Dark theme"
         : "System theme";
+
+  // Per-page buckets, recomputed only when the underlying list changes.
+  const boxesByPage = useMemo(() => bucketByPage(textBoxes), [textBoxes]);
+  const redactionsByPage = useMemo(() => bucketByPage(redactions), [redactions]);
+  const annotationsByPage = useMemo(() => bucketByPage(annotations), [annotations]);
+  const stampsByPage = useMemo(() => bucketByPage(stamps), [stamps]);
+  const linksByPage = useMemo(() => bucketByPage(links), [links]);
 
   const fragmentById = useMemo(() => {
     const map = new Map<string, TextFragment>();
@@ -362,22 +399,39 @@ export function App() {
   const exportTextFile = useCallback(() => {
     if (!pdf) return;
     setMenuOpen(false);
-    const blob = new Blob([extractText(pdf.pages, edits)], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName.replace(/\.pdf$/i, "") + ".txt";
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadText(extractText(pdf.pages, edits), fileName.replace(/\.pdf$/i, "") + ".txt");
     setStatus("ready");
     setMessage("Text exported.");
   }, [pdf, edits, fileName]);
 
   // ---- Autosave to IndexedDB (debounced) + one-time restore ----
   useEffect(() => {
-    if (!pdf) return;
+    if (!pdf || !autosaveOn) return;
     saveSession(fileName, pdf.bytes, doc.state, changeCount > 0);
-  }, [pdf, fileName, doc.state, changeCount, saveSession]);
+  }, [pdf, fileName, doc.state, changeCount, saveSession, autosaveOn]);
+
+  /** Toggle the on-device session copy. Turning it off erases whatever is
+   * already stored — the point of the switch is that no copy remains. */
+  const toggleAutosave = useCallback(() => {
+    setAutosaveOn((on) => {
+      if (on) {
+        void clearSession();
+        setStatus("ready");
+        setMessage("Stopped saving a copy on this device, and deleted the stored one.");
+      } else {
+        setStatus("ready");
+        setMessage("Saving a copy on this device so a reload can't lose your work.");
+      }
+      return !on;
+    });
+  }, [setAutosaveOn, clearSession]);
+
+  /** Erase the offered previous session without opening it. */
+  const discardRestorable = useCallback(() => {
+    void clearSession();
+    setStatus("ready");
+    setMessage("Deleted the saved session.");
+  }, [clearSession]);
 
   const openBytes = useCallback(
     async (bytes: ArrayBuffer, name: string, note?: string, seedDoc?: DocState) => {
@@ -448,19 +502,6 @@ export function App() {
     dismissRestore();
     await openBytes(s.bytes, s.fileName, "Session restored.", s.doc);
   }, [restorable, dismissRestore, openBytes]);
-
-  const downloadBytes = useCallback(
-    (bytes: Uint8Array, filename: string, mime = "application/pdf") => {
-      const blob = new Blob([bytes as BlobPart], { type: mime });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      a.click();
-      URL.revokeObjectURL(url);
-    },
-    [],
-  );
 
   const toAB = (u8: Uint8Array): ArrayBuffer => {
     const ab = new ArrayBuffer(u8.byteLength);
@@ -933,19 +974,24 @@ export function App() {
     [doc],
   );
 
-  const startImagePlacement = useCallback((file: File) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result);
-      const img = new Image();
-      img.onload = () => {
-        setPendingStamp({ dataUrl, w: img.naturalWidth, h: img.naturalHeight });
-        setStatus("ready");
-        setMessage("Tap the page to place the image.");
-      };
-      img.src = dataUrl;
-    };
-    reader.readAsDataURL(file);
+  const startImagePlacement = useCallback(async (file: File) => {
+    setStatus("working");
+    setMessage(`Reading ${file.name}…`);
+    try {
+      const stamp = await prepareImageStamp(file);
+      setPendingStamp(stamp);
+      setStatus("ready");
+      setMessage("Tap the page to place the image.");
+    } catch (err) {
+      // Previously an unreadable or unsupported file (HEIC, SVG, a renamed
+      // non-image) fell through `img.onerror` with no handler at all: no stamp,
+      // no message, nothing to distinguish it from a mis-tap.
+      setStatus("error");
+      setMessage(
+        (err as Error)?.message ??
+          "Couldn't read that image. Try a PNG or JPEG instead.",
+      );
+    }
   }, []);
 
   const onSelect = useCallback((sel: Selection) => {
@@ -1569,13 +1615,7 @@ export function App() {
         { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark },
         (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`),
       );
-      const blob = new Blob([out as BlobPart], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = fileName.replace(/\.pdf$/i, "") + "-edited.pdf";
-      a.click();
-      URL.revokeObjectURL(url);
+      downloadBytes(out, fileName.replace(/\.pdf$/i, "") + "-edited.pdf");
       setStatus("ready");
       setMessage(
         redactions.length > 0
@@ -1707,6 +1747,15 @@ export function App() {
                     <Icon name="contrast" size={18} /> Dim pages
                     {dimPages && <Icon name="check" size={16} className="menu__check" />}
                   </button>
+                  <button
+                    className="menu__item"
+                    onClick={() => { setMenuOpen(false); toggleAutosave(); }}
+                    role="menuitemcheckbox"
+                    aria-checked={autosaveOn}
+                  >
+                    <Icon name="rotate" size={18} /> Save session on this device
+                    {autosaveOn && <Icon name="check" size={16} className="menu__check" />}
+                  </button>
                   <div className="menu__divider" />
                   <button className="menu__item" onClick={reset} role="menuitem">
                     <Icon name="note_add" size={18} /> Open another PDF
@@ -1797,7 +1846,11 @@ export function App() {
                 <span className="body-small">{restorable.fileName}</span>
               </div>
               <button className="btn btn--tonal" onClick={restoreSession}>Restore</button>
-              <button className="btn btn--text" onClick={dismissRestore}>Dismiss</button>
+              {/* "Dismiss" only hides this prompt — the copy stays on the device
+                  so it can still be restored later. "Delete" is the way to
+                  actually get rid of it, which previously had no UI at all. */}
+              <button className="btn btn--text" onClick={dismissRestore}>Not now</button>
+              <button className="btn btn--text" onClick={discardRestorable}>Delete</button>
             </div>
           )}
           <div className="dropzone__card">
@@ -1869,11 +1922,11 @@ export function App() {
                 drawTool={drawTool}
                 drawStyle={drawStyle}
                 edits={edits}
-                textBoxes={textBoxes.filter((b) => b.pageIndex === page.pageIndex)}
-                redactions={redactions.filter((r) => r.pageIndex === page.pageIndex)}
-                annotations={annotations.filter((a) => a.pageIndex === page.pageIndex)}
-                stamps={stamps.filter((s) => s.pageIndex === page.pageIndex)}
-                links={links.filter((l) => l.pageIndex === page.pageIndex)}
+                textBoxes={pageItems(boxesByPage, page.pageIndex)}
+                redactions={pageItems(redactionsByPage, page.pageIndex)}
+                annotations={pageItems(annotationsByPage, page.pageIndex)}
+                stamps={pageItems(stampsByPage, page.pageIndex)}
+                links={pageItems(linksByPage, page.pageIndex)}
                 formValues={formValues}
                 pageNumbers={pageNumbers}
                 watermark={watermark}
@@ -2104,7 +2157,7 @@ export function App() {
         hidden
         onChange={(e) => {
           const f = e.target.files?.[0];
-          if (f) startImagePlacement(f);
+          if (f) void startImagePlacement(f);
           e.target.value = "";
         }}
       />

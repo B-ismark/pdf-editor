@@ -9,6 +9,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc -b --noEmit",
+    "fixtures": "node scripts/make-fixtures.mjs",
+    "check": "node scripts/check.mjs",
     "test": "playwright test",
     "setup-ocr": "node scripts/setup-ocr.mjs"
   },

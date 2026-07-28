@@ -1,4 +1,18 @@
-import { PDFArray, PDFDict, PDFDocument, PDFName } from "pdf-lib";
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString, PDFHexString } from "pdf-lib";
+import { isSafeExistingUri } from "./url";
+
+/**
+ * Action types allowed to survive on a copied annotation.
+ *
+ * Everything else is dropped, because the alternative — naming the dangerous
+ * ones — misses a long tail that all execute something on the recipient's
+ * machine: `/Launch` (run a program), `/SubmitForm` and `/ImportData` (send the
+ * document's data to a URL), `/GoToR` and `/GoToE` (reach into another file),
+ * `/Movie`, `/Sound`, `/Rendition`, `/RichMedia` (embedded players), and
+ * `/JavaScript`. A viewer only needs `/URI` and the in-document jumps to make
+ * ordinary links work, so that's the whole list.
+ */
+const ALLOWED_ACTIONS = new Set(["/URI", "/GoTo", "/Named"]);
 
 /**
  * Strip identifying and potentially-active hidden data from a document before
@@ -75,8 +89,9 @@ export function sanitizeDocument(doc: PDFDocument): void {
     /* ignore */
   }
 
-  // 4) Scrub page-level additional actions and per-annotation JavaScript
-  //    actions. URI/link/GoTo actions are preserved so real links keep working.
+  // 4) Scrub page-level additional actions and every annotation action that
+  //    isn't a plain link. Ordinary URI/GoTo links are preserved (and their
+  //    URIs scheme-checked) so real links keep working.
   for (const page of doc.getPages()) {
     try {
       page.node.delete(PDFName.of("AA"));
@@ -105,15 +120,54 @@ export function sanitizeDocument(doc: PDFDocument): void {
       }
       try {
         const action = deref(annot.get(PDFName.of("A")));
-        if (action instanceof PDFDict) {
-          const s = action.get(PDFName.of("S"));
-          if (s instanceof PDFName && s.toString() === "/JavaScript") {
-            annot.delete(PDFName.of("A"));
-          }
+        if (action instanceof PDFDict && !isSafeAction(action, deref)) {
+          annot.delete(PDFName.of("A"));
         }
       } catch {
         /* ignore */
       }
     }
   }
+}
+
+/**
+ * True when an action dictionary is a plain, inert link we're happy to keep.
+ *
+ * Three things have to hold, and the third is the one that's easy to miss: an
+ * action can chain to further actions through `/Next`, so a permitted `/URI`
+ * can tow a `/JavaScript` behind it. The chain is walked (with a depth cap, in
+ * case a malformed file loops back on itself) and any disallowed link in it
+ * rejects the whole action.
+ */
+function isSafeAction(
+  action: PDFDict,
+  deref: (obj: unknown) => unknown,
+  depth = 0,
+): boolean {
+  if (depth > 8) return false;
+
+  const s = action.get(PDFName.of("S"));
+  if (!(s instanceof PDFName) || !ALLOWED_ACTIONS.has(s.toString())) return false;
+
+  // A kept /URI must also point somewhere harmless.
+  if (s.toString() === "/URI") {
+    const uri = action.get(PDFName.of("URI"));
+    const text =
+      uri instanceof PDFString || uri instanceof PDFHexString
+        ? uri.decodeText()
+        : null;
+    if (text === null || !isSafeExistingUri(text)) return false;
+  }
+
+  const next = deref(action.get(PDFName.of("Next")));
+  if (next instanceof PDFDict) return isSafeAction(next, deref, depth + 1);
+  if (next instanceof PDFArray) {
+    for (let i = 0; i < next.size(); i++) {
+      const item = deref(next.get(i));
+      if (!(item instanceof PDFDict) || !isSafeAction(item, deref, depth + 1)) {
+        return false;
+      }
+    }
+  }
+  return true;
 }
