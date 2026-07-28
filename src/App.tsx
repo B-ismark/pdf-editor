@@ -334,12 +334,35 @@ export function App() {
     if (findActive > matches.length - 1) setFindActive(matches.length ? matches.length - 1 : 0);
   }, [matches.length, findActive]);
 
-  // Scroll the active match into view (centre it in the scroll surface).
+  // Scroll the active match into view.
+  //
+  // This used to centre the *page* the match is on, which is only right when a
+  // page is shorter than the viewport. At fit-width an A4 page is taller than
+  // most viewports, so a match near its top or bottom stayed off screen — and
+  // stepping through several matches on one page looked like Next doing nothing.
+  // Position the match itself instead, a third of the way down, which also keeps
+  // it clear of the find bar pinned across the top of the viewer.
+  //
+  // Computed from the match's PDF coordinates rather than by querying the
+  // highlight element, because the overlay for a far-off page isn't mounted
+  // (rendering is windowed) — but the page *frame* always is, since layout stays
+  // eager, so its rect is reliable.
   useEffect(() => {
-    if (!activeMatch) return;
-    const el = document.querySelector<HTMLElement>(`[data-page-index="${activeMatch.pageIndex}"]`);
-    el?.scrollIntoView({ block: "center", behavior: "smooth" });
-  }, [activeMatch]);
+    if (!activeMatch || !pdf) return;
+    const scroller = document.querySelector<HTMLElement>(".viewer__scroll");
+    const pageEl = document.querySelector<HTMLElement>(
+      `[data-page-index="${activeMatch.pageIndex}"]`,
+    );
+    const page = pdf.pages[activeMatch.pageIndex];
+    if (!scroller || !pageEl || !page) return;
+    const yInPage = (page.viewBox.height - (activeMatch.y + activeMatch.height)) * vp.scale;
+    const offsetFromScrollTop =
+      pageEl.getBoundingClientRect().top - scroller.getBoundingClientRect().top + yInPage;
+    scroller.scrollTo({
+      top: scroller.scrollTop + offsetFromScrollTop - scroller.clientHeight / 3,
+      behavior: "smooth",
+    });
+  }, [activeMatch, pdf, vp.scale]);
 
   const nextMatch = useCallback(() => {
     setFindActive((i) => (matches.length ? (i + 1) % matches.length : 0));

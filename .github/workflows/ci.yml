@@ -25,6 +25,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Must run before the build so the OCR assets are bundled into dist/ and
+      # the OCR spec exercises the feature instead of skipping itself.
+      - name: Bundle on-device OCR assets
+        run: npm run setup-ocr
+
       - name: Build (also type-checks)
         run: npm run build
 

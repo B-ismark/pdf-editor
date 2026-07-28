@@ -7,7 +7,7 @@
 //
 // The assets it produces are git-ignored (they're large binaries); the deploy
 // workflow runs this step so production bundles them.
-import { mkdir, copyFile, writeFile, access } from "node:fs/promises";
+import { mkdir, copyFile, writeFile, access, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 
@@ -51,22 +51,56 @@ async function main() {
     await access(langFile);
     console.log("✓ Language model already present");
   } catch {
-    console.log(`↓ Downloading ${LANG} language model…`);
-    const res = await fetch(LANG_URL);
-    if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    await writeFile(langFile, buf);
-    console.log(`✓ Saved ${LANG}.traineddata.gz (${(buf.length / 1e6).toFixed(1)} MB)`);
+    await installLanguageModel(langFile);
   }
 
   console.log("\nOCR is ready. Rebuild the app to bundle the assets.");
 }
 
+/**
+ * Put the language model in place, preferring the npm package.
+ *
+ * It used to be fetched from `tessdata.projectnaptha.com` at setup time, with
+ * `continue-on-error: true` in the deploy workflow. That combination fails
+ * badly: any blocked network, rate limit, or outage on that one community host
+ * produces a *successful* deploy in which OCR is simply dead, and users are told
+ * "Text recognition isn't available in this version" with nothing in the build
+ * log to explain it. It also made the shipped bytes unpinned — whatever the host
+ * served that day.
+ *
+ * `@tesseract.js-data/eng` is the same data published by the tesseract.js
+ * maintainer, resolved through the registry that `npm ci` already requires, with
+ * its hash pinned in the lockfile and cached by CI. So that's the primary
+ * source; the direct download stays as a fallback for a checkout without
+ * devDependencies installed.
+ */
+async function installLanguageModel(langFile) {
+  try {
+    // `4.0.0_best_int` is the integer-quantised "best" model: ~2.9 MB, a little
+    // larger than the `_fast` variant this used to fetch and more accurate.
+    const packaged = require.resolve(`@tesseract.js-data/${LANG}/4.0.0_best_int/${LANG}.traineddata.gz`);
+    await copyFile(packaged, langFile);
+    const { size } = await stat(langFile);
+    console.log(`✓ Copied ${LANG} language model from @tesseract.js-data/${LANG} (${(size / 1e6).toFixed(1)} MB)`);
+    return;
+  } catch (err) {
+    console.log(`  (@tesseract.js-data/${LANG} unavailable: ${err.code ?? err.message})`);
+  }
+
+  console.log(`↓ Downloading ${LANG} language model…`);
+  const res = await fetch(LANG_URL);
+  if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+  const buf = Buffer.from(await res.arrayBuffer());
+  await writeFile(langFile, buf);
+  console.log(`✓ Saved ${LANG}.traineddata.gz (${(buf.length / 1e6).toFixed(1)} MB)`);
+}
+
 main().catch((err) => {
   console.error("\nsetup-ocr failed:", err.message);
   console.error(
-    "If your network blocks tessdata.projectnaptha.com, download\n" +
-      `${LANG}.traineddata.gz manually into public/tessdata/ and re-run.`,
+    "The language model normally comes from the @tesseract.js-data/eng\n" +
+      "devDependency — run `npm install` first. Failing that, download\n" +
+      `${LANG}.traineddata.gz into public/tessdata/ manually and re-run.`,
   );
   process.exit(1);
 });
