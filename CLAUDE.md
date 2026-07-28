@@ -14,6 +14,11 @@ See `README.md` for the user-facing feature list and the detailed
 "Limitations" section (fonts approximated, redaction rasterizes the page, no
 OCR/encryption, etc.). Don't duplicate that here.
 
+Two audits are on record and worth skimming before changing anything they
+touched: `docs/UI-UX-AUDIT.md` (usability, accessibility, platform conformance)
+and `docs/PRODUCT-AUDIT.md` (privacy, security, performance, export integrity —
+including measurements, and the one finding deliberately left open).
+
 ## Commands
 
 ```bash
@@ -22,11 +27,28 @@ npm run dev        # Vite dev server
 npm run build      # tsc -b && vite build  → dist/   (run this before committing)
 npm run preview    # serve dist/ (defaults to :4173 with --port)
 npm run typecheck  # tsc -b --noEmit
+npm run fixtures   # generate .fixtures/*.pdf for the checks (once)
+npm run check      # end-to-end checks against dist/ (starts its own preview)
 ```
 
-There is **no test runner / linter** configured. Verification is done with
-ad-hoc Playwright scripts (see "Testing" below) plus `npm run build` (which
-type-checks). Always `npm run build` before committing.
+There is **no unit-test runner / linter** configured. Verification is
+`npm run build` (which type-checks) plus **`npm run check`**
+(`scripts/check.mjs`) — 24 end-to-end assertions in real Chromium against the
+built bundle. **Run both before committing.** The checks cover the invariants
+type-checking can't see, and each one exists because it broke once:
+
+- no off-origin request or `<link>`; CSP present and restrictive;
+- the render window stays bounded on a 150-page document and doesn't grow while
+  scrolling, and the page you scroll to is actually painted;
+- an unsafe link URL is flagged in the UI, a bare hostname is accepted, and
+  neither a `javascript:` URI nor authoring metadata reaches the exported bytes;
+- a redacted page has no extractable text while its neighbours keep theirs;
+- autosave stores a session and the toggle erases it;
+- on a phone, the status message clears the zoom pill and the tool dock.
+
+If you add a feature that touches privacy, the export bytes, or per-page
+rendering, add a check for it — that's where this project's real invariants live.
+See `docs/PRODUCT-AUDIT.md` for the findings behind each of them.
 
 ## Architecture
 
@@ -55,10 +77,38 @@ type-checks). Always `npm run build` before committing.
 
 ## Conventions & gotchas (read before editing)
 
-- **Self-contained assets only.** The sandbox proxy blocks external hosts, so
-  web fonts / CDNs may not load. Icons are **Lucide** (`Icon.tsx` maps semantic
-  names → Lucide components); fonts fall back to system. Don't add CDN/font
-  dependencies.
+- **Self-contained assets only — now enforced.** A build-time
+  Content-Security-Policy (`cspPlugin` in `vite.config.ts`) sets
+  `default-src 'self'` / `connect-src 'self'`, so an off-origin request fails in
+  the browser rather than silently working in dev and leaking in production. A
+  CDN font link had shipped for months against this exact rule; the CSP plus the
+  `check` assertion is what stops that recurring. Icons are **Lucide**
+  (`Icon.tsx` maps semantic names → Lucide components); type is the system font
+  stack (`--font-plain`). **Don't add CDN/font dependencies**, and if you add
+  something the policy blocks, widen the policy deliberately and say why at the
+  definition — don't reach for `'unsafe-*'`.
+- **Per-page rendering is windowed.** `useRenderWindow` (IntersectionObserver)
+  gates both the canvas raster and the overlay subtree in `PageView`, and the
+  thumbnails in `Thumbnail`. Layout stays eager (page frames keep their true
+  size, so scroll anchors are exact) — only the contents are windowed. Two
+  traps: the observer's `root` must be the *scrolling ancestor*, since
+  `rootMargin` doesn't expand an intervening clip; and `PageView` is `memo`'d,
+  so props passed from `App` must be referentially stable (per-page overlay
+  arrays are bucketed once via `bucketByPage`, and absent `DocState` fields use
+  the shared `NO_LINKS` / `NO_FORM_VALUES` constants, never fresh literals).
+- **Anything that reaches the output file is validated at the exporter**, not
+  only in the UI: link URLs go through `safeLinkUrl` (`pdf/url.ts`, an
+  allow-list) and copied annotation actions through `sanitize.ts` (also an
+  allow-list, `/Next` chains included). The exporter is the single choke point,
+  so a value from a restored session can't bypass a UI check.
+- **On the redaction raster path, anything not covered is permanent.** The
+  raster is all that survives, so cover rectangles must be *measured*
+  (`ctx.measureText` / `widthOfTextAtSize`), never estimated from character
+  counts. That estimate shipped once and left original text visible past the
+  cover for wide glyphs and non-Latin scripts.
+- **Download via `src/download.ts`.** It attaches the anchor before clicking and
+  defers `revokeObjectURL`; revoking synchronously races the browser's fetch of
+  the blob and cancels downloads on Firefox/Safari.
 - **No native UI.** Use the in-house `ConfirmDialog` (not `confirm()`),
   `ColorField` (not `<input type=color>`), and `TooltipHost` + `data-tip=`
   (not `title=`). `ColorField`'s popover is **portaled to `document.body`** —
@@ -99,20 +149,34 @@ layer (so Find and search-and-redact work on scans).
 
 ## Testing (Playwright)
 
-No browser download in the sandbox — use the **pre-installed Chromium**:
+Start with the committed suite: `npm run build && npm run fixtures && npm run check`.
+It starts its own preview server, generates its own PDFs, and covers the
+invariants listed under "Commands". Extend `scripts/check.mjs` rather than
+writing a throwaway script when the thing you're verifying should stay verified.
 
-```js
-chromium.launch({ executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome" })
-```
+For one-off exploration (a new interaction, a screenshot in both themes):
 
-- `npm install` prunes the unsaved `playwright` package — after any install run
-  `npm install --no-save playwright` again before testing.
-- Playwright resolves `playwright` from the project's `node_modules`, so put the
-  test script **in the project root** (not the scratchpad) or it won't resolve.
-- `npm run build` then `npx vite preview --port 4173`; drive `http://localhost:4173/`.
-  Load a PDF with `setInputFiles('input[type=file]', …)`; test PDFs live in the
-  session scratchpad. Test both desktop (e.g. 1280×820) and mobile
-  (390×844, `isMobile:true, hasTouch:true`) and both themes.
+- No browser download in the sandbox — use the **pre-installed Chromium**:
+  `chromium.launch({ executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome" })`.
+  `scripts/check.mjs` probes a couple of known paths and falls back to
+  Playwright's own lookup, so copy that if you need portability.
+- `playwright` resolves transitively through the `@playwright/test`
+  devDependency, so a plain `npm install` is enough — the old
+  `npm install --no-save playwright` step is no longer needed. Node still
+  resolves from the project's `node_modules`, so keep scripts inside the repo
+  (`scripts/`), not in the scratchpad.
+- `npm run build`, then `npx vite preview --port 4173`, and drive
+  `http://localhost:4173/`. Load a PDF with
+  `setInputFiles('input[type=file]', …)` — `npm run fixtures` writes usable ones
+  to `.fixtures/` (git-ignored). Test desktop (e.g. 1280×820) *and* mobile
+  (390×844, `isMobile:true, hasTouch:true, deviceScaleFactor:3`) in both themes.
+- **Listen for `console` errors, `pageerror`, 4xx responses, and off-origin
+  requests** in any script you write. The mobile snackbar/zoom-pill collision and
+  the CDN font were both invisible in the code and obvious the moment a script
+  looked at the rendered geometry and the request log.
+- Gotcha: single-key tool shortcuts are ignored while a `contentEditable` has
+  focus, so after typing into an overlay click something neutral (or use the
+  `.tooldock__btn[aria-label="…"]` buttons) before switching tools.
 
 ## Deployment
 
