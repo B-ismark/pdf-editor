@@ -20,6 +20,8 @@ in the file the user hands to someone else.
 
 **Date:** 2026-07-28. Findings #20-22 come from a second pass that exercised
 OCR once its assets could be obtained; the first pass had recorded that as a gap.
+That pass also **corrected finding #19**, which had wrongly asserted the project
+had no automated tests — see the note under it.
 
 ---
 
@@ -45,7 +47,7 @@ OCR once its assets could be obtained; the first pass had recorded that as a gap
 | 16 | UX | Native `title` tooltip on link boxes, against convention | 🟢 P3 | ✅ Fixed |
 | 17 | UX | No favicon, no description, theme-color ignores dark mode | 🟢 P3 | ✅ Fixed |
 | 18 | Supply chain | `vite` / `esbuild` advisories (dev server only) | 🟡 P2 | ◑ Documented |
-| 19 | Process | No automated verification of any kind | 🟠 P1 | ✅ Fixed |
+| 19 | Process | Test suite missed the load-bearing invariants (see correction) | 🟠 P1 | ✅ Fixed |
 | 20 | Reliability | OCR language model fetched from one CDN, failure silent | 🟠 P1 | ✅ Fixed |
 | 21 | UX | Find scrolls the page, not the match — matches stay off screen | 🟠 P1 | ✅ Fixed |
 | 22 | Docs | README claims OCR doesn't exist | 🟢 P3 | ✅ Fixed |
@@ -309,7 +311,7 @@ snackbar, so any status message made the zoom percentage unreadable. Caught by
 screenshot, not by reading the code.
 
 **Fixed** by dropping the phone snackbar below the pill's band, and asserted
-geometrically in `npm run check` so it can't silently come back.
+geometrically in `tests/phone.spec.ts` so it can't silently come back.
 
 ### 15. 🟡 Unlabelled controls
 
@@ -361,36 +363,50 @@ hostile page in the same browser. Worth scheduling; not worth coupling to this.
 
 ## Process
 
-### 19. 🟠 Nothing was verified automatically
+### 19. 🟠 The test suite didn't cover the properties that carry the product
 
-`npm run build` type-checks, and that was the whole safety net — verification
-was ad-hoc Playwright scripts written and discarded per session. For this
-product that gap is specifically dangerous, because its most important
-properties are exactly the ones a type-checker cannot see: whether a request
-leaves the origin, whether a redacted page still has a text layer, whether a
-`javascript:` URI made it into the file, how much memory a long document costs.
+**Correction.** The first version of this document claimed there was "no
+automated verification of any kind" and that type-checking "was the whole safety
+net". That was wrong, and it is worth recording why rather than quietly editing
+it: `tests/app.spec.ts` holds a six-test Playwright suite, `playwright.config.ts`
+serves the production build for it, and `.github/workflows/ci.yml` runs
+`npm run build` plus `npm test` on every push and every PR into `main`. The
+repo's own `CLAUDE.md` said "no test runner / linter configured", and that stale
+line was taken at face value instead of being checked against
+`.github/workflows/` and the `test` script sitting in `package.json`.
 
-**Fixed** with `npm run fixtures && npm run check` (`scripts/check.mjs`): 31
-end-to-end assertions against the built bundle in a real browser, covering
-every invariant this audit relied on —
+The accurate finding is narrower and still real. The existing suite covers
+*feature behaviour*: content-sniffing a non-PDF, opening a document, page numbers
+as an undoable layer, undo/redo re-seeding a `contentEditable`, multi-page image
+export bundling to one ZIP, and a modal suppressing global shortcuts. Every one
+is worth having. But none of them looks at the things this audit turned on — no
+test observed a network request, checked the CSP, measured canvas memory, or read
+a single byte of an exported file. So the properties the product is *sold* on
+were unguarded, which is exactly how a CDN font survived months against a written
+rule forbidding it.
 
-- no off-origin requests, no off-origin `<link>`, CSP present and restrictive;
-- render window bounded on a 150-page document and not growing while scrolling,
-  with the scrolled-to page actually painted;
-- an unsafe URL flagged in the UI, a bare hostname accepted, and no
-  `javascript:` URI or authoring metadata in the exported bytes;
-- a redacted page with no extractable text, while its neighbours keep theirs;
-- autosave storing a session and the toggle erasing it;
-- OCR recovering text from an image-only page, from same-origin assets only,
-  and the result being findable (skipped when the assets aren't installed);
-- the active Find match landing on screen and clear of the find bar;
-- phone geometry: the status message clears both the zoom control and the dock.
+**Fixed** by extending that suite rather than standing up a parallel one. An
+earlier iteration of this work added a separate `scripts/check.mjs` harness with
+its own runner, fixtures and npm scripts; that was duplicated infrastructure and
+a second thing to remember to run, so it has been folded into `tests/` where CI
+already picks it up. `npm test` now runs **18** specs:
 
-Fixtures are generated rather than committed, so the checks can assert against
-known page contents. `playwright` resolves transitively through the existing
-`@playwright/test` devDependency, so no extra install step is needed.
+| Spec | Guards |
+| --- | --- |
+| `app.spec.ts` | the original six feature tests, unchanged |
+| `privacy.spec.ts` | no off-origin request or `<link>`; CSP present, restrictive, and not silently widened; autosave stores a session and the toggle erases it |
+| `rendering.spec.ts` | a 150-page document lays out fully but rasterises few pages; canvas memory doesn't grow while scrolling; the page scrolled to is actually painted |
+| `export.spec.ts` | an unsafe URL is refused visibly and absent from the bytes; no authoring metadata; a redacted page has no text layer while its neighbour keeps one |
+| `ocr.spec.ts` | a scan becomes recognised and findable, from same-origin assets only |
+| `find.spec.ts` | the active match lands on screen and clear of the find bar |
+| `phone.spec.ts` | the status message clears both the zoom pill and the tool dock |
 
----
+CI also gained a `npm run setup-ocr` step before the build, so the OCR spec
+exercises the feature instead of skipping itself — which is what it does locally
+on a checkout without the assets.
+
+Fixtures are generated at run time (`tests/fixtures.ts`) rather than committed,
+so the specs can assert against known page contents.
 
 ## OCR (added after the first pass)
 
@@ -419,7 +435,7 @@ now means something is genuinely wrong with the build rather than with someone
 else's server.
 
 With that in place, OCR was verified end-to-end against a new image-only fixture
-(`.fixtures/scanned.pdf`, zero extractable text): it recovered all four rendered
+(an image-only page with zero extractable text): it recovered all four rendered
 words, requested only `tessdata/` and `tesseract/` paths on our own origin,
 raised no CSP violations, and made the scan findable. The run also confirmed the
 runtime picks the `relaxedsimd` core, which is why all three wasm variants have

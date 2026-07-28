@@ -12,7 +12,7 @@ Deployed as a static site to GitHub Pages: https://b-ismark.github.io/pdf-editor
 
 See `README.md` for the user-facing feature list and the detailed
 "Limitations" section (fonts approximated, redaction rasterizes the page, no
-OCR/encryption, etc.). Don't duplicate that here.
+password encryption, etc.). Don't duplicate that here.
 
 Two audits are on record and worth skimming before changing anything they
 touched: `docs/UI-UX-AUDIT.md` (usability, accessibility, platform conformance)
@@ -27,31 +27,35 @@ npm run dev        # Vite dev server
 npm run build      # tsc -b && vite build  → dist/   (run this before committing)
 npm run preview    # serve dist/ (defaults to :4173 with --port)
 npm run typecheck  # tsc -b --noEmit
-npm run fixtures   # generate .fixtures/*.pdf for the checks (once)
-npm run check      # end-to-end checks against dist/ (starts its own preview)
+npm test           # Playwright end-to-end suite against dist/ (18 specs)
 ```
 
 There is **no unit-test runner / linter** configured. Verification is
-`npm run build` (which type-checks) plus **`npm run check`**
-(`scripts/check.mjs`) — 31 end-to-end assertions in real Chromium against the
-built bundle. **Run both before committing.** The checks cover the invariants
-type-checking can't see, and each one exists because it broke once:
+`npm run build` (which type-checks) plus **`npm test`** — a Playwright suite
+(`tests/`, `playwright.config.ts`) that serves `dist/` and drives it in real
+Chromium. `.github/workflows/ci.yml` runs both on every push and PR;
+`deploy.yml` handles Pages separately. **Run both before committing.**
 
-- no off-origin request or `<link>`; CSP present and restrictive;
-- the render window stays bounded on a 150-page document and doesn't grow while
-  scrolling, and the page you scroll to is actually painted;
-- an unsafe link URL is flagged in the UI, a bare hostname is accepted, and
-  neither a `javascript:` URI nor authoring metadata reaches the exported bytes;
-- a redacted page has no extractable text while its neighbours keep theirs;
-- autosave stores a session and the toggle erases it;
-- OCR turns an image-only page into findable text, loading its engine and
-  language model from our own origin only (skipped if assets aren't installed);
-- the active Find match is scrolled on screen and clear of the find bar;
-- on a phone, the status message clears the zoom pill and the tool dock.
+`tests/app.spec.ts` covers feature behaviour. The rest cover the invariants
+type-checking can't see, and each exists because it broke once:
+
+- `privacy.spec.ts` — no off-origin request or `<link>`; CSP present, restrictive,
+  and not silently widened; autosave stores a session and the toggle erases it;
+- `rendering.spec.ts` — the render window stays bounded on a 150-page document,
+  doesn't grow while scrolling, and the page you scroll to is actually painted;
+- `export.spec.ts` — an unsafe link URL is flagged in the UI and absent from the
+  exported bytes, no authoring metadata is written, and a redacted page has no
+  extractable text while its neighbour keeps its own;
+- `ocr.spec.ts` — an image-only page becomes findable text, with the engine and
+  language model loaded from our own origin only (skips if assets are absent);
+- `find.spec.ts` — the active match is on screen and clear of the find bar;
+- `phone.spec.ts` — the status message clears the zoom pill and the tool dock.
 
 If you add a feature that touches privacy, the export bytes, or per-page
-rendering, add a check for it — that's where this project's real invariants live.
-See `docs/PRODUCT-AUDIT.md` for the findings behind each of them.
+rendering, add a spec for it — that's where this project's real invariants live.
+Fixtures are generated at run time in `tests/fixtures.ts`; shared page helpers
+(request/error watching, opening a doc, canvas stats) are in `tests/helpers.ts`.
+See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
 
 ## Architecture
 
@@ -84,8 +88,8 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each of them.
   Content-Security-Policy (`cspPlugin` in `vite.config.ts`) sets
   `default-src 'self'` / `connect-src 'self'`, so an off-origin request fails in
   the browser rather than silently working in dev and leaking in production. A
-  CDN font link had shipped for months against this exact rule; the CSP plus the
-  `check` assertion is what stops that recurring. Icons are **Lucide**
+  CDN font link had shipped for months against this exact rule; the CSP plus
+  `tests/privacy.spec.ts` is what stops that recurring. Icons are **Lucide**
   (`Icon.tsx` maps semantic names → Lucide components); type is the system font
   stack (`--font-plain`). **Don't add CDN/font dependencies**, and if you add
   something the policy blocks, widen the policy deliberately and say why at the
@@ -156,9 +160,9 @@ where OCR was dead and users saw "Text recognition isn't available in this
 version". Sourcing it from npm makes the bytes lockfile-pinned and lets the
 workflow step fail loudly. Don't reintroduce a network fetch on this path.
 
-`npm run check` exercises OCR end-to-end against `.fixtures/scanned.pdf` (an
-image-only page with no text layer) whenever the assets are installed, and skips
-those checks otherwise. The fixture's bitmap is rendered by a real browser in a
+`tests/ocr.spec.ts` exercises OCR end-to-end against a generated image-only page
+whenever the assets are installed, and skips itself otherwise. CI runs
+`npm run setup-ocr` before the build so it actually executes there. The fixture's bitmap is rendered by a real browser in a
 real typeface — a hand-rolled pixel font was tried and Tesseract read 1 of 3
 words from it, which makes for a useless assertion.
 
@@ -168,17 +172,19 @@ layer (so Find and search-and-redact work on scans).
 
 ## Testing (Playwright)
 
-Start with the committed suite: `npm run build && npm run fixtures && npm run check`.
-It starts its own preview server, generates its own PDFs, and covers the
-invariants listed under "Commands". Extend `scripts/check.mjs` rather than
-writing a throwaway script when the thing you're verifying should stay verified.
+Start with the committed suite: `npm run build && npm test`. Playwright starts
+its own preview server (`webServer` in the config) and the specs generate their
+own PDFs. Extend `tests/` rather than writing a throwaway script when the thing
+you're verifying should stay verified.
 
 For one-off exploration (a new interaction, a screenshot in both themes):
 
-- No browser download in the sandbox — use the **pre-installed Chromium**:
-  `chromium.launch({ executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome" })`.
-  `scripts/check.mjs` probes a couple of known paths and falls back to
-  Playwright's own lookup, so copy that if you need portability.
+- No browser download in the sandbox, and the pinned Playwright wants a newer
+  build than is installed — so run the suite as
+  `PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm test`.
+  The config reads that env var (CI uses `playwright install` instead). Without
+  it every spec fails with "Executable doesn't exist", which is a missing binary,
+  not a regression.
 - `playwright` resolves transitively through the `@playwright/test`
   devDependency, so a plain `npm install` is enough — the old
   `npm install --no-save playwright` step is no longer needed. Node still
@@ -186,8 +192,8 @@ For one-off exploration (a new interaction, a screenshot in both themes):
   (`scripts/`), not in the scratchpad.
 - `npm run build`, then `npx vite preview --port 4173`, and drive
   `http://localhost:4173/`. Load a PDF with
-  `setInputFiles('input[type=file]', …)` — `npm run fixtures` writes usable ones
-  to `.fixtures/` (git-ignored). Test desktop (e.g. 1280×820) *and* mobile
+  `setInputFiles('input[type=file]', …)` — `tests/fixtures.ts` builds usable ones
+  (12-page, 150-page, and an image-only "scan"). Test desktop (e.g. 1280×820) *and* mobile
   (390×844, `isMobile:true, hasTouch:true, deviceScaleFactor:3`) in both themes.
 - **Listen for `console` errors, `pageerror`, 4xx responses, and off-origin
   requests** in any script you write. The mobile snackbar/zoom-pill collision and

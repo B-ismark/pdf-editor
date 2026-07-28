@@ -107,17 +107,18 @@ npm run dev      # start the dev server
 npm run build    # type-check + production build to dist/
 npm run preview  # serve the production build
 
-npm run fixtures # generate the test PDFs (once)
-npm run check    # end-to-end checks against dist/ in a real browser
+npm test         # Playwright end-to-end suite against dist/
 ```
 
 Then open the printed URL and drop in a PDF.
 
-`npm run check` verifies the properties a type-checker can't see: that no request
-leaves the origin, that the CSP is in force, that a redacted page really has no
-recoverable text layer, that no `javascript:` URI or authoring metadata reaches an
-exported file, that a long document doesn't rasterise itself end to end, and that
-the phone layout doesn't collide. Run it after `npm run build`.
+`npm test` runs in a real browser against the production build, and covers the
+properties a type-checker can't see: that no request leaves the origin, that the
+CSP is in force, that a redacted page really has no recoverable text layer, that
+no `javascript:` URI or authoring metadata reaches an exported file, that a long
+document doesn't rasterise itself end to end, that OCR reads a scan from
+same-origin assets, and that the phone layout doesn't collide. Run it after
+`npm run build` (CI does both on every push and PR).
 
 ## Deployment
 
@@ -141,8 +142,8 @@ That's enforced, not just intended. The page ships a **Content-Security-Policy**
 with `default-src 'self'` and `connect-src 'self'`, so the browser itself blocks
 any request to an outside host — including one a future dependency might try to
 make. There are no web fonts and no CDN references, so opening the app makes
-exactly one set of requests, all to the origin serving it. `npm run check`
-asserts this in a real browser on every run.
+exactly one set of requests, all to the origin serving it. `npm test` asserts
+this in a real browser, and CI runs it on every push and pull request.
 
 Two things are stored locally, both under your control:
 

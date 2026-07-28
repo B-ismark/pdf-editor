@@ -5,9 +5,6 @@ dist
 .DS_Store
 .vite
 
-# Generated check fixtures (`npm run fixtures`)
-.fixtures/
-
 # Playwright
 test-results/
 playwright-report/
