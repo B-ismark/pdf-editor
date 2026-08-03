@@ -1,6 +1,25 @@
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+
+const require = createRequire(import.meta.url);
+
+/**
+ * Identity of the OCR engine bytes, injected into the app as
+ * `__OCR_ASSET_VERSION__`.
+ *
+ * `public/sw.js` caches the Tesseract core, whose filenames are fixed by
+ * tesseract.js (`getCore.js` builds them) and so carry no content hash. The app
+ * registers the worker as `sw.js?v=<this>` and the cache is named from it, which
+ * is what makes upgrading either package evict the old core instead of serving
+ * it forever. Read from the installed packages rather than hard-coded, so a
+ * `npm update` can't silently leave the two out of step.
+ */
+const ocrAssetVersion = [
+  require("tesseract.js/package.json").version,
+  require("tesseract.js-core/package.json").version,
+].join("-");
 
 /**
  * Inject a Content-Security-Policy `<meta>` into index.html.
@@ -83,6 +102,9 @@ function cspPlugin(): Plugin {
 export default defineConfig({
   plugins: [react(), cspPlugin()],
   base: "./",
+  define: {
+    __OCR_ASSET_VERSION__: JSON.stringify(ocrAssetVersion),
+  },
   build: {
     rollupOptions: {
       output: {

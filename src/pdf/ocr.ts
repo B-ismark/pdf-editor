@@ -1,3 +1,4 @@
+import { ensureEngineCache } from "./engineCache";
 import { renderPageToCanvas } from "./loader";
 import { collectWords, wordsToFragments } from "./ocrText";
 import type { PageData, TextFragment } from "./types";
@@ -103,6 +104,19 @@ export interface OcrResult {
   total: number;
 }
 
+export interface OcrOptions {
+  /**
+   * Allow the wasm core to be cached on the device across sessions (see
+   * `engineCache.ts`). This is on-device storage, so it follows the "Save
+   * session on this device" switch rather than being decided here.
+   *
+   * Defaults to `false`: the safe default for something that writes to the
+   * user's disk is not to, so a caller that forgets loses a bit of speed rather
+   * than silently storing something the user switched off.
+   */
+  cacheEngine?: boolean;
+}
+
 /**
  * Recognise text on the given pages and return new TextFragments per page
  * (PDF units, bottom-left origin). Appending these to a page's fragments turns
@@ -118,11 +132,14 @@ export async function ocrPages(
   pages: PageData[],
   onProgress?: OcrProgress,
   signal?: AbortSignal,
+  options?: OcrOptions,
 ): Promise<OcrResult> {
   if (signal?.aborted) throw new OcrCancelled();
   if (!(await assetsPresent())) throw new OcrAssetsMissing();
 
   const { createWorker } = await import("tesseract.js");
+  // Before the engine is fetched, not after — see ensureEngineCache.
+  if (options?.cacheEngine) await ensureEngineCache();
   onProgress?.(0, pages.length, "Starting");
   const worker = await withTimeout(
     createWorker("eng", 1, {

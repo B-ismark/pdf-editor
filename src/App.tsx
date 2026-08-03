@@ -22,6 +22,7 @@ import { usePersistentState, usePersistentFlag } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
 import { useViewport } from "./hooks/useViewport";
 import { loadPdf, looksLikePdf } from "./pdf/loader";
+import { clearEngineCache } from "./pdf/engineCache";
 import { prepareImageStamp } from "./pdf/imageStamp";
 import {
   OVERLAYS,
@@ -434,11 +435,14 @@ export function App() {
   }, [pdf, fileName, doc.state, changeCount, saveSession, autosaveOn]);
 
   /** Toggle the on-device session copy. Turning it off erases whatever is
-   * already stored — the point of the switch is that no copy remains. */
+   * already stored — the point of the switch is that no copy remains. That
+   * includes the cached OCR engine: it holds no document of the user's, but a
+   * switch that left 1.4 MB of wasm behind would be a switch that lies. */
   const toggleAutosave = useCallback(() => {
     setAutosaveOn((on) => {
       if (on) {
         void clearSession();
+        void clearEngineCache();
         setStatus("ready");
         setMessage("Stopped saving a copy on this device, and deleted the stored one.");
       } else {
@@ -686,6 +690,9 @@ export function App() {
         (p, t) =>
           setMessage(p === 0 ? "Starting OCR engine…" : `Reading text… page ${p}/${t}`),
         ctrl.signal,
+        // Keeping the wasm engine on the device is on-device storage, so it
+        // follows the same switch as the session copy.
+        { cacheEngine: autosaveOn },
       );
       let added = 0;
       const pages = pdf.pages.map((pg) => {
@@ -727,7 +734,10 @@ export function App() {
     } finally {
       setOnCancel(null);
     }
-  }, [pdf]);
+    // `autosaveOn` is read for `cacheEngine`, so it has to be a dependency —
+    // without it the callback keeps whatever value was current when `pdf` last
+    // changed, and OCR goes on caching the engine after the switch is off.
+  }, [pdf, autosaveOn]);
 
   const exportImages = useCallback(async () => {
     if (!pdf) return;
