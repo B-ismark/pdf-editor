@@ -9,7 +9,7 @@
 // workflow runs this step so production bundles them.
 import { mkdir, copyFile, writeFile, access, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 
 const require = createRequire(import.meta.url);
 const root = process.cwd();
@@ -38,11 +38,25 @@ async function main() {
     "tesseract-core-simd-lstm", // SIMD
     "tesseract-core-relaxedsimd-lstm", // relaxed SIMD (most modern browsers)
   ];
+  // Copy only the `.wasm.js` glue — NOT the sibling `.wasm`.
+  //
+  // tesseract.js-core ships each variant twice: a small `<name>.js` glue that
+  // fetches `<name>.wasm` at runtime, and `<name>.wasm.js`, an emscripten
+  // SINGLE_FILE build with the whole module inlined as base64. `getCore.js` in
+  // tesseract.js only ever builds a `.wasm.js` URL when `corePath` is a
+  // directory (which is how we pass it), so the inlined build is the one that
+  // loads and the bare `.wasm` is never requested — it was 8.2 MB of dist that
+  // no browser ever fetched. Verified by deleting them and re-running
+  // tests/ocr.spec.ts, which still passes.
+  //
+  // If you ever switch to the `<name>.js` glue to skip the base64 overhead
+  // (~26% smaller over the wire, and a streaming wasm compile), you must copy
+  // the `.wasm` back AND pass `corePath` as an explicit `.js` file path —
+  // which means doing the SIMD/relaxed-SIMD feature detection here instead of
+  // letting tesseract.js do it.
   for (const name of CORE_VARIANTS) {
     const coreJs = require.resolve(`tesseract.js-core/${name}.wasm.js`);
-    const coreWasm = join(dirname(coreJs), `${name}.wasm`);
     await copyFile(coreJs, join(tessDir, `${name}.wasm.js`));
-    await copyFile(coreWasm, join(tessDir, `${name}.wasm`));
   }
   console.log(`✓ Copied Tesseract worker + ${CORE_VARIANTS.length} wasm cores into public/tesseract`);
 
