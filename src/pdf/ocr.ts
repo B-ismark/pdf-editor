@@ -69,6 +69,48 @@ async function assetsPresent(): Promise<boolean> {
   }
 }
 
+/** Longest we'll wait for the engine cache to take control before starting OCR
+ * anyway. Short on purpose — this is an optimisation, not a prerequisite. */
+const SW_CONTROL_TIMEOUT = 3_000;
+
+/**
+ * Make sure `public/sw.js` — which caches the wasm core across sessions — is
+ * registered and controlling this page, then resolve.
+ *
+ * Registered here rather than at app startup so the only users who ever get a
+ * service worker are the ones who actually run OCR; someone who just edits a PDF
+ * keeps a browser profile with nothing installed in it.
+ *
+ * The wait matters. Tesseract fetches the core the instant its worker boots, and
+ * a freshly-installed service worker doesn't control the page until it activates
+ * — so without waiting, the very run that triggered registration would miss the
+ * cache and store nothing. `sw.js` calls `skipWaiting()`/`clients.claim()` to
+ * make that handoff quick.
+ *
+ * Every failure path here is deliberately silent: no service worker support, a
+ * blocked registration, or a slow activation all just mean OCR runs uncached.
+ */
+async function ensureEngineCache(): Promise<void> {
+  if (!("serviceWorker" in navigator)) return;
+  try {
+    // Scope defaults to the script's own directory, which is the app root under
+    // both `/` and the `/pdf-editor/` subpath Pages serves from.
+    await navigator.serviceWorker.register(`${BASE}sw.js?v=${__OCR_ASSET_VERSION__}`);
+    if (navigator.serviceWorker.controller) return;
+    await new Promise<void>((resolve) => {
+      const settle = () => {
+        clearTimeout(timer);
+        navigator.serviceWorker.removeEventListener("controllerchange", settle);
+        resolve();
+      };
+      const timer = setTimeout(settle, SW_CONTROL_TIMEOUT);
+      navigator.serviceWorker.addEventListener("controllerchange", settle);
+    });
+  } catch {
+    // Caching is an optimisation; OCR has to work without it.
+  }
+}
+
 /** Preferred render scale for OCR — higher is more accurate but slower. */
 const OCR_SCALE = 2;
 
@@ -123,6 +165,8 @@ export async function ocrPages(
   if (!(await assetsPresent())) throw new OcrAssetsMissing();
 
   const { createWorker } = await import("tesseract.js");
+  // Before the engine is fetched, not after — see ensureEngineCache.
+  await ensureEngineCache();
   onProgress?.(0, pages.length, "Starting");
   const worker = await withTimeout(
     createWorker("eng", 1, {

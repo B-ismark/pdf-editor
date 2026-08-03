@@ -1,4 +1,4 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Page } from "@playwright/test";
 import { fixtures, SCANNED_WORDS } from "./fixtures";
 import { open, watch } from "./helpers";
 
@@ -9,6 +9,27 @@ import { open, watch } from "./helpers";
  * runs on a checkout that hasn't run `npm run setup-ocr`. CI runs that step, so
  * these do execute there.
  */
+/** True when `npm run setup-ocr` has been run, so OCR can actually execute. */
+async function ocrAssetsReady(page: Page): Promise<boolean> {
+  return page.evaluate(async () => {
+    try {
+      const res = await fetch("./tessdata/eng.traineddata.gz", { method: "HEAD" });
+      return res.ok && !(res.headers.get("content-type") ?? "").includes("text/html");
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** Run OCR from the overflow menu and wait for the terminal snackbar. */
+async function runOcr(page: Page): Promise<void> {
+  await page.click('[aria-label="More actions"]');
+  await page.locator('[role="menuitem"]', { hasText: "OCR" }).click();
+  await expect(page.locator(".snackbar__msg")).toContainText(/OCR added \d+ words/, {
+    timeout: 180_000,
+  });
+}
+
 test.describe("OCR", () => {
   test("recognises a scan, from same-origin assets only, and makes it findable", async ({
     page,
@@ -57,5 +78,58 @@ test.describe("OCR", () => {
       w.requests.filter((u) => /tesseract|tessdata/.test(u)).length,
       "OCR assets were actually fetched",
     ).toBeGreaterThan(0);
+  });
+
+  /**
+   * The wasm core has fixed filenames and GitHub Pages serves everything with
+   * `Cache-Control: max-age=600`, so without `public/sw.js` a returning user
+   * re-downloads ~1.4 MB of engine every ten minutes. tesseract.js already keeps
+   * the language model in IndexedDB; this is the equivalent for the core.
+   *
+   * The second half of this test is the one that matters most. A service worker
+   * is the only part of this app that keeps running with visibility into
+   * requests, so "it caches the engine" is worth far less than "it caches
+   * *nothing else*" — - not the app shell, and above all not the user's document.
+   */
+  test("the wasm core is cached for next time, and nothing else is", async ({ page }) => {
+    test.slow(); // two full engine boots and a recognition pass each
+    await page.goto("/");
+    test.skip(!(await ocrAssetsReady(page)), "OCR assets absent — run `npm run setup-ocr`");
+
+    await open(page, (await fixtures()).scanned);
+    await runOcr(page);
+
+    // Everything the service worker has stored, by path.
+    const cached = await page.evaluate(async () => {
+      const names = await caches.keys();
+      const paths: string[] = [];
+      for (const name of names) {
+        const cache = await caches.open(name);
+        for (const req of await cache.keys()) paths.push(new URL(req.url).pathname);
+      }
+      return { names, paths };
+    });
+
+    expect(cached.names.filter((n) => n.startsWith("ocr-core-"))).toHaveLength(1);
+    expect(
+      cached.paths.some((p) => /\/tesseract\/tesseract-core-.*-lstm\.wasm\.js$/.test(p)),
+      `cached: ${cached.paths.join(", ")}`,
+    ).toBe(true);
+    // The whole privacy argument for allowing a service worker at all.
+    expect(
+      cached.paths.filter((p) => !p.includes("/tesseract/")),
+      "the engine cache must hold engine assets and nothing else",
+    ).toEqual([]);
+
+    // Now the next visit. Asserting "no network response for the core" does not
+    // work: Playwright attributes the service worker's *own* `fetch()` to the
+    // worker too, so `fromServiceWorker()` is true either way and the check
+    // passes even against a worker that never reads its cache (verified).
+    // So make the network unable to supply the core and require the run to
+    // succeed regardless — the only way it can is from the cache.
+    await page.context().route(/tesseract-core-.*\.wasm\.js/, (route) => route.abort());
+    await page.reload();
+    await open(page, (await fixtures()).scanned);
+    await runOcr(page);
   });
 });

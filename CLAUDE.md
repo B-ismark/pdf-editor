@@ -47,7 +47,8 @@ type-checking can't see, and each exists because it broke once:
   exported bytes, no authoring metadata is written, and a redacted page has no
   extractable text while its neighbour keeps its own;
 - `ocr.spec.ts` — an image-only page becomes findable text, with the engine and
-  language model loaded from our own origin only (skips if assets are absent);
+  language model loaded from our own origin only; and the engine cache holds the
+  wasm core and *nothing else* (skips if assets are absent);
 - `find.spec.ts` — the active match is on screen and clear of the find bar;
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock.
 
@@ -169,6 +170,44 @@ words from it, which makes for a useless assertion.
 Recognised words are
 appended to a page's `fragments` as a transparent, selectable/searchable text
 layer (so Find and search-and-redact work on scans).
+
+**`setup-ocr` copies only the `.wasm.js` cores, not the sibling `.wasm`.** Each
+variant ships both ways — a small `<name>.js` glue that fetches `<name>.wasm`,
+and `<name>.wasm.js` with the module inlined as base64 — and `getCore.js` in
+tesseract.js only ever builds a `.wasm.js` URL when `corePath` is a directory,
+which is how `pdf/ocr.ts` passes it. Copying both put 8.2 MB in `dist/` that no
+browser fetched. Switching to the smaller glue means copying the `.wasm` back
+*and* doing SIMD detection yourself.
+
+### The engine cache (`public/sw.js`)
+
+**There is one service worker, and it exists only to cache the wasm core.** The
+core's filenames are fixed by tesseract.js, so they carry no content hash, and
+Pages serves everything `max-age=600` — without this a returning user
+re-downloads ~1.4 MB of engine every ten minutes. (The *language model* needs no
+help: tesseract.js already keeps it in IndexedDB, so its 2.82 MB is once per
+device.)
+
+Three things about it are load-bearing, so don't casually relax them:
+
+- **It handles same-origin GETs under `<scope>tesseract/` and nothing else** —
+  every other request returns from the handler untouched. There is deliberately
+  no offline app shell: caching the app would be a far larger surface, and a
+  stale shell is the classic service-worker failure this side-steps entirely.
+  `ocr.spec.ts` asserts the cache contains only `tesseract/` entries.
+- **It's registered lazily, from `ocrPages`**, so only people who actually run
+  OCR end up with a service worker at all — and registration *waits for control*
+  (`skipWaiting`/`clients.claim`) before Tesseract boots, or the very run that
+  triggered it would miss the cache and store nothing.
+- **The cache name comes from `sw.js?v=<tesseract.js>-<tesseract.js-core>`**,
+  injected by `define` in `vite.config.ts` from the installed packages. That's
+  what makes an upgrade evict the old core rather than serve it forever.
+
+Testing gotcha: **don't assert "no network response for the core"** to prove a
+cache hit. Playwright attributes the service worker's own `fetch()` to the
+worker, so `response.fromServiceWorker()` is true either way and the assertion
+passes against a worker that never reads its cache. The spec instead
+`route(...).abort()`s the core and requires OCR to succeed anyway.
 
 ## Testing (Playwright)
 
