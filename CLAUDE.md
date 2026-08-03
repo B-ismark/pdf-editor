@@ -199,9 +199,31 @@ Three things about it are load-bearing, so don't casually relax them:
   OCR end up with a service worker at all — and registration *waits for control*
   (`skipWaiting`/`clients.claim`) before Tesseract boots, or the very run that
   triggered it would miss the cache and store nothing.
+- **It's part of "Save session on this device."** The cache holds engine
+  binaries, not anything of the user's, but a switch labelled "don't keep things
+  on this device" that left 1.4 MB of wasm behind is a switch that lies. So
+  `ocrPages` takes `cacheEngine` (App passes `autosaveOn`), and `toggleAutosave`
+  calls `clearEngineCache()` beside `clearSession()`. Mechanism lives in
+  `pdf/engineCache.ts`, which imports nothing from `ocr.ts` — that's what lets
+  `App` reach `clearEngineCache` without pulling tesseract.js into the initial
+  bundle.
 - **The cache name comes from `sw.js?v=<tesseract.js>-<tesseract.js-core>`**,
   injected by `define` in `vite.config.ts` from the installed packages. That's
   what makes an upgrade evict the old core rather than serve it forever.
+
+Two traps, both of which cost a debugging round:
+
+- **`sw.js` caches only while armed** (`caching` starts `false`; the app posts
+  `enable` before each run). Don't "simplify" that to default-on. A service
+  worker is killed when idle and restarted on the next event, so state held in a
+  variable evaporates — a default-on worker that switches off on a message
+  silently un-disables itself. And `unregister()` does not stop an active worker
+  from serving pages that are still open, so the registration going away is not
+  enough either.
+- **A callback that reads the pref needs it as a dependency.** `runOcr` was
+  `[pdf]`, so `cacheEngine: autosaveOn` captured whatever the value was when
+  `pdf` last changed and kept caching after the switch was off. This is exactly
+  the class of bug the `PageView` memo note warns about, one layer up.
 
 Testing gotcha: **don't assert "no network response for the core"** to prove a
 cache hit. Playwright attributes the service worker's own `fetch()` to the

@@ -68,9 +68,34 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+/**
+ * Whether to cache at all — **off until the app says otherwise**, and it says so
+ * immediately before each OCR run (`ensureEngineCache`), only while "Save session
+ * on this device" is on.
+ *
+ * Default-deny, for two reasons that both bit the first version of this file:
+ *
+ *  - `unregister()` does not stop an already-active worker from serving pages
+ *    that are still open. A user who switched the toggle off and ran OCR again in
+ *    the same tab got the engine written straight back.
+ *  - A service worker is killed when idle and restarted on the next event, so any
+ *    "disabled" state held in a variable evaporates. Defaulting to enabled and
+ *    switching off on a message therefore silently un-disabled itself; defaulting
+ *    to disabled fails the safe way, because a restart just means one OCR run
+ *    goes uncached until the app arms it again.
+ */
+let caching = false;
+
+self.addEventListener("message", (event) => {
+  const type = event.data && event.data.type;
+  if (type === "disable") caching = false;
+  else if (type === "enable") caching = true;
+});
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   // Returning without calling respondWith leaves the request completely alone.
+  if (!caching) return;
   if (req.method !== "GET") return;
   if (!req.url.startsWith(CORE_PREFIX)) return;
   event.respondWith(cacheFirst(req));

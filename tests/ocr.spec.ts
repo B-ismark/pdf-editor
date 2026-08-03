@@ -132,4 +132,50 @@ test.describe("OCR", () => {
     await open(page, (await fixtures()).scanned);
     await runOcr(page);
   });
+
+  /**
+   * The cached engine is on-device storage, so "Save session on this device" has
+   * to cover it. A switch that stops saving the document but silently leaves
+   * 1.4 MB of wasm behind is a switch that lies.
+   *
+   * The second half is the part that's easy to get wrong: `unregister()` does not
+   * stop an already-active worker from serving open pages, so without the
+   * stand-down message the engine would be written straight back by the very next
+   * OCR run in the same tab.
+   */
+  test("turning off the session copy erases the cached engine, and stops it coming back", async ({
+    page,
+  }) => {
+    test.slow();
+    await page.goto("/");
+    test.skip(!(await ocrAssetsReady(page)), "OCR assets absent — run `npm run setup-ocr`");
+
+    const engineCaches = () =>
+      page.evaluate(async () => (await caches.keys()).filter((n) => n.startsWith("ocr-core-")));
+
+    await open(page, (await fixtures()).scanned);
+    await runOcr(page);
+    expect(await engineCaches(), "the engine should be cached to begin with").toHaveLength(1);
+
+    // Switch off the on-device copy.
+    await page.click('[aria-label="More actions"]');
+    await page.locator('[role="menuitemcheckbox"]', { hasText: "Save session" }).click();
+
+    await expect
+      .poll(engineCaches, { timeout: 15_000 })
+      .toHaveLength(0);
+    await expect
+      .poll(async () => page.evaluate(() => navigator.serviceWorker.getRegistrations().then((r) => r.length)), {
+        timeout: 15_000,
+      })
+      .toBe(0);
+
+    // Still switched off, same tab, worker still controlling: a further OCR run
+    // must not re-create the cache.
+    await runOcr(page);
+    expect(
+      await engineCaches(),
+      "OCR re-cached the engine after on-device storage was switched off",
+    ).toHaveLength(0);
+  });
 });
