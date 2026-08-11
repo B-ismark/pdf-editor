@@ -53,6 +53,12 @@ export function peekPageFonts(bytes: ArrayBuffer, pageIndex: number): PageFonts 
  * Harvest a page's fonts (once). Safe to call repeatedly and from anywhere:
  * concurrent callers share one in-flight read, and any failure resolves to
  * `NO_FONTS` so callers just fall back to the generic family.
+ *
+ * A *failure* is deliberately not cached. Reading fonts depends on the page
+ * having rendered, so a torn-down or cancelled render is a plausible transient
+ * miss — caching it would leave that page approximating its fonts for the rest
+ * of the session, with nothing to retry it. A successful-but-empty result is
+ * cached: a page with no text genuinely has no fonts.
  */
 export function readPageFonts(bytes: ArrayBuffer, pageIndex: number): Promise<PageFonts> {
   const d = entry(bytes);
@@ -61,13 +67,13 @@ export function readPageFonts(bytes: ArrayBuffer, pageIndex: number): Promise<Pa
   let p = d.pending.get(pageIndex);
   if (!p) {
     p = harvest(bytes, pageIndex)
-      .catch(() => NO_FONTS)
       .then((fonts) => {
-        d.pending.delete(pageIndex);
         d.ready.set(pageIndex, fonts);
         for (const fn of listeners) fn();
         return fonts;
-      });
+      })
+      .catch(() => NO_FONTS)
+      .finally(() => d.pending.delete(pageIndex));
     d.pending.set(pageIndex, p);
   }
   return p;

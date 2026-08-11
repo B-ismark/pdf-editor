@@ -1751,7 +1751,10 @@ export function App() {
           type="button"
           className="appbar__brand appbar__brand--link"
           onClick={goHome}
-          aria-label="Close this PDF and return to the start screen"
+          // The visible label is "PDF Editor", so the accessible name has to
+          // start with it (WCAG 2.5.3 Label in Name) — speech-input users say
+          // what they see.
+          aria-label="PDF Editor — close this PDF and return to the start screen"
           data-tip="Close document"
         >
           <span className="appbar__logo">

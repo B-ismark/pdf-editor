@@ -64,8 +64,10 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
 ## Architecture
 
 - **Render path** — `pdf/loader.ts` uses **PDF.js** (`pdfjs-dist`) to rasterize
-  each page to a `<canvas>` and extract text fragments (position + font). The
-  pdf.js worker is bundled via `?url` and set as `GlobalWorkerOptions.workerSrc`.
+  each page to a `<canvas>` and extract text fragments (position + a *generic*
+  font family). The pdf.js worker is bundled via `?url` and set as
+  `GlobalWorkerOptions.workerSrc`. The document's real per-fragment fonts come
+  from `pdf/fontInfo.ts` after the page paints — see the gotcha below.
 - **Write path** — `pdf/exporter.ts` uses **pdf-lib** to produce the output.
   Non-redacted pages keep vector content (edits/text/annotations/stamps drawn on
   top); **redacted pages are rasterized to an image** so content is truly
