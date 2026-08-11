@@ -3,6 +3,7 @@ import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
 import { safeLinkUrl } from "./url";
 import { createSourceFontEmbedder, type SourceFontEmbedder } from "./fontEmbed";
+import { NO_FONTS, readPageFonts, type PageFonts } from "./fontInfo";
 import { yieldToUI } from "./yield";
 import {
   DEFAULT_STYLE,
@@ -10,12 +11,14 @@ import {
   cssFont,
   hexToRgb,
   isFragmentModified,
+  keepsSourceTypeface,
   resolveFragmentStyle,
   standardFontKey,
 } from "./style";
 import type {
   Annotation,
   Edits,
+  FragmentFont,
   LinkAnnot,
   LoadedPdf,
   PageNumberOptions,
@@ -379,6 +382,11 @@ export async function exportPdf(
     // covers stay vector.
     const pageCovers = pageRedactions.filter((r) => r.cover);
     const needsRaster = pageRedactions.some((r) => !r.cover);
+    // The document's own fonts for this page, so a redrawn fragment falls back
+    // to the *right* standard font (and, on the raster path, is drawn in the
+    // page's actual face) instead of a generic guess.
+    const pageEdited = pageData.fragments.some((f) => isFragmentModified(f, edits[f.id]));
+    const sourceFonts: PageFonts = pageEdited ? await readPageFonts(loaded.bytes, i) : NO_FONTS;
 
     // Both paths produce a finished PDFPage; page numbers, watermark, and link
     // annotations are then applied uniformly on top. `done` is the 1-based
@@ -391,7 +399,7 @@ export async function exportPdf(
     };
 
     if (needsRaster) {
-      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, pageBoxes, pageRedactions, pageAnnots, pageStamps);
+      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps);
       applyPageLayers(rasterPage);
       continue;
     }
@@ -403,7 +411,7 @@ export async function exportPdf(
     for (const fragment of pageData.fragments) {
       const edit = edits[fragment.id];
       if (!isFragmentModified(fragment, edit)) continue;
-      const style = resolveFragmentStyle(fragment, edit!.style);
+      const style = resolveFragmentStyle(fragment, edit!.style, sourceFonts.get(fragment.itemIndex));
       const x = fragment.transform[4];
       const y = fragment.transform[5];
       const descent = style.size * 0.22;
@@ -411,8 +419,7 @@ export async function exportPdf(
       // Prefer the document's own font when the user kept the original typeface
       // (changed only text / size / colour) and it has a glyph for every
       // character typed; otherwise fall back to a standard font.
-      const keptTypeface =
-        edit!.style.font === undefined && edit!.style.bold === undefined && edit!.style.italic === undefined;
+      const keptTypeface = keepsSourceTypeface(edit!.style);
       let font: PDFFont | null = null;
       if (keptTypeface && embedder) {
         const src = await embedder.get(i, fragment.itemIndex);
@@ -491,6 +498,7 @@ async function rasterisePage(
   loaded: LoadedPdf,
   pageIndex: number,
   edits: Edits,
+  sourceFonts: PageFonts,
   boxes: TextBox[],
   redactions: Redaction[],
   annots: Annotation[],
@@ -508,9 +516,10 @@ async function rasterisePage(
     x: number,
     yBaseline: number,
     style: TextStyle,
+    face?: FragmentFont | null,
   ) => {
     if (!text) return;
-    ctx.font = cssFont(style, style.size * S);
+    ctx.font = cssFont(style, style.size * S, face);
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = style.color;
     // Multi-line (text boxes): step each line down by the shared line height.
@@ -526,7 +535,11 @@ async function rasterisePage(
   for (const fragment of pageData.fragments) {
     const edit = edits[fragment.id];
     if (!isFragmentModified(fragment, edit)) continue;
-    const style = resolveFragmentStyle(fragment, edit!.style);
+    const source = sourceFonts.get(fragment.itemIndex) ?? null;
+    const style = resolveFragmentStyle(fragment, edit!.style, source);
+    // The page's own face, on the same terms as the vector path: only while
+    // the edit keeps it. `renderPageToCanvas` above has already loaded it.
+    const face = keepsSourceTypeface(edit!.style) ? source : null;
     const x = fragment.transform[4];
     const y = fragment.transform[5];
     // Measure the replacement text instead of estimating it. The old estimate
@@ -536,7 +549,7 @@ async function rasterisePage(
     // beyond it. On this path that's a redaction failure, not a cosmetic one:
     // the raster is all that survives into the output, so whatever it shows is
     // permanent and whatever the user thought they had overwritten is not.
-    ctx.font = cssFont(style, style.size * S);
+    ctx.font = cssFont(style, style.size * S, face);
     const lines = edit!.text.split("\n");
     const widest = Math.max(...lines.map((line) => ctx.measureText(line).width / S));
     // Extra lines step downward from the baseline, so the cover has to grow with
@@ -549,7 +562,7 @@ async function rasterisePage(
       (Math.max(fragment.width, widest) + style.size * 0.1) * S,
       coverHeight * S,
     );
-    drawText(edit!.text, x, y, style);
+    drawText(edit!.text, x, y, style, face);
   }
 
   // New text boxes.

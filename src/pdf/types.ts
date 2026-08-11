@@ -26,8 +26,34 @@ export interface TextFragment {
   width: number;
   /** Glyph height in PDF units (unscaled). */
   height: number;
-  /** CSS font-family resolved from the PDF font, used for the overlay. */
+  /** CSS font-family resolved from the PDF font, used for the overlay.
+   * pdf.js only reports a generic here ("sans-serif" / "serif" / "monospace");
+   * {@link FragmentFont}, harvested once the page has rendered, is the real
+   * thing. */
   fontFamily: string;
+}
+
+/**
+ * The document's own font for a fragment, read back from pdf.js after the page
+ * has rendered (see `pdf/fontInfo.ts`).
+ *
+ * Two halves, because they answer different questions. `css`/`weight`/`slant`
+ * reproduce exactly what pdf.js paints on the canvas, so an overlay using them
+ * is indistinguishable from the page underneath. `font`/`bold`/`italic` are the
+ * nearest *standard-font* equivalent, used when the original typeface can't be
+ * kept (the user picked a different font, or a glyph is missing at export).
+ */
+export interface FragmentFont {
+  /** CSS font stack: the document's face first, then a generic fallback. */
+  css: string;
+  /** CSS font-weight to pair with `css` ("900" | "bold" | "normal"). */
+  weight: string;
+  /** CSS font-style to pair with `css`. */
+  slant: "italic" | "normal";
+  /** Nearest standard-font family. */
+  font: FontKey;
+  bold: boolean;
+  italic: boolean;
 }
 
 /** An interactive AcroForm field detected on a page (text or checkbox). */

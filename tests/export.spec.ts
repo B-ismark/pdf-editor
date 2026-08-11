@@ -66,8 +66,10 @@ test.describe("export integrity", () => {
     await page.waitForTimeout(300);
 
     // Leave the overlay before switching tools (a focused contentEditable
-    // correctly swallows the single-key shortcut).
-    await page.locator(".appbar__logo").click();
+    // correctly swallows the single-key shortcut). Blur it outright rather
+    // than clicking "somewhere neutral" in the app bar — the brand there is
+    // the close-document control now, and the rest is a zero-width spacer.
+    await frag.evaluate((el) => (el as HTMLElement).blur());
     await pickTool(page, "Redact");
     await dragOnPage(page, { x: 60, y: 400 }, { x: 420, y: 445 });
     await expect(page.locator(".redaction")).toHaveCount(1);

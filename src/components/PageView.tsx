@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, useState } from "react";
 import { renderPage, isRenderCancelled } from "../pdf/loader";
 import { useRenderWindow } from "../hooks/useRenderWindow";
-import { isFragmentModified, resolveFragmentStyle } from "../pdf/style";
+import { isFragmentModified, keepsSourceTypeface, resolveFragmentStyle } from "../pdf/style";
+import { usePageFonts } from "../hooks/usePageFonts";
 import type {
   Annotation,
   AnnotationTool,
@@ -154,6 +155,12 @@ function PageViewInner(props: Props) {
       handle?.cancel();
     };
   }, [bytes, page.pageIndex, scale, near]);
+
+  // The document's own fonts, readable only after the page has painted. Until
+  // then fragments fall back to pdf.js's generic family — the overlay for an
+  // unedited fragment is transparent anyway, so nothing visibly changes when
+  // this lands.
+  const pageFonts = usePageFonts(bytes, page.pageIndex, painted);
 
   const W = page.viewBox.width * scale;
   const Hpx = page.viewBox.height * scale;
@@ -352,7 +359,8 @@ function PageViewInner(props: Props) {
           {page.fragments.map((fragment) => {
             const edit = edits[fragment.id];
             const value = edit?.text ?? fragment.original;
-            const style = resolveFragmentStyle(fragment, edit?.style ?? {});
+            const source = pageFonts.get(fragment.itemIndex) ?? null;
+            const style = resolveFragmentStyle(fragment, edit?.style ?? {}, source);
             const modified = isFragmentModified(fragment, edit);
             const selected = selection?.kind === "fragment" && selection.id === fragment.id;
             return (
@@ -363,6 +371,10 @@ function PageViewInner(props: Props) {
                 pageHeight={H}
                 value={value}
                 style={style}
+                // Only preview the document's face while the edit keeps it —
+                // the same test the exporter uses to decide whether to
+                // re-embed it.
+                face={keepsSourceTypeface(edit?.style ?? {}) ? source : null}
                 modified={modified}
                 selected={selected}
                 interactive={tool === "select"}

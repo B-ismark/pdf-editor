@@ -31,7 +31,9 @@ and is **mobile- and tablet-first**:
 
 ## Features
 
-- **Edit existing text** — click any text run and type over it in place.
+- **Edit existing text** — click any text run and type over it in place. Your
+  replacement keeps the document's own typeface and weight, both on screen and
+  in the downloaded file.
 - **Restyle text** — change font (Sans / Serif / Mono), **bold**, *italic*,
   size, and colour for the selected text or text box.
 - **Add new text** — the *Add text* tool drops a text box anywhere you click.
@@ -85,14 +87,17 @@ Everything runs locally with the [File API]; the PDF never leaves your machine.
 ## How it works
 
 1. **Render** — [PDF.js] rasterises each page to a `<canvas>` and extracts the
-   text fragments with their exact positions and fonts.
+   text fragments with their exact positions. Once a page has painted, its
+   fonts are read back from PDF.js so an edited fragment can be shown in the
+   document's own face rather than a generic stand-in.
 2. **Edit** — each fragment gets a transparent `contentEditable` overlay
    aligned to its glyphs. Editing or restyling a fragment paints an opaque box
    over the original so the preview matches the export. New text boxes and
    redactions are tracked as overlays too.
 3. **Export** — [pdf-lib] produces the output page by page:
    - Pages **without** redactions keep their original vector content; edits and
-     new text boxes are drawn on top (original glyphs are covered and redrawn).
+     new text boxes are drawn on top (original glyphs are covered and redrawn,
+     in the document's own font — re-embedded and subset — where possible).
    - Pages **with** redactions are flattened: the page is re-rendered to a
      high-resolution image with all edits, text boxes, and redaction fills
      baked in, and that image replaces the page. Because only the raster
@@ -177,7 +182,12 @@ it's measured server-side by GitHub Pages — nothing is added to the app itself
 | **Redact** | Drag a rectangle over the content to remove. Pick its fill colour in the properties panel. |
 
 The overflow menu (⋮) holds document tools: **Organize pages**, **Add image**,
-**Page numbers**, **Watermark**, and **Export as images**.
+**Page numbers**, **Watermark**, and **Export as images** — plus **Open another
+PDF** and **Close document**.
+
+To leave a document, click the **PDF Editor** brand in the app bar (or use
+**Close document**): it returns you to the start screen, asking first if you
+have unsaved changes.
 
 Undo/redo is available from the toolbar (↶ ↷) or the keyboard
 (<kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> / <kbd>Ctrl/⌘</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd>).
@@ -190,6 +200,7 @@ src/
   pdf/
     types.ts      shared TypeScript types
     style.ts      font/style resolution + colour helpers
+    fontInfo.ts   the document's own font per fragment, read back after render
     loader.ts     parse + render pages with PDF.js (+ document cache)
     exporter.ts   write edits/text/redactions/annotations/stamps with pdf-lib
     pageOps.ts    reorder/rotate/delete/merge/extract via pdf-lib
@@ -198,6 +209,7 @@ src/
     useHistory.ts undo/redo stack with gesture coalescing
     useDrag.ts    pointer-drag helper + shared drag lock
     useViewport.ts fit-to-width scale + pinch/wheel/double-tap zoom
+    usePageFonts.ts subscribe to a page's harvested fonts (see pdf/fontInfo)
   components/
     Icon.tsx              inline SVG icon set
     PageView.tsx          one page: canvas + editable/annotation overlay + tools
@@ -227,9 +239,12 @@ A pragmatic, client-side editor — worth knowing where the seams are:
 - **Redacting flattens the whole page to an image.** That page loses its
   selectable text layer and its file size grows. Pages you don't redact keep
   full vector quality and selectable text.
-- **Fonts are approximated.** Text is drawn with the closest standard font
-  (Helvetica / Times / Courier, with bold & italic). Edited text supports only
-  WinAnsi-encodable characters.
+- **Fonts are kept where they can be, approximated where they can't.** Edited
+  text is previewed and written in the document's own typeface (re-embedded,
+  subset to the glyphs used). It falls back to the closest standard font —
+  Helvetica / Times / Courier, with bold & italic — when you pick a different
+  font yourself, or when the original has no glyph for something you typed.
+  Text drawn with a standard font supports only WinAnsi-encodable characters.
 - **White background assumed** behind edited text on non-redacted pages;
   coloured or image backgrounds will show a white patch. (Redaction fill colour
   is configurable.)

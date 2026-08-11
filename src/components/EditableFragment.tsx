@@ -3,7 +3,7 @@ import { CSS_FONT } from "../pdf/style";
 import { elementTap, lastEditPoint } from "../hooks/useDrag";
 import { focusEditable, placeCaretEnd } from "../caret";
 import { EditDoneButton } from "./EditDoneButton";
-import type { TextFragment, TextStyle } from "../pdf/types";
+import type { FragmentFont, TextFragment, TextStyle } from "../pdf/types";
 
 interface Props {
   fragment: TextFragment;
@@ -13,6 +13,9 @@ interface Props {
   value: string;
   /** Resolved display style (used when the fragment is styled/selected). */
   style: TextStyle;
+  /** The document's own font, when the edit keeps it: rendering with this is
+   * what makes replaced text match the page instead of approximating it. */
+  face: FragmentFont | null;
   /** Whether the fragment differs from its original (text or style). */
   modified: boolean;
   selected: boolean;
@@ -42,6 +45,7 @@ function EditableFragmentImpl({
   pageHeight,
   value,
   style,
+  face,
   modified,
   selected,
   interactive,
@@ -81,7 +85,12 @@ function EditableFragmentImpl({
   const left = e * scale;
   const top = (pageHeight - f) * scale - fontPx;
 
-  const fontFamily = show ? CSS_FONT[style.font] : fragment.fontFamily;
+  // With the document's own face, take its weight and slant too: the face
+  // already carries them, and asking for bold on top of a bold face makes the
+  // browser synthesise a second helping of it.
+  const fontFamily = face ? face.css : show ? CSS_FONT[style.font] : fragment.fontFamily;
+  const fontWeight = face ? face.weight : show && style.bold ? "bold" : "normal";
+  const fontStyle = face ? face.slant : show && style.italic ? "italic" : "normal";
 
   // Cover sized to the ORIGINAL glyph box so the rasterised original text is
   // fully hidden (no peeking / duplication), independent of the new text.
@@ -124,8 +133,8 @@ function EditableFragmentImpl({
           top: `${top}px`,
           fontSize: `${fontPx}px`,
           fontFamily,
-          fontWeight: show && style.bold ? "bold" : "normal",
-          fontStyle: show && style.italic ? "italic" : "normal",
+          fontWeight,
+          fontStyle,
           color: show ? style.color : "transparent",
           background: show ? "#fff" : undefined,
           lineHeight: 1,
