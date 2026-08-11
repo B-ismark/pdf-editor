@@ -166,7 +166,13 @@ export function renderPage(
  * repeated re-renders (e.g. during zoom) don't reparse the whole file. */
 const docCache = new WeakMap<ArrayBuffer, Promise<pdfjsLib.PDFDocumentProxy>>();
 
-function getCachedDoc(bytes: ArrayBuffer): Promise<pdfjsLib.PDFDocumentProxy> {
+/** The parsed document behind the on-screen rendering of `bytes`.
+ *
+ * Exported for `fontInfo.ts`, which must read fonts back out of *this* parse:
+ * pdf.js registers each embedded font under a `loadedName` that is only valid
+ * within the `getDocument()` call that produced it, and only that call's faces
+ * are the ones painted on the canvas the overlay sits on. */
+export function getCachedDoc(bytes: ArrayBuffer): Promise<pdfjsLib.PDFDocumentProxy> {
   let doc = docCache.get(bytes);
   if (!doc) {
     doc = pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;

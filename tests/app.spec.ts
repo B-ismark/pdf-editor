@@ -79,3 +79,30 @@ test("a modal suppresses global editing shortcuts", async ({ page }) => {
   await page.keyboard.press("Control+z");
   await expect(page.locator(".organize")).toHaveCount(1);
 });
+
+test("the brand is the way out of a document", async ({ page }) => {
+  await openSample(page);
+  // Nothing edited yet: closing is not destructive, so it needs no prompt.
+  await page.getByRole("button", { name: /return to the start screen/i }).click();
+  await expect(page.locator(".dropzone__card")).toBeVisible();
+  await expect(page.locator(".appbar__download")).toHaveCount(0);
+});
+
+test("closing a document with unsaved changes asks first", async ({ page }) => {
+  await openSample(page);
+  const ov = await page.locator(".page__overlay").first().boundingBox();
+  await page.keyboard.press("t");
+  await page.mouse.click(ov!.x + 150, ov!.y + 150);
+  await page.keyboard.type("Hello", { delay: 20 });
+  await page.locator(".appbar__brand--link").click();
+
+  const dialog = page.locator('[aria-modal="true"]');
+  await expect(dialog).toContainText(/Close this PDF/i);
+  // Cancelling leaves the document exactly as it was.
+  await dialog.getByRole("button", { name: /Cancel/i }).click();
+  await expect(page.locator(".textbox").first()).toHaveText("Hello");
+
+  await page.locator(".appbar__brand--link").click();
+  await page.getByRole("button", { name: /Discard & close/i }).click();
+  await expect(page.locator(".dropzone__card")).toBeVisible();
+});

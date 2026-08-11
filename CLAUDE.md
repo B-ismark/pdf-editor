@@ -49,6 +49,9 @@ type-checking can't see, and each exists because it broke once:
 - `ocr.spec.ts` — an image-only page becomes findable text, with the engine and
   language model loaded from our own origin only; and the engine cache holds the
   wasm core and *nothing else* (skips if assets are absent);
+- `font.spec.ts` — an edited fragment keeps the page's typeface and weight (a
+  sans document's edits are not redrawn in Times), and picking a font overrides
+  it;
 - `find.spec.ts` — the active match is on screen and clear of the find bar;
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock.
 
@@ -104,6 +107,20 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   so props passed from `App` must be referentially stable (per-page overlay
   arrays are bucketed once via `bucketByPage`, and absent `DocState` fields use
   the shared `NO_LINKS` / `NO_FORM_VALUES` constants, never fresh literals).
+- **A fragment's font is not in `PageData`.** All `getTextContent()` reports is
+  pdf.js's generic `fallbackName` — `"sans-serif" | "serif" | "monospace"`, no
+  weight, no slant, no typeface. Two bugs lived in that gap: a `/serif/` test
+  matched inside `"sans-serif"`, so every sans document's edited text was
+  redrawn in Times, and bold headings came back regular. The real font only
+  exists on the main thread *after the page renders*, so `pdf/fontInfo.ts`
+  harvests it per page, lazily, into a small store (`hooks/usePageFonts.ts`) —
+  rendering 150 pages up front to learn their fonts would cost more than the
+  load. Use `resolveFragmentStyle(fragment, override, source)` and treat
+  `keepsSourceTypeface()` as the one place that decides whether the document's
+  own face is used: the overlay previews exactly what the exporter re-embeds,
+  and they must not drift. When drawing with that face, take its weight/slant
+  from the face too (`cssFont(..., face)`) — a bold face plus `font-weight:
+  bold` gets synthesised bold on top of real bold.
 - **Anything that reaches the output file is validated at the exporter**, not
   only in the UI: link URLs go through `safeLinkUrl` (`pdf/url.ts`, an
   allow-list) and copied annotation actions through `sanitize.ts` (also an

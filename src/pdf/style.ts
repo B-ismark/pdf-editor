@@ -1,5 +1,5 @@
 import { StandardFonts } from "pdf-lib";
-import type { FontKey, TextFragment, TextStyle } from "./types";
+import type { FontKey, FragmentFont, TextFragment, TextStyle } from "./types";
 
 /** CSS font stacks for each abstract font key, used in the DOM overlay. */
 export const CSS_FONT: Record<FontKey, string> = {
@@ -45,11 +45,17 @@ export function standardFontKey(
   return "Helvetica";
 }
 
-/** Guess an abstract font key + weight/style from a PDF font-family string. */
+/** Guess an abstract font key + weight/style from a PDF font name or CSS
+ * font-family string (e.g. "ABCDEE+Calibri-Bold", "sans-serif").
+ *
+ * The `sans-serif` collapse on the first line is load-bearing: the only family
+ * string pdf.js gives a fragment is the generic `fallbackName`, and a bare
+ * `/serif/` matched *inside* "sans-serif" — so every sans document's edited
+ * text came back as Times, on screen and in the exported file. */
 export function guessStyleFromFontFamily(
   fontFamily: string,
 ): Pick<TextStyle, "font" | "bold" | "italic"> {
-  const f = fontFamily.toLowerCase();
+  const f = fontFamily.toLowerCase().replace(/sans[-_ ]?serif/g, "sans");
   const bold = /bold|black|heavy|semibold/.test(f);
   const italic = /italic|oblique/.test(f);
   let font: FontKey = "sans";
@@ -68,8 +74,13 @@ export function hexToRgb(hex: string): { r: number; g: number; b: number } {
   };
 }
 
-/** Build a CSS font shorthand for canvas/DOM from a style + pixel size. */
-export function cssFont(style: TextStyle, sizePx: number): string {
+/** Build a CSS font shorthand for canvas/DOM from a style + pixel size.
+ *
+ * With a `face` (the document's own font, see {@link FragmentFont}) the family
+ * *and* its weight/slant come from the face: the loaded face already carries
+ * them, and asking for bold on top of a bold face gets it synthesised twice. */
+export function cssFont(style: TextStyle, sizePx: number, face?: FragmentFont | null): string {
+  if (face) return `${face.slant} ${face.weight} ${sizePx}px ${face.css}`;
   const weight = style.bold ? "bold " : "";
   const slant = style.italic ? "italic " : "";
   return `${slant}${weight}${sizePx}px ${CSS_FONT[style.font]}`;
@@ -93,16 +104,33 @@ export function isFragmentModified(
   return edit.text !== fragment.original || Object.keys(edit.style).length > 0;
 }
 
-/** Resolve a fragment's effective style (detected base + user overrides). */
+/**
+ * True while an edit keeps the fragment's original typeface — i.e. the user
+ * changed only the text, size or colour.
+ *
+ * The exporter re-embeds the document's own font in exactly this case, and the
+ * on-screen overlay previews that font, so both have to agree on the test:
+ * whenever they disagree, what you edit stops looking like what you download.
+ */
+export function keepsSourceTypeface(override: Partial<TextStyle>): boolean {
+  return override.font === undefined && override.bold === undefined && override.italic === undefined;
+}
+
+/** Resolve a fragment's effective style (detected base + user overrides).
+ *
+ * `source` is the document's own font once it's known (see `pdf/fontInfo.ts`);
+ * without it all we have is pdf.js's generic family, which carries no weight or
+ * slant at all — so a bold heading came back regular. */
 export function resolveFragmentStyle(
   fragment: TextFragment,
   override: Partial<TextStyle>,
+  source?: FragmentFont | null,
 ): TextStyle {
-  const guessed = guessStyleFromFontFamily(fragment.fontFamily);
+  const base = source ?? guessStyleFromFontFamily(fragment.fontFamily);
   return {
-    font: override.font ?? guessed.font,
-    bold: override.bold ?? guessed.bold,
-    italic: override.italic ?? guessed.italic,
+    font: override.font ?? base.font,
+    bold: override.bold ?? base.bold,
+    italic: override.italic ?? base.italic,
     size: override.size ?? fragmentSize(fragment),
     color: override.color ?? "#000000",
   };

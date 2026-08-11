@@ -133,6 +133,21 @@ body {
   flex: none;
 }
 .appbar__brand { display: flex; align-items: center; gap: 10px; margin-right: 6px; }
+/* The same brand, as the "back to the start screen" control. */
+.appbar__brand--link {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 4px 8px 4px 4px;
+  margin-left: -4px;
+  border-radius: var(--radius-lg);
+  transition: background-color 120ms ease;
+}
+.appbar__brand--link:hover { background: var(--surface-container-highest); }
+.appbar__brand--link:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 .appbar__logo {
   display: grid;
   place-items: center;

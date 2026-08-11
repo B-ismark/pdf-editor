@@ -190,6 +190,7 @@ src/
   pdf/
     types.ts      shared TypeScript types
     style.ts      font/style resolution + colour helpers
+    fontInfo.ts   the document's own font per fragment, read back after render
     loader.ts     parse + render pages with PDF.js (+ document cache)
     exporter.ts   write edits/text/redactions/annotations/stamps with pdf-lib
     pageOps.ts    reorder/rotate/delete/merge/extract via pdf-lib
@@ -227,9 +228,12 @@ A pragmatic, client-side editor — worth knowing where the seams are:
 - **Redacting flattens the whole page to an image.** That page loses its
   selectable text layer and its file size grows. Pages you don't redact keep
   full vector quality and selectable text.
-- **Fonts are approximated.** Text is drawn with the closest standard font
-  (Helvetica / Times / Courier, with bold & italic). Edited text supports only
-  WinAnsi-encodable characters.
+- **Fonts are kept where they can be, approximated where they can't.** Edited
+  text is previewed and written in the document's own typeface (re-embedded,
+  subset to the glyphs used). It falls back to the closest standard font —
+  Helvetica / Times / Courier, with bold & italic — when you pick a different
+  font yourself, or when the original has no glyph for something you typed.
+  Text drawn with a standard font supports only WinAnsi-encodable characters.
 - **White background assumed** behind edited text on non-redacted pages;
   coloured or image backgrounds will show a white patch. (Redaction fill colour
   is configurable.)

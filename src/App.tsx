@@ -18,6 +18,7 @@ import { downloadBytes, downloadText } from "./download";
 import type { PageNumberOptions, WatermarkOptions } from "./pdf/types";
 import { useHistory } from "./hooks/useHistory";
 import { useMediaQuery } from "./hooks/useMediaQuery";
+import { useFragmentFont } from "./hooks/usePageFonts";
 import { usePersistentState, usePersistentFlag } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
 import { useViewport } from "./hooks/useViewport";
@@ -245,6 +246,7 @@ export function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [organizeOpen, setOrganizeOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
   const [coverWarn, setCoverWarn] = useState<CoverWarning | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
@@ -1148,16 +1150,22 @@ export function App() {
       ? annotations.find((a) => a.id === selection.id) ?? null
       : null;
 
+  // The selected fragment's own font, so the properties panel shows the
+  // document's actual weight/family rather than a generic guess.
+  const selectedFragment =
+    selection?.kind === "fragment" ? fragmentById.get(selection.id) ?? null : null;
+  const selectedFragmentFont = useFragmentFont(pdf?.bytes ?? null, selectedFragment);
+
   const activeStyle: TextStyle | null = useMemo(() => {
     if (selection?.kind === "fragment") {
       const f = fragmentById.get(selection.id);
-      return f ? resolveFragmentStyle(f, edits[f.id]?.style ?? {}) : null;
+      return f ? resolveFragmentStyle(f, edits[f.id]?.style ?? {}, selectedFragmentFont) : null;
     }
     if (selection?.kind === "textbox") {
       return textBoxes.find((b) => b.id === selection.id)?.style ?? null;
     }
     return null;
-  }, [selection, fragmentById, edits, textBoxes]);
+  }, [selection, fragmentById, edits, textBoxes, selectedFragmentFont]);
 
   const selectedRedaction =
     selection?.kind === "redaction" ? redactions.find((r) => r.id === selection.id) ?? null : null;
@@ -1690,6 +1698,37 @@ export function App() {
     else openAnother();
   }, [changeCount, openAnother]);
 
+  /** Close the document and go back to the start screen.
+   *
+   * The editor had no exit at all: once a PDF was open the only way out was
+   * loading a different one (which opens the OS picker) or reloading the tab.
+   * The app bar's brand is the obvious "home", so it runs this. */
+  const closeDoc = useCallback(() => {
+    setConfirmClose(false);
+    setMenuOpen(false);
+    setPdf(null);
+    setFileName("document.pdf");
+    doc.reset(EMPTY_DOC);
+    setSelection(null);
+    setMulti([]);
+    setTool("select");
+    setPendingStamp(null);
+    setEditingId(null);
+    setAutoFocusId(null);
+    setFindOpen(false);
+    setFindQuery("");
+    setNavOpen(false);
+    setInspectorOpen(true);
+    setSheetOpen(false);
+    setStatus("idle");
+    setMessage("");
+  }, [doc]);
+
+  const goHome = useCallback(() => {
+    if (changeCount > 0) setConfirmClose(true);
+    else closeDoc();
+  }, [changeCount, closeDoc]);
+
   const pickTool = (t: NavKey) => {
     setPendingStamp(null);
     setMulti([]);
@@ -1704,12 +1743,30 @@ export function App() {
 
   const appBar = (
     <header className="appbar">
-      <div className="appbar__brand">
-        <span className="appbar__logo">
-          <Icon name="stylus_note" size={18} filled />
-        </span>
-        <span className="title-large appbar__name">PDF Editor</span>
-      </div>
+      {/* With a document open the brand is the way back to the start screen —
+          it looks like a home link, so it has to behave like one. With nothing
+          open it's already home, and stays inert text. */}
+      {pdf ? (
+        <button
+          type="button"
+          className="appbar__brand appbar__brand--link"
+          onClick={goHome}
+          aria-label="Close this PDF and return to the start screen"
+          data-tip="Close document"
+        >
+          <span className="appbar__logo">
+            <Icon name="stylus_note" size={18} filled />
+          </span>
+          <span className="title-large appbar__name">PDF Editor</span>
+        </button>
+      ) : (
+        <div className="appbar__brand">
+          <span className="appbar__logo">
+            <Icon name="stylus_note" size={18} filled />
+          </span>
+          <span className="title-large appbar__name">PDF Editor</span>
+        </div>
+      )}
       {pdf && (
         <button
           className={`icon-btn${navOpen ? " icon-btn--on" : ""}`}
@@ -1792,6 +1849,9 @@ export function App() {
                   <div className="menu__divider" />
                   <button className="menu__item" onClick={reset} role="menuitem">
                     <Icon name="note_add" size={18} /> Open another PDF
+                  </button>
+                  <button className="menu__item" onClick={goHome} role="menuitem">
+                    <Icon name="close" size={18} /> Close document
                   </button>
                 </div>
               </>
@@ -2218,6 +2278,17 @@ export function App() {
         />
       )}
 
+      {confirmClose && (
+        <ConfirmDialog
+          title="Close this PDF?"
+          message="Your unsaved changes will be discarded. Download the edited file first if you want to keep it."
+          confirmLabel="Discard & close"
+          danger
+          onConfirm={closeDoc}
+          onCancel={() => setConfirmClose(false)}
+        />
+      )}
+
       {coverWarn && (
         <ConfirmDialog
           title="Whiteout doesn't remove the text"
@@ -2283,6 +2354,7 @@ export function App() {
               { id: "theme", label: `Theme: ${themeLabel}`, icon: themeIcon, keywords: "dark light system", run: theme.cycle },
               { id: "download", label: "Download PDF", hint: "", icon: "download", run: download },
               { id: "open", label: "Open another PDF", icon: "note_add", run: reset },
+              { id: "close", label: "Close document", icon: "close", keywords: "home start exit leave", run: goHome },
             ] as Command[]
           }
         />
