@@ -102,7 +102,10 @@ Everything runs locally with the [File API]; the PDF never leaves your machine.
      high-resolution image with all edits, text boxes, and redaction fills
      baked in, and that image replaces the page. Because only the raster
      survives, redacted content is genuinely gone — there is no hidden text
-     layer to recover.
+     layer to recover. The raster ships as whichever of JPEG and PNG comes out
+     smaller, which on a scan is several times less than lossless alone;
+     *Lossless redacted pages* in the ⋯ menu forces PNG for anyone who needs
+     the image bit-exact.
 
 ## Getting started
 
@@ -237,8 +240,9 @@ A pragmatic, client-side editor — worth knowing where the seams are:
   the original glyphs still exist in the content stream. Use **Redact** (which
   flattens the page) if you need content to actually be removed.
 - **Redacting flattens the whole page to an image.** That page loses its
-  selectable text layer and its file size grows. Pages you don't redact keep
-  full vector quality and selectable text.
+  selectable text layer, and unless you switch on *Lossless redacted pages* the
+  image is a high-quality JPEG rather than an exact copy. Pages you don't redact
+  keep full vector quality and selectable text.
 - **Fonts are kept where they can be, approximated where they can't.** Edited
   text is previewed and written in the document's own typeface (re-embedded,
   subset to the glyphs used). It falls back to the closest standard font —

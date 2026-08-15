@@ -1,10 +1,16 @@
 # Raster codec evaluation: MuPDF, JBIG2, JPEG
 
-An evaluation, not a change. The question was whether MuPDF, JBIG2, JPEG as a
-fallback, and stream re-encoding would be useful here. Short version: the JPEG
-part is a clear win, stream re-encoding already exists, and JBIG2 should be
-dropped. MuPDF is worth a conversation, but about vector redaction and
-licensing — not about compression.
+The question was whether MuPDF, JBIG2, JPEG as a fallback, and stream
+re-encoding would be useful here. Short version: the JPEG part is a clear win,
+stream re-encoding already existed but skipped the formats that needed it most,
+and JBIG2 should be dropped. MuPDF is worth a conversation, but about vector
+redaction and licensing — not about compression.
+
+**Status:** the two recommendations below marked *safe bets* are implemented —
+the redaction raster now picks the smaller of JPEG and PNG (`exporter.ts`), and
+the image optimiser handles `FlateDecode` (`optimizeImages.ts`). JBIG2 and
+MuPDF were not pursued; the reasoning is kept here because it is the kind of
+thing that gets re-proposed.
 
 Numbers below are reproducible with `node scripts/measure-raster-codecs.mjs`
 (see the header of that file for the browser flag).
@@ -46,32 +52,45 @@ The "1-bit PNG" column is not a proposal — it is the input a JBIG2 encoder wou
 take, included so the JBIG2 upside can be sized honestly. Lossless JBIG2
 (generic region) lands roughly 2–3× below it.
 
-## JPEG on the redaction raster — worth doing
+## JPEG on the redaction raster — *safe bet, done*
 
 Highest return here, and a small diff: `exporter.ts` is already lazy-loaded, so
-it can import `loadJpegEncoder` without pulling anything into the render path.
+it imports `loadJpegEncoder` without pulling anything into the render path.
 
-Two constraints if we do it:
+Two constraints, both implemented:
 
-- **Encode both and embed the smaller**, per page. `optimizeImages.ts` already
-  establishes this discipline ("never grow a stream"); a clean vector page is a
-  case where PNG legitimately wins.
-- **Lossless has to stay reachable.** JPEG rings around text, and a redacted
-  page is often evidence. A quality control with a lossless setting is the
-  honest shape, not a silent switch to lossy.
+- **Encode both and embed the smaller**, per page (`embedPageRaster`).
+  `optimizeImages.ts` already established this discipline ("never grow a
+  stream"), and a sparse vector page is a case where PNG legitimately wins — so
+  neither codec can be picked up front. It also means turning this on cannot
+  make any page larger than it was.
+- **Lossless stays reachable.** JPEG rings around text, and a redacted page is
+  often evidence. *Lossless redacted pages* (`pref.losslessRaster`, ⋯ menu)
+  skips the JPEG encode entirely. A full quality slider was not added: the
+  compress dialog already owns quality-vs-size, and a second control for it
+  here would be a worse version of that one.
 
-`tests/export.spec.ts` asserts a redacted page has no extractable text while its
-neighbour keeps its own. That invariant is about content removal, not encoding,
-but it runs through the bytes this would change — so it needs to keep passing,
-and the size win is worth asserting too.
+`tests/export.spec.ts` covers both halves — the default raster is a
+`/DCTDecode` stream with no recoverable text, and the lossless switch produces
+no `/DCTDecode` at more than twice the size.
 
-## Stream re-encoding — already shipped, one real gap
+## Stream re-encoding — *safe bet, done*
 
-`isSafeJpeg` requires a single `DCTDecode` filter, so **`FlateDecode` images are
-skipped entirely**. Flate scans and screenshots — exactly the oversized-but-not-
-photographic content — get no benefit at all today. That is the bounded
-extension, and it inherits the existing safety allow-list (no masks, no
-`/Decode`, no CMYK or indexed colour) unchanged.
+`isSafeJpeg` required a single `DCTDecode` filter, so `FlateDecode` images were
+skipped entirely — and flate is where scans, screenshots, and anything embedded
+from a PNG end up. Exactly the heaviest documents got nothing from "Keep text".
+
+`classify` now accepts both, and flate streams are inflated, un-predicted, and
+unpacked in `optimizeImages.ts`. `/Predictor` handling is the load-bearing part:
+it isn't a refinement, since ignoring it yields noise rather than a
+slightly-wrong image. The existing safety allow-list is unchanged and now gates
+both formats (no masks, no `/Decode`, no CMYK or indexed colour, 8 bits per
+component), so anything unrecognised is left exactly as it was.
+
+Re-encoding flate as JPEG is a lossy step on content that may be crisp line art,
+which is why it stays behind the existing size thresholds and the never-grow
+rule: an image changes only if it is genuinely large *and* the result is
+genuinely smaller.
 
 ## JBIG2 — recommend against
 
@@ -111,8 +130,8 @@ prototype.
 
 ## Recommendation
 
-1. JPEG-or-PNG-whichever-is-smaller on the redaction raster, with a quality
-   control and a lossless setting.
-2. Extend `optimizeImages.ts` to `FlateDecode` images.
-3. Drop JBIG2.
-4. Treat MuPDF separately, as vector redaction plus a licence decision.
+1. ✅ JPEG-or-PNG-whichever-is-smaller on the redaction raster, with a lossless
+   setting.
+2. ✅ Extend `optimizeImages.ts` to `FlateDecode` images.
+3. ❌ Drop JBIG2.
+4. ⏸ Treat MuPDF separately, as vector redaction plus a licence decision.

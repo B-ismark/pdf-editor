@@ -1,7 +1,17 @@
 import { test, expect } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { fixtures } from "./fixtures";
+import { readFileSync, statSync } from "node:fs";
+import { fixtures, PHOTO_CAPTION } from "./fixtures";
 import { open, watch, pickTool, dragOnPage, pageTexts } from "./helpers";
+import type { Page } from "@playwright/test";
+
+/** Click a control that produces a download and return the bytes. */
+async function downloadFrom(page: Page, selector: string): Promise<Buffer> {
+  const [download] = await Promise.all([
+    page.waitForEvent("download", { timeout: 180_000 }),
+    page.click(selector),
+  ]);
+  return readFileSync((await download.path())!);
+}
 
 /**
  * What actually ends up in the file the user hands to someone else.
@@ -83,5 +93,65 @@ test.describe("export integrity", () => {
     const [first, second] = await pageTexts(bytes, [1, 2]);
     expect(first.trim(), "the redacted page is rasterised — no text layer").toBe("");
     expect(second, "untouched pages keep selectable vector text").toContain("quick brown fox");
+  });
+
+  /**
+   * The redaction raster is the whole page, so its encoding is the whole file
+   * size. PNG alone used to ship here, which is the worst possible choice for
+   * the scans people most often redact — lossless has no answer to sensor
+   * noise. What has to hold is both halves of the trade: the default is
+   * dramatically smaller, and asking for lossless actually gets lossless.
+   */
+  test("a redacted page ships as JPEG, and the lossless switch turns that off", async ({ page }) => {
+    const w = watch(page);
+    await open(page, (await fixtures()).photo);
+
+    await pickTool(page, "Redact");
+    await dragOnPage(page, { x: 80, y: 200 }, { x: 320, y: 260 });
+    await expect(page.locator(".redaction")).toHaveCount(1);
+
+    const lossy = await downloadFrom(page, ".appbar__download");
+    // An image XObject is always a top-level stream (streams can't live inside
+    // object streams), so its filter is readable straight out of the bytes.
+    expect(lossy.toString("latin1"), "the raster is a JPEG").toMatch(/\/DCTDecode/);
+    expect((await pageTexts(lossy, [1]))[0].trim(), "still no recoverable text").toBe("");
+
+    await page.click('[aria-label="More actions"]');
+    await page.locator('[role="menuitemcheckbox"]', { hasText: "Lossless redacted pages" }).click();
+
+    const lossless = await downloadFrom(page, ".appbar__download");
+    expect(lossless.toString("latin1"), "no lossy raster once asked for lossless").not.toMatch(/\/DCTDecode/);
+    // The whole reason the default exists. A noisy page is several times larger
+    // lossless; anything close to parity means the JPEG path silently stopped.
+    expect(lossless.length).toBeGreaterThan(lossy.length * 2);
+    expect(w.errors).toEqual([]);
+  });
+
+  /**
+   * "Keep text" re-encodes oversized images in place. It only understood
+   * `DCTDecode`, so a document whose bulk arrived as flate — scans, screenshots,
+   * anything embedded from a PNG — got nothing at all from it, which is exactly
+   * the document heavy enough to need it.
+   */
+  test("Keep text shrinks a flate-compressed image and leaves the text selectable", async ({ page }) => {
+    const photo = (await fixtures()).photo;
+    const before = statSync(photo).size;
+    await open(page, photo);
+
+    await page.click('[aria-label="More actions"]');
+    await page.locator('[role="menuitem"]', { hasText: "Compress PDF" }).click();
+    await page.locator(".compress__preset", { hasText: "Keep text" }).click();
+    // The estimate is computed by actually running the optimisation, so waiting
+    // for it to settle is waiting for the real result.
+    await expect(page.locator(".compress__estimate")).toContainText("text stays selectable", {
+      timeout: 180_000,
+    });
+
+    const bytes = await downloadFrom(page, ".dialog__actions .btn--filled");
+    expect(bytes.length, `${before} → ${bytes.length} bytes`).toBeLessThan(before * 0.6);
+    expect(
+      (await pageTexts(bytes, [1]))[0],
+      "the point of this preset — the page is still text",
+    ).toContain(PHOTO_CAPTION);
   });
 });

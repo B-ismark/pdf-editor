@@ -44,8 +44,10 @@ type-checking can't see, and each exists because it broke once:
 - `rendering.spec.ts` — the render window stays bounded on a 150-page document,
   doesn't grow while scrolling, and the page you scroll to is actually painted;
 - `export.spec.ts` — an unsafe link URL is flagged in the UI and absent from the
-  exported bytes, no authoring metadata is written, and a redacted page has no
-  extractable text while its neighbour keeps its own;
+  exported bytes, no authoring metadata is written, a redacted page has no
+  extractable text while its neighbour keeps its own, the redaction raster is a
+  JPEG (and the lossless switch really turns that off), and "Keep text" shrinks
+  a flate-compressed image without costing the page its text;
 - `ocr.spec.ts` — an image-only page becomes findable text, with the engine and
   language model loaded from our own origin only; and the engine cache holds the
   wasm core and *nothing else* (skips if assets are absent);
@@ -128,6 +130,20 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   allow-list) and copied annotation actions through `sanitize.ts` (also an
   allow-list, `/Next` chains included). The exporter is the single choke point,
   so a value from a restored session can't bypass a UI check.
+- **The redaction raster picks its own codec, and must never grow a page.**
+  `embedPageRaster` encodes both PNG and JPEG and embeds the smaller. Neither
+  wins everywhere — lossless is hopeless against scanner noise (a scanned A4
+  page measured 5127 KB as PNG against 1056 KB as JPEG), but PNG is far smaller
+  on a sparse vector page — so the comparison is the design, not a fallback.
+  `pref.losslessRaster` (⋯ menu) skips JPEG entirely for users who need the
+  raster bit-exact. `docs/RASTER-CODEC-EVAL.md` has the measurements, and the
+  reasons JBIG2 and MuPDF were evaluated and turned down.
+- **`optimizeImages.ts` decodes flate images itself.** `DCTDecode` goes to the
+  browser's JPEG decoder; `FlateDecode` is inflated, un-predicted, and unpacked
+  here — `/Predictor` is not optional, since ignoring it yields noise rather
+  than a slightly-off image. Every unsupported shape (chained filters, 1/16-bit
+  depths, CMYK or indexed colour, masks, `/Decode`) returns null and leaves the
+  image untouched, which is why the safety checks are an allow-list.
 - **On the redaction raster path, anything not covered is permanent.** The
   raster is all that survives, so cover rectangles must be *measured*
   (`ctx.measureText` / `widthOfTextAtSize`), never estimated from character
