@@ -1,5 +1,6 @@
-import { PDFArray, PDFName, PDFNumber, PDFRawStream, type PDFDocument, type PDFRef } from "pdf-lib";
+import { PDFArray, PDFDict, PDFName, PDFNumber, PDFRawStream, PDFRef, type PDFDocument } from "pdf-lib";
 import { loadJpegEncoder } from "./jpeg";
+import { yieldToUI } from "./yield";
 
 export interface OptimizeImagesResult {
   /** Number of image streams downsampled + re-encoded. */
@@ -19,9 +20,15 @@ export interface OptimizeImagesOptions {
  *  decoder; `FlateDecode` carries raw samples we unpack ourselves. */
 type ImageFilter = "DCTDecode" | "FlateDecode";
 
-/** Guard against inflating a stream that would blow the tab's memory. A 40 MP
- *  RGB image is already ~120 MB of samples; past that, leave it alone. */
-const MAX_PIXELS = 40_000_000;
+/**
+ * Pixel ceiling for the *flate* path only, where we hold the decoded image
+ * ourselves. Decoding costs roughly four copies at once — inflated bytes, the
+ * un-predicted samples, the ImageData, and the canvas backing it — so 16 MP of
+ * RGB is already on the order of 200 MB. JPEG has no equivalent limit here
+ * because `createImageBitmap` decodes off our heap; capping it would only stop
+ * the optimiser working on the largest photos, which are the whole point.
+ */
+const MAX_FLATE_PIXELS = 16_000_000;
 
 /** A PDFName's bare name without the leading slash (pdf-lib's asString keeps
  *  it, e.g. "/Image" → "Image"), or null if the value isn't a name. */
@@ -32,6 +39,30 @@ const nameOf = (v: unknown): string | null =>
 function num(dict: { get: (k: PDFName) => unknown }, key: string): number | null {
   const v = dict.get(PDFName.of(key));
   return v instanceof PDFNumber ? v.asNumber() : null;
+}
+
+/**
+ * Every object referenced as some other image's `/SMask` or `/Mask`.
+ *
+ * A soft mask is itself an image XObject — usually DeviceGray, 8-bit, flate —
+ * so it looks exactly like a candidate from the inside, and nothing on the mask
+ * stream says "I am a mask". Re-encoding one as a DeviceRGB JPEG produces an
+ * invalid soft mask (they must be a single component) and quietly makes the
+ * transparency lossy. Masks were never *reachable* while only `DCTDecode` was
+ * accepted, since masks are essentially always flate; accepting flate is what
+ * put them in range, so they have to be excluded by name.
+ */
+function maskedRefs(doc: PDFDocument): Set<string> {
+  const refs = new Set<string>();
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    const dict = obj instanceof PDFRawStream ? obj.dict : obj instanceof PDFDict ? obj : null;
+    if (!dict) continue;
+    for (const key of ["SMask", "Mask"]) {
+      const v = dict.get(PDFName.of(key));
+      if (v instanceof PDFRef) refs.add(v.tag);
+    }
+  }
+  return refs;
 }
 
 /** The stream's single filter name, or null if it has none / more than one
@@ -185,16 +216,55 @@ function unpredict(
   return out;
 }
 
-/** The /DecodeParms dictionary for a stream (unwrapping a single-element
- *  array), or null. */
-function decodeParms(stream: PDFRawStream): { get: (k: PDFName) => unknown } | null {
+/** Resolved `/DecodeParms` values, in the units `unpredict` needs. */
+interface FlateParms {
+  predictor: number;
+  colors: number;
+  bpc: number;
+  columns: number;
+}
+
+/**
+ * Read `/DecodeParms` into concrete numbers, or null if we can't be certain
+ * what they are.
+ *
+ * "Can't be certain" has to mean *stop*, not *assume the default*. Getting the
+ * predictor wrong doesn't produce a slightly-off image, it produces a sheared
+ * noise field — and the short-data guard downstream can't catch it, because
+ * predictor-filtered data is *larger* than the samples it encodes, never
+ * smaller. So an entry that is present but not a plain number (an indirect
+ * reference, say), or a multi-entry parms array, bails out here rather than
+ * quietly falling back to "unfiltered".
+ *
+ * Defaults follow the PDF spec (`Colors` 1, `Columns` 1, `BitsPerComponent` 8),
+ * not what an image "obviously" means — the caller cross-checks them against
+ * the image's own dimensions and rejects a mismatch.
+ */
+function flateParms(stream: PDFRawStream): FlateParms | null {
   const ctx = stream.dict.context;
-  let dp: unknown = stream.dict.get(PDFName.of("DecodeParms")) ?? stream.dict.get(PDFName.of("DP"));
-  dp = ctx.lookup(dp as never) ?? dp;
-  if (dp instanceof PDFArray) dp = dp.size() === 1 ? ctx.lookup(dp.get(0)) : null;
-  return dp && typeof (dp as { get?: unknown }).get === "function"
-    ? (dp as { get: (k: PDFName) => unknown })
-    : null;
+  const raw = stream.dict.get(PDFName.of("DecodeParms")) ?? stream.dict.get(PDFName.of("DP"));
+  let dp: unknown = raw instanceof PDFRef ? ctx.lookup(raw) : raw;
+  // No parms at all: the stream is plain deflate with no prediction.
+  if (dp === undefined || dp === null) return { predictor: 1, colors: 1, bpc: 8, columns: 1 };
+  if (dp instanceof PDFArray) {
+    if (dp.size() !== 1) return null; // one filter, so anything else is a shape we don't model
+    dp = ctx.lookup(dp.get(0));
+  }
+  const dict = dp as { get?: (k: PDFName) => unknown };
+  if (typeof dict.get !== "function") return null;
+
+  const read = (key: string, fallback: number): number | null => {
+    const present = dict.get!(PDFName.of(key));
+    if (present === undefined || present === null) return fallback;
+    const v = present instanceof PDFRef ? ctx.lookup(present) : present;
+    return v instanceof PDFNumber ? v.asNumber() : null; // present but unreadable → bail
+  };
+  const predictor = read("Predictor", 1);
+  const colors = read("Colors", 1);
+  const bpc = read("BitsPerComponent", 8);
+  const columns = read("Columns", 1);
+  if (predictor === null || colors === null || bpc === null || columns === null) return null;
+  return { predictor, colors, bpc, columns };
 }
 
 /** Decode a FlateDecode image stream to a canvas we can draw from, or null if
@@ -205,18 +275,19 @@ async function decodeFlate(
   h: number,
   comps: number,
 ): Promise<HTMLCanvasElement | null> {
+  const parms = flateParms(stream);
+  if (!parms) return null;
+  // With prediction in play the parms describe the exact sample layout, so they
+  // have to agree with the image dictionary. A disagreement means one of the two
+  // isn't what we think it is — skip rather than unfilter against a guess.
+  if (parms.predictor > 1 && (parms.colors !== comps || parms.bpc !== 8 || parms.columns !== w)) {
+    return null;
+  }
+
   const inflated = await inflate(stream.contents);
   if (!inflated) return null;
 
-  const parms = decodeParms(stream);
-  const predictor = parms ? (num(parms, "Predictor") ?? 1) : 1;
-  const samples = unpredict(
-    inflated,
-    predictor,
-    parms ? (num(parms, "Colors") ?? comps) : comps,
-    parms ? (num(parms, "BitsPerComponent") ?? 8) : 8,
-    parms ? (num(parms, "Columns") ?? w) : w,
-  );
+  const samples = unpredict(inflated, parms.predictor, parms.colors, parms.bpc, parms.columns);
   // Short data means we misread the layout somewhere — bail rather than
   // re-encode a half-decoded image over the original.
   if (!samples || samples.length < w * h * comps) return null;
@@ -269,19 +340,27 @@ export async function optimizeImages(
   let changed = 0;
   let saved = 0;
 
+  const masks = maskedRefs(doc);
   const entries = doc.context.enumerateIndirectObjects();
   for (const [ref, obj] of entries as [PDFRef, unknown][]) {
     if (!(obj instanceof PDFRawStream)) continue;
+    if (masks.has(ref.tag)) continue;
     const kind = classify(obj);
     if (!kind) continue;
 
     const d = obj.dict;
     const w = num(d, "Width");
     const h = num(d, "Height");
-    if (!w || !h || w * h > MAX_PIXELS) continue;
+    if (!w || !h) continue;
+    if (kind.filter === "FlateDecode" && w * h > MAX_FLATE_PIXELS) continue;
     const longest = Math.max(w, h);
     // Only bother when the image is large enough that downsampling helps.
     if (longest <= opts.maxDim && obj.contents.length < 40_000) continue;
+
+    // Decoding and re-encoding a full-size image is the expensive part, and it
+    // is all synchronous once it starts — let the UI breathe between images so a
+    // scan-heavy document doesn't freeze the tab.
+    await yieldToUI();
 
     // Decode to something drawable. Either step can bail on an image it can't
     // read; that just leaves the original in place.
@@ -298,7 +377,12 @@ export async function optimizeImages(
         continue; // undecodable → leave untouched
       }
     } else {
-      const decoded = await decodeFlate(obj, w, h, kind.comps);
+      let decoded: HTMLCanvasElement | null = null;
+      try {
+        decoded = await decodeFlate(obj, w, h, kind.comps);
+      } catch {
+        decoded = null; // out of memory on a huge image, say — one image failing
+      } //                 to decode must not fail the whole document
       if (!decoded) continue;
       source = decoded;
     }
@@ -332,9 +416,13 @@ export async function optimizeImages(
     newDict.set(PDFName.of("Filter"), PDFName.of("DCTDecode"));
     newDict.set(PDFName.of("Length"), PDFNumber.of(encoded.length));
     // Carry /Interpolate over — it's a rendering hint, and a downsampled image
-    // is if anything more likely to want the smoothing it asks for.
-    const interpolate = d.get(PDFName.of("Interpolate"));
-    if (interpolate) newDict.set(PDFName.of("Interpolate"), interpolate);
+    // is if anything more likely to want the smoothing it asks for. /OC matters
+    // more: it binds the image to an optional-content group, so dropping it
+    // turns an image on a hidden layer permanently visible.
+    for (const key of ["Interpolate", "OC"]) {
+      const v = d.get(PDFName.of(key));
+      if (v !== undefined) newDict.set(PDFName.of(key), v);
+    }
 
     const newStream = PDFRawStream.of(newDict as never, encoded);
     ctxObj.assign(ref, newStream);

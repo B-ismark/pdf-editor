@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { PDFDocument, PDFName, PDFRawStream, PDFRef } from "pdf-lib";
 import { readFileSync, statSync } from "node:fs";
 import { fixtures, PHOTO_CAPTION } from "./fixtures";
 import { open, watch, pickTool, dragOnPage, pageTexts } from "./helpers";
@@ -153,5 +154,41 @@ test.describe("export integrity", () => {
       (await pageTexts(bytes, [1]))[0],
       "the point of this preset — the page is still text",
     ).toContain(PHOTO_CAPTION);
+  });
+
+  /**
+   * A soft mask is an image XObject too, and nothing on the stream says so —
+   * it's DeviceGray, 8-bit, flate, which is exactly the shape the optimiser now
+   * looks for. Rewriting one as a DeviceRGB JPEG makes it an invalid mask and
+   * makes the transparency lossy, and only the *reference* from the image it
+   * belongs to distinguishes it.
+   */
+  test("Keep text never rewrites a soft mask", async ({ page }) => {
+    await open(page, (await fixtures()).masked);
+
+    await page.click('[aria-label="More actions"]');
+    await page.locator('[role="menuitem"]', { hasText: "Compress PDF" }).click();
+    await page.locator(".compress__preset", { hasText: "Keep text" }).click();
+    await expect(page.locator(".compress__estimate")).toContainText("text stays selectable", {
+      timeout: 180_000,
+    });
+    const bytes = await downloadFrom(page, ".dialog__actions .btn--filled");
+
+    const doc = await PDFDocument.load(bytes);
+    let checked = 0;
+    for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+      if (!(obj instanceof PDFRawStream)) continue;
+      const ref = obj.dict.get(PDFName.of("SMask"));
+      if (!(ref instanceof PDFRef)) continue;
+      const mask = doc.context.lookup(ref);
+      expect(mask, "the mask stream still exists").toBeInstanceOf(PDFRawStream);
+      const dict = (mask as PDFRawStream).dict;
+      expect(String(dict.get(PDFName.of("ColorSpace"))), "a mask must stay single-component")
+        .toBe("/DeviceGray");
+      expect(String(dict.get(PDFName.of("Filter"))), "and must not be re-encoded as JPEG")
+        .not.toContain("DCTDecode");
+      checked++;
+    }
+    expect(checked, "the fixture is supposed to have a soft mask").toBeGreaterThan(0);
   });
 });

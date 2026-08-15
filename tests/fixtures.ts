@@ -1,4 +1,4 @@
-import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, PDFName, PDFRawStream, PDFRef, StandardFonts, rgb } from "pdf-lib";
 import { chromium } from "@playwright/test";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,6 +22,8 @@ export interface Fixtures {
   scanned: string;
   /** One page: a large photographic (flate-compressed) image plus real text. */
   photo: string;
+  /** One page: a transparent image, so the file carries a soft-mask stream. */
+  masked: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
@@ -53,6 +55,7 @@ async function build(): Promise<Fixtures> {
     long: write("long.pdf", await textPdf(150)),
     scanned: write("scanned.pdf", await scannedPdf()),
     photo: write("photo.pdf", await photoPdf()),
+    masked: write("masked.pdf", await maskedPdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -168,23 +171,77 @@ async function photoPdf(): Promise<Uint8Array> {
   return doc.save();
 }
 
-/** Minimal truecolour PNG encoder (8-bit, no alpha, no interlacing).
- *  Hand-rolled so the fixture can guarantee the *absence* of an alpha channel —
- *  a canvas `toDataURL` always emits RGBA, which pdf-lib turns into an image
- *  plus a soft mask, and a soft-masked image is one the optimiser skips. */
-function encodePng(rgbPixels: Uint8Array, w: number, h: number): Uint8Array {
-  const stride = w * 3 + 1;
+/**
+ * A page whose image is transparent, so the PDF carries a **soft-mask stream**.
+ *
+ * A soft mask is an image XObject in its own right — DeviceGray, 8-bit, flate —
+ * so from the inside it looks exactly like something the optimiser should
+ * shrink, and nothing on the stream says "I am a mask". Re-encoding one as a
+ * DeviceRGB JPEG makes it an invalid mask and makes the transparency lossy.
+ *
+ * pdf-lib happens to write `/Decode [0 1]` on its masks, which the optimiser's
+ * `/Decode` guard would refuse for the wrong reason — so the fixture strips it
+ * afterwards. That's not making the test easier; it's making it *representative*,
+ * since most producers emit a mask with no `/Decode` at all.
+ */
+async function maskedPdf(): Promise<Uint8Array> {
+  const w = 700;
+  const h = 900;
+  const px = new Uint8Array(w * h * 4);
+  let seed = 0x51f3a7c;
+  const rand = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return (seed >>> 24) & 0xff;
+  };
+  for (let i = 0; i < w * h; i++) {
+    const o = i * 4;
+    px[o] = rand();
+    px[o + 1] = rand();
+    px[o + 2] = rand();
+    // Noisy alpha, so the mask stream is too big for flate to shrink and lands
+    // well over the optimiser's size threshold.
+    px[o + 3] = rand();
+  }
+
+  const doc = await PDFDocument.create();
+  const img = await doc.embedPng(encodePng(px, w, h, 4));
+  doc.addPage([595, 842]).drawImage(img, { x: 47, y: 120, width: 500, height: 600 });
+  return stripMaskDecode(await doc.save());
+}
+
+/** Remove `/Decode` from every soft-mask stream, so the fixture matches the
+ *  shape a typical PDF producer emits rather than pdf-lib's own. */
+async function stripMaskDecode(bytes: Uint8Array): Promise<Uint8Array> {
+  const doc = await PDFDocument.load(bytes);
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFRawStream)) continue;
+    const smask = obj.dict.get(PDFName.of("SMask"));
+    if (!(smask instanceof PDFRef)) continue;
+    const mask = doc.context.lookup(smask);
+    if (mask instanceof PDFRawStream) mask.dict.delete(PDFName.of("Decode"));
+  }
+  return doc.save();
+}
+
+/** Minimal PNG encoder (8-bit, no interlacing), truecolour with or without an
+ *  alpha channel. Hand-rolled so a fixture can guarantee which of the two it
+ *  gets: a canvas `toDataURL` always emits RGBA, and whether an alpha channel
+ *  is present decides whether pdf-lib writes a soft mask — which is the
+ *  difference between the two images these fixtures need. */
+function encodePng(pixels: Uint8Array, w: number, h: number, channels: 3 | 4 = 3): Uint8Array {
+  const rowBytes = w * channels;
+  const stride = rowBytes + 1;
   const raw = new Uint8Array(stride * h);
   for (let y = 0; y < h; y++) {
     raw[y * stride] = 0; // per-row filter: none
-    raw.set(rgbPixels.subarray(y * w * 3, (y + 1) * w * 3), y * stride + 1);
+    raw.set(pixels.subarray(y * rowBytes, (y + 1) * rowBytes), y * stride + 1);
   }
   const ihdr = new Uint8Array(13);
   const head = new DataView(ihdr.buffer);
   head.setUint32(0, w);
   head.setUint32(4, h);
   ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // colour type 2: truecolour, no alpha
+  ihdr[9] = channels === 4 ? 6 : 2; // truecolour, with or without alpha
   return concatBytes([
     new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     pngChunk("IHDR", ihdr),
