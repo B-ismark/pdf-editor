@@ -1,12 +1,23 @@
 name: CI
 
-# Build, type-check, and run the Playwright end-to-end tests on every push
-# (except the Pages deploy branch) and on PRs into main. Deployment is handled
-# separately by deploy.yml on pushes to main.
+# Build, type-check, and run the Playwright end-to-end tests on PRs into main
+# and on main itself. Deployment is handled separately by deploy.yml on pushes
+# to main.
+#
+# `push` is deliberately limited to main. It used to run on every branch, and
+# since a PR branch lives in this repo, a single push to an open PR matched both
+# `push` and `pull_request` and ran the whole suite twice against the identical
+# commit — two Playwright browser installs, two full e2e runs, and two chances
+# for that download step to stall (it did, and blocked a merge on a run that
+# carried no information the passing one hadn't already given).
+#
+# The trade-off: a branch with no PR open gets no CI. That's the intended
+# workflow here anyway — work goes to a branch, a PR opens, and it squash-merges
+# into main — and the first push after opening the PR covers it.
 on:
   push:
-    branches-ignore:
-      - gh-pages
+    branches:
+      - main
   pull_request:
     branches:
       - main
