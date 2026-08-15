@@ -4,6 +4,7 @@ import { sanitizeDocument } from "./sanitize";
 import { safeLinkUrl } from "./url";
 import { createSourceFontEmbedder, type SourceFontEmbedder } from "./fontEmbed";
 import { NO_FONTS, readPageFonts, type PageFonts } from "./fontInfo";
+import { loadJpegEncoder, type JpegEncoder } from "./jpeg";
 import { yieldToUI } from "./yield";
 import {
   DEFAULT_STYLE,
@@ -32,6 +33,17 @@ import type {
 /** Pixels per PDF unit used when rasterising redacted pages (≈216 dpi). */
 const REDACT_SCALE = 3;
 
+/**
+ * JPEG quality for the redaction raster.
+ *
+ * High, because this raster *is* the page — there is no vector copy underneath
+ * to fall back on, and a redacted document is often evidence. At 216 dpi this
+ * shows no ringing around text at normal reading zoom while costing a fraction
+ * of lossless: a scanned A4 page measures ~5100 KB as PNG against ~1050 KB
+ * here. See `docs/RASTER-CODEC-EVAL.md` for the measurements.
+ */
+const REDACT_JPEG_QUALITY = 0.85;
+
 export interface ExportInput {
   edits: Edits;
   textBoxes: TextBox[];
@@ -45,6 +57,9 @@ export interface ExportInput {
   pageNumbers?: PageNumberOptions | null;
   /** Document-wide diagonal watermark, drawn on every output page. */
   watermark?: WatermarkOptions | null;
+  /** Encode redacted pages losslessly (PNG only), never as JPEG. Costs several
+   *  times the file size; for users who need the raster bit-exact. */
+  losslessRaster?: boolean;
 }
 
 /** Draw a page number onto a finished page (vector or rasterised alike). */
@@ -146,6 +161,38 @@ async function canvasPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
   );
   if (!blob) throw new Error("Could not encode the page image");
   return new Uint8Array(await blob.arrayBuffer());
+}
+
+/**
+ * Embed a finished page raster, choosing whichever of PNG and JPEG is smaller.
+ *
+ * PNG alone used to ship here, and it is the wrong default for the content that
+ * most often gets redacted: lossless has no defence against scanner noise, so a
+ * scanned A4 page cost ~5 MB where JPEG costs ~1 MB. But PNG still wins
+ * outright on sparse vector pages — a mostly-blank page is a few KB flat and
+ * would be an order of magnitude *larger* as JPEG — so neither codec can be
+ * picked up front. Encoding both and keeping the smaller is the same
+ * "never grow a stream" rule `optimizeImages.ts` follows, and it means turning
+ * this on can't make any page bigger than it was before.
+ *
+ * `encodeJpeg` is null when the user asked for a lossless raster, which skips
+ * the comparison entirely. A JPEG encode that throws also falls back to PNG:
+ * the page still exports, just larger.
+ */
+async function embedPageRaster(
+  out: PDFDocument,
+  canvas: HTMLCanvasElement,
+  encodeJpeg: JpegEncoder | null,
+) {
+  const png = await canvasPngBytes(canvas);
+  if (!encodeJpeg) return out.embedPng(png);
+  let jpeg: Uint8Array | null = null;
+  try {
+    jpeg = await encodeJpeg(canvas);
+  } catch {
+    jpeg = null; // codec unavailable or failed on this page — PNG is still correct
+  }
+  return jpeg && jpeg.length < png.length ? out.embedJpg(jpeg) : out.embedPng(png);
 }
 
 /** Load a data-URL image element (for the raster path). */
@@ -338,7 +385,7 @@ export async function exportPdf(
   input: ExportInput,
   onProgress?: (page: number, total: number) => void,
 ): Promise<Uint8Array> {
-  const { edits, textBoxes, redactions, annotations, stamps, links = [], formValues = {}, pageNumbers, watermark } = input;
+  const { edits, textBoxes, redactions, annotations, stamps, links = [], formValues = {}, pageNumbers, watermark, losslessRaster = false } = input;
   const src = await PDFDocument.load(loaded.bytes.slice(0));
   fillAndFlattenForm(src, formValues);
   // updateMetadata: false stops pdf-lib stamping its own Producer / Creator /
@@ -365,6 +412,13 @@ export async function exportPdf(
   const anyEdits = loaded.pages.some((pd) => pd.fragments.some((f) => isFragmentModified(f, edits[f.id])));
   let embedder: SourceFontEmbedder | null = null;
   if (anyEdits) embedder = await createSourceFontEmbedder(loaded.bytes, out);
+
+  // Resolved once, on the first redacted page, and only when a lossy raster is
+  // allowed — loading the codec costs a WASM init, and most documents never
+  // take the raster path at all.
+  let jpegEncoder: Promise<JpegEncoder> | null = null;
+  const getJpegEncoder = () =>
+    losslessRaster ? null : (jpegEncoder ??= loadJpegEncoder(REDACT_JPEG_QUALITY));
 
   let done = 0;
   for (const pageData of loaded.pages) {
@@ -399,7 +453,7 @@ export async function exportPdf(
     };
 
     if (needsRaster) {
-      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps);
+      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, await getJpegEncoder());
       applyPageLayers(rasterPage);
       continue;
     }
@@ -503,6 +557,7 @@ async function rasterisePage(
   redactions: Redaction[],
   annots: Annotation[],
   stamps: Stamp[],
+  encodeJpeg: JpegEncoder | null,
 ): Promise<PDFPage> {
   const pageData = loaded.pages[pageIndex];
   const H = pageData.viewBox.height;
@@ -592,17 +647,17 @@ async function rasterisePage(
     ctx.fillRect(r.x * S, (H - (r.y + r.height)) * S, r.width * S, r.height * S);
   }
 
-  // Via a Blob, not `toDataURL()`. A redacted A4 page at 3× is ~7 MP, whose PNG
-  // becomes a ~10-30 MB base64 *string* that pdf-lib then decodes back to bytes
-  // — two large copies plus the base64 33% overhead, all on the main thread and
-  // all held at once. `toBlob` hands over the encoded bytes directly, which on a
-  // document with several redacted pages is the difference between exporting and
-  // an out-of-memory tab.
-  const png = await out.embedPng(await canvasPngBytes(canvas));
+  // Encoded via a Blob, not `toDataURL()`. A redacted A4 page at 3× is ~7 MP,
+  // whose PNG becomes a ~10-30 MB base64 *string* that pdf-lib then decodes back
+  // to bytes — two large copies plus the base64 33% overhead, all on the main
+  // thread and all held at once. `toBlob` hands over the encoded bytes directly,
+  // which on a document with several redacted pages is the difference between
+  // exporting and an out-of-memory tab.
+  const image = await embedPageRaster(out, canvas, encodeJpeg);
   const wPt = pageData.viewBox.width;
   const hPt = pageData.viewBox.height;
   const page = out.addPage([wPt, hPt]);
-  page.drawImage(png, { x: 0, y: 0, width: wPt, height: hPt });
+  page.drawImage(image, { x: 0, y: 0, width: wPt, height: hPt });
   return page;
 }
 

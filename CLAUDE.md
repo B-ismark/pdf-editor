@@ -44,8 +44,11 @@ type-checking can't see, and each exists because it broke once:
 - `rendering.spec.ts` — the render window stays bounded on a 150-page document,
   doesn't grow while scrolling, and the page you scroll to is actually painted;
 - `export.spec.ts` — an unsafe link URL is flagged in the UI and absent from the
-  exported bytes, no authoring metadata is written, and a redacted page has no
-  extractable text while its neighbour keeps its own;
+  exported bytes, no authoring metadata is written, a redacted page has no
+  extractable text while its neighbour keeps its own, the redaction raster is a
+  JPEG (and the lossless switch really turns that off), "Keep text" shrinks a
+  flate-compressed image without costing the page its text, and it never
+  rewrites a soft mask;
 - `ocr.spec.ts` — an image-only page becomes findable text, with the engine and
   language model loaded from our own origin only; and the engine cache holds the
   wasm core and *nothing else* (skips if assets are absent);
@@ -128,6 +131,32 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   allow-list) and copied annotation actions through `sanitize.ts` (also an
   allow-list, `/Next` chains included). The exporter is the single choke point,
   so a value from a restored session can't bypass a UI check.
+- **The redaction raster picks its own codec, and must never grow a page.**
+  `embedPageRaster` encodes both PNG and JPEG and embeds the smaller. Neither
+  wins everywhere — lossless is hopeless against scanner noise (a scanned A4
+  page measured 5127 KB as PNG against 1056 KB as JPEG), but PNG is far smaller
+  on a sparse vector page — so the comparison is the design, not a fallback.
+  `pref.losslessRaster` (⋯ menu) skips JPEG entirely for users who need the
+  raster bit-exact. `docs/RASTER-CODEC-EVAL.md` has the measurements, and the
+  reasons JBIG2 and MuPDF were evaluated and turned down.
+- **`optimizeImages.ts` decodes flate images itself.** `DCTDecode` goes to the
+  browser's JPEG decoder; `FlateDecode` is inflated, un-predicted, and unpacked
+  here — `/Predictor` is not optional, since ignoring it yields noise rather
+  than a slightly-off image, and `flateParms` therefore *bails* on anything it
+  can't read rather than assuming the default. Every unsupported shape (chained
+  filters, 1/16-bit depths, CMYK or indexed colour, masks, `/Decode`) returns
+  null and leaves the image untouched, which is why the checks are an
+  allow-list. Two traps worth keeping in mind:
+  - **A soft mask is an image XObject too**, DeviceGray/8-bit/flate — i.e.
+    indistinguishable from a candidate by its own contents, and only the
+    `/SMask` reference *from the image that owns it* marks it. Rewriting one as
+    a DeviceRGB JPEG is an invalid mask and lossy transparency, so `maskedRefs`
+    pre-scans for those references. Accepting flate is what put masks in range;
+    they were unreachable when only `DCTDecode` was.
+  - **The rebuilt image dict is a fresh minimal one**, so any key that changes
+    how the image renders has to be carried over explicitly — `/Interpolate`
+    and, load-bearingly, `/OC`, without which an image on a hidden
+    optional-content layer becomes permanently visible.
 - **On the redaction raster path, anything not covered is permanent.** The
   raster is all that survives, so cover rectangles must be *measured*
   (`ctx.measureText` / `widthOfTextAtSize`), never estimated from character

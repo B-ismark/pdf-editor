@@ -221,6 +221,11 @@ export function App() {
   // switching it off has to actually erase what's already stored, not just stop
   // adding to it.
   const [autosaveOn, setAutosaveOn] = usePersistentFlag("pref.autosave", true);
+  // Redacted pages are flattened to an image, and that image is the whole page.
+  // It ships as JPEG-or-PNG-whichever-is-smaller, which is several times
+  // smaller on scans; this makes the raster bit-exact instead, for anyone who
+  // needs the output to survive later analysis unaltered.
+  const [losslessRaster, setLosslessRaster] = usePersistentFlag("pref.losslessRaster", false);
   const [sigOpen, setSigOpen] = useState(false);
   const [finishTab, setFinishTab] = useState<"numbers" | "watermark" | null>(null);
   const [pendingStamp, setPendingStamp] = useState<{ dataUrl: string; w: number; h: number } | null>(null);
@@ -541,9 +546,11 @@ export function App() {
   /** Export the current edits to fresh bytes so finishing ops build on them. */
   const bakeCurrent = useCallback(async (): Promise<ArrayBuffer> => {
     const { exportPdf } = await import("./pdf/exporter");
-    const out = await exportPdf(pdf!, { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark });
+    const out = await exportPdf(pdf!, { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster });
     return toAB(out);
-  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark]);
+    // `losslessRaster` is read for the export, so it has to be a dependency —
+    // otherwise this captures whatever it was when `pdf` last changed.
+  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster]);
 
   // Page numbers and watermark are document-wide layers stored in DocState and
   // drawn at export time (see exporter.ts). Setting them is a normal, undoable
@@ -613,7 +620,8 @@ export function App() {
       }
       const { buf, sizes, before } = compressBaked.current;
       if (preset.kind === "lossless") {
-        // Text stays selectable; oversized JPEG images are downsampled in place.
+        // Text stays selectable; oversized images (JPEG or flate) are
+        // downsampled and re-encoded in place.
         if (!compressLossless.current) {
           const { optimizeKeepingText } = await import("./pdf/finishOps");
           const { bytes: optimized } = await optimizeKeepingText(buf, { maxDim: 1600, quality: 0.8 });
@@ -1653,7 +1661,7 @@ export function App() {
       const { exportPdf } = await import("./pdf/exporter");
       const out = await exportPdf(
         pdf,
-        { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark },
+        { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster },
         (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`),
       );
       downloadBytes(out, fileName.replace(/\.pdf$/i, "") + "-edited.pdf");
@@ -1667,7 +1675,7 @@ export function App() {
       setStatus("error");
       setMessage("Couldn't build the edited PDF. Please try again.");
     }
-  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, fileName]);
+  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, fileName]);
 
   // Guard the download: a whiteout cover only paints over content — the text
   // beneath stays recoverable. If any cover sits over live text, warn before
@@ -1848,6 +1856,16 @@ export function App() {
                   >
                     <Icon name="rotate" size={18} /> Save session on this device
                     {autosaveOn && <Icon name="check" size={16} className="menu__check" />}
+                  </button>
+                  <button
+                    className="menu__item"
+                    onClick={() => { setMenuOpen(false); setLosslessRaster((v) => !v); }}
+                    role="menuitemcheckbox"
+                    aria-checked={losslessRaster}
+                    data-tip="Redacted pages export bit-exact, at several times the file size"
+                  >
+                    <Icon name="compress" size={18} /> Lossless redacted pages
+                    {losslessRaster && <Icon name="check" size={16} className="menu__check" />}
                   </button>
                   <div className="menu__divider" />
                   <button className="menu__item" onClick={reset} role="menuitem">
