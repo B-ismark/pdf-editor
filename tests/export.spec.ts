@@ -191,4 +191,36 @@ test.describe("export integrity", () => {
     }
     expect(checked, "the fixture is supposed to have a soft mask").toBeGreaterThan(0);
   });
+
+  /**
+   * `/DecodeParms` that can't be read must stop the optimiser, not fall back to
+   * "no prediction". Getting the predictor wrong writes a sheared noise field
+   * over a real image, and nothing downstream can notice: predictor-filtered
+   * data is *larger* than the samples it encodes, so the short-data guard never
+   * fires. Refusing the image is the only safe answer.
+   */
+  test("an unreadable /DecodeParms leaves the image untouched", async ({ page }) => {
+    await open(page, (await fixtures()).brokenParms);
+
+    await page.click('[aria-label="More actions"]');
+    await page.locator('[role="menuitem"]', { hasText: "Compress PDF" }).click();
+    await page.locator(".compress__preset", { hasText: "Keep text" }).click();
+    await expect(page.locator(".compress__estimate")).toContainText("text stays selectable", {
+      timeout: 180_000,
+    });
+    const bytes = await downloadFrom(page, ".dialog__actions .btn--filled");
+
+    const doc = await PDFDocument.load(bytes);
+    let images = 0;
+    for (const [, obj] of doc.context.enumerateIndirectObjects()) {
+      if (!(obj instanceof PDFRawStream)) continue;
+      if (String(obj.dict.get(PDFName.of("Subtype"))) !== "/Image") continue;
+      images++;
+      expect(
+        String(obj.dict.get(PDFName.of("Filter"))),
+        "an image we couldn't read the layout of must not be re-encoded",
+      ).toContain("FlateDecode");
+    }
+    expect(images, "the fixture is supposed to carry two images").toBe(2);
+  });
 });

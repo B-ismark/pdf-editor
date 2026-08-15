@@ -47,8 +47,8 @@ type-checking can't see, and each exists because it broke once:
   exported bytes, no authoring metadata is written, a redacted page has no
   extractable text while its neighbour keeps its own, the redaction raster is a
   JPEG (and the lossless switch really turns that off), "Keep text" shrinks a
-  flate-compressed image without costing the page its text, and it never
-  rewrites a soft mask;
+  flate-compressed image without costing the page its text, it never rewrites a
+  soft mask, and an image whose `/DecodeParms` it can't read is left alone;
 - `ocr.spec.ts` — an image-only page becomes findable text, with the engine and
   language model loaded from our own origin only; and the engine cache holds the
   wasm core and *nothing else* (skips if assets are absent);
@@ -153,10 +153,19 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
     a DeviceRGB JPEG is an invalid mask and lossy transparency, so `maskedRefs`
     pre-scans for those references. Accepting flate is what put masks in range;
     they were unreachable when only `DCTDecode` was.
-  - **The rebuilt image dict is a fresh minimal one**, so any key that changes
-    how the image renders has to be carried over explicitly — `/Interpolate`
-    and, load-bearingly, `/OC`, without which an image on a hidden
-    optional-content layer becomes permanently visible.
+  - **The rebuilt image dict is a fresh minimal one**, so any key that outlives
+    the pixels has to be carried over by name — `/Interpolate` and `/Intent`,
+    plus `/OC` (without which an image on a hidden optional-content layer
+    becomes permanently visible) and `/StructParent` (which ties it to the
+    tagged-PDF tree carrying its alt text).
+  - **"Present but unreadable" is not "absent".** `flateParms` returns the
+    no-prediction defaults *only* when `/DecodeParms` is missing outright; a
+    dangling reference or a shape it doesn't model bails instead. Collapsing
+    the two is how you unfilter predicted data as if it were raw, and nothing
+    downstream can catch it — predictor-filtered data is always *larger* than
+    the samples it encodes, so the short-data guard never fires. For the same
+    reason the parms object is checked with `instanceof PDFDict`, not for a
+    `.get` method: `PDFArray` has one of those too.
 - **On the redaction raster path, anything not covered is permanent.** The
   raster is all that survives, so cover rectangles must be *measured*
   (`ctx.measureText` / `widthOfTextAtSize`), never estimated from character
