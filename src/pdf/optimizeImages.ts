@@ -243,18 +243,28 @@ interface FlateParms {
 function flateParms(stream: PDFRawStream): FlateParms | null {
   const ctx = stream.dict.context;
   const raw = stream.dict.get(PDFName.of("DecodeParms")) ?? stream.dict.get(PDFName.of("DP"));
+  // Absent entirely is the only case that means "no prediction". An entry that
+  // is *present* but doesn't resolve — a dangling reference, a shape we don't
+  // model — is not the same thing, and must not collapse into the same answer:
+  // that's the silent default this function exists to refuse.
+  if (raw === undefined || raw === null) return { predictor: 1, colors: 1, bpc: 8, columns: 1 };
+
   let dp: unknown = raw instanceof PDFRef ? ctx.lookup(raw) : raw;
-  // No parms at all: the stream is plain deflate with no prediction.
-  if (dp === undefined || dp === null) return { predictor: 1, colors: 1, bpc: 8, columns: 1 };
   if (dp instanceof PDFArray) {
     if (dp.size() !== 1) return null; // one filter, so anything else is a shape we don't model
-    dp = ctx.lookup(dp.get(0));
+    const first = dp.get(0);
+    dp = first instanceof PDFRef ? ctx.lookup(first) : first;
   }
-  const dict = dp as { get?: (k: PDFName) => unknown };
-  if (typeof dict.get !== "function") return null;
+  // Must be an actual dictionary. Duck-typing on `.get` is not enough: PDFArray
+  // has one too, so a nested array would sail through and then answer every
+  // lookup with its fallback — arriving right back at "predictor 1" by a
+  // different route. Anything else here (unresolved ref, null, array, number)
+  // leaves the image untouched, which is never wrong, only unhelpful.
+  if (!(dp instanceof PDFDict)) return null;
+  const dict = dp;
 
   const read = (key: string, fallback: number): number | null => {
-    const present = dict.get!(PDFName.of(key));
+    const present = dict.get(PDFName.of(key));
     if (present === undefined || present === null) return fallback;
     const v = present instanceof PDFRef ? ctx.lookup(present) : present;
     return v instanceof PDFNumber ? v.asNumber() : null; // present but unreadable → bail
@@ -415,11 +425,13 @@ export async function optimizeImages(
     newDict.set(PDFName.of("BitsPerComponent"), PDFNumber.of(8));
     newDict.set(PDFName.of("Filter"), PDFName.of("DCTDecode"));
     newDict.set(PDFName.of("Length"), PDFNumber.of(encoded.length));
-    // Carry /Interpolate over — it's a rendering hint, and a downsampled image
-    // is if anything more likely to want the smoothing it asks for. /OC matters
-    // more: it binds the image to an optional-content group, so dropping it
-    // turns an image on a hidden layer permanently visible.
-    for (const key of ["Interpolate", "OC"]) {
+    // The rebuilt dict is a fresh minimal one, so every key that outlives the
+    // pixels has to be carried over by name: /Interpolate and /Intent are
+    // rendering hints, /OC binds the image to an optional-content group (drop it
+    // and an image on a hidden layer becomes permanently visible), and
+    // /StructParent is what ties it to the tagged-PDF tree that carries its
+    // alt text — losing that quietly costs the document its accessibility.
+    for (const key of ["Interpolate", "Intent", "OC", "StructParent"]) {
       const v = d.get(PDFName.of(key));
       if (v !== undefined) newDict.set(PDFName.of(key), v);
     }

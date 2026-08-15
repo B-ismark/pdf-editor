@@ -24,6 +24,8 @@ export interface Fixtures {
   photo: string;
   /** One page: a transparent image, so the file carries a soft-mask stream. */
   masked: string;
+  /** Two images whose `/DecodeParms` can't be read — must be left alone. */
+  brokenParms: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
@@ -56,6 +58,7 @@ async function build(): Promise<Fixtures> {
     scanned: write("scanned.pdf", await scannedPdf()),
     photo: write("photo.pdf", await photoPdf()),
     masked: write("masked.pdf", await maskedPdf()),
+    brokenParms: write("broken-parms.pdf", await brokenParmsPdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -207,6 +210,61 @@ async function maskedPdf(): Promise<Uint8Array> {
   const img = await doc.embedPng(encodePng(px, w, h, 4));
   doc.addPage([595, 842]).drawImage(img, { x: 47, y: 120, width: 500, height: 600 });
   return stripMaskDecode(await doc.save());
+}
+
+/**
+ * Two images whose `/DecodeParms` the optimiser cannot read: one a reference to
+ * an object that isn't there, one a single-element array holding another array.
+ *
+ * Both are shapes where the honest answer is "I don't know how these samples are
+ * laid out". The dangerous failure isn't refusing them — it's treating either as
+ * *no prediction* and unfiltering anyway, which writes a sheared noise field
+ * over a real image, and which the short-data guard cannot catch because
+ * predictor-filtered data is larger than the samples it encodes, never smaller.
+ * So what this fixture asserts is the policy: an unreadable `/DecodeParms`
+ * leaves the image exactly as it was.
+ */
+async function brokenParmsPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([595, 842]);
+  const refs: PDFRef[] = [];
+  for (let i = 0; i < 2; i++) {
+    const img = await doc.embedPng(encodePng(noisePixels(600, 500, 3, 0x9e21b + i), 600, 500));
+    page.drawImage(img, { x: 47, y: 440 - i * 320, width: 480, height: 280 });
+    refs.push((img as unknown as { ref: PDFRef }).ref);
+  }
+  // pdf-lib embeds lazily — the image streams don't exist until the document is
+  // flushed, so mutating them before this point silently does nothing.
+  await doc.flush();
+
+  for (const [i, kind] of (["dangling", "nested"] as const).entries()) {
+    const stream = doc.context.lookup(refs[i]);
+    if (!(stream instanceof PDFRawStream)) throw new Error("fixture: image stream missing");
+    stream.dict.set(
+      PDFName.of("DecodeParms"),
+      kind === "dangling"
+        ? // points at an object that was never written
+          PDFRef.of(9999, 0)
+        : // a single-element array whose element is itself an array: passes a
+          // duck-typed "has .get" check, answers every lookup with a fallback
+          doc.context.obj([[]]),
+    );
+  }
+  return doc.save();
+}
+
+/** Deterministic pure noise, `channels` bytes per pixel. Noise (rather than
+ *  `photoPdf`'s gradient-plus-noise) because these images exist to be *refused*
+ *  — all that matters is that they're incompressible enough to clear the
+ *  optimiser's size threshold and become candidates in the first place. */
+function noisePixels(w: number, h: number, channels: 3 | 4, seed0: number): Uint8Array {
+  const px = new Uint8Array(w * h * channels);
+  let seed = seed0 >>> 0 || 1;
+  for (let i = 0; i < px.length; i++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    px[i] = (seed >>> 24) & 0xff;
+  }
+  return px;
 }
 
 /** Remove `/Decode` from every soft-mask stream, so the fixture matches the
