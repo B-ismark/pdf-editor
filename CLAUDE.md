@@ -33,7 +33,9 @@ npm test           # Playwright end-to-end suite against dist/ (18 specs)
 There is **no unit-test runner / linter** configured. Verification is
 `npm run build` (which type-checks) plus **`npm test`** — a Playwright suite
 (`tests/`, `playwright.config.ts`) that serves `dist/` and drives it in real
-Chromium. `.github/workflows/ci.yml` runs both on every push and PR;
+Chromium. `.github/workflows/ci.yml` runs both on PRs into `main` and on `main`
+itself (deliberately *not* on every branch push — a PR branch lives in this repo,
+so that matched both triggers and ran the whole suite twice per commit);
 `deploy.yml` handles Pages separately. **Run both before committing.**
 
 `tests/app.spec.ts` covers feature behaviour. The rest cover the invariants
