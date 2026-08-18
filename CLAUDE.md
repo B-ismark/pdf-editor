@@ -28,11 +28,15 @@ npm run dev        # Vite dev server
 npm run build      # tsc -b && vite build  → dist/   (run this before committing)
 npm run preview    # serve dist/ (defaults to :4173 with --port)
 npm run typecheck  # tsc -b --noEmit
-npm test           # Playwright end-to-end suite against dist/ (18 specs)
+npm test           # builds, then runs the Playwright end-to-end suite against dist/
 ```
 
 There is **no unit-test runner / linter** configured. Verification is
-`npm run build` (which type-checks) plus **`npm test`** — a Playwright suite
+`npm run build` (which type-checks) plus **`npm test`** — which *also* builds,
+deliberately: the suite serves `dist/`, so running it after a source edit without
+rebuilding exercises the previous bundle and reports a confident green. That is how
+a renamed button label passed locally and failed in CI. Invoking `playwright test`
+directly to iterate on one spec skips the rebuild — build first. It is a Playwright suite
 (`tests/`, `playwright.config.ts`) that serves `dist/` and drives it in real
 Chromium. `.github/workflows/ci.yml` runs both on PRs into `main` and on `main`
 itself (deliberately *not* on every branch push — a PR branch lives in this repo,
