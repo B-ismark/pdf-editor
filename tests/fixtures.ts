@@ -26,9 +26,45 @@ export interface Fixtures {
   masked: string;
   /** Two images whose `/DecodeParms` can't be read — must be left alone. */
   brokenParms: string;
+  /** One page of known typesetting: several faces at known baselines, and text
+   * on a solid-colour panel. */
+  typeset: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
+
+/** Page size of the `typeset` fixture, in PDF units. */
+export const TYPESET_PAGE = { width: 460, height: 420 };
+
+/**
+ * Text runs in `typeset`, at baselines the specs can assert against.
+ *
+ * Deliberately a spread of faces and sizes: the baseline-placement bug this
+ * fixture exists for was proportional to the font size and different per
+ * typeface, so a single run at a single size would have passed against it.
+ */
+export const TYPESET_RUNS = [
+  { text: "Hxplg-Helvetica-24", x: 30, baseline: 370, size: 24, font: StandardFonts.Helvetica },
+  { text: "Hxplg-Helvetica-11", x: 30, baseline: 330, size: 11, font: StandardFonts.Helvetica },
+  { text: "Hxplg-Times-18", x: 30, baseline: 290, size: 18, font: StandardFonts.TimesRoman },
+  { text: "Hxplg-Courier-24", x: 30, baseline: 240, size: 24, font: StandardFonts.Courier },
+  { text: "Hxplg-Bold-20", x: 30, baseline: 190, size: 20, font: StandardFonts.HelveticaBold },
+];
+
+/** A solid-colour panel in `typeset` with white text on it — an edit here must
+ * not punch a white hole through the panel. */
+export const TYPESET_PANEL = {
+  x: 24,
+  y: 60,
+  width: 260,
+  height: 56,
+  /** Fill colour, 0-255 per channel, as the raster should show it. */
+  rgb: [26, 127, 55] as [number, number, number],
+  text: "ON A PANEL",
+  textX: 44,
+  baseline: 80,
+  size: 18,
+};
 
 /** Text repeated on every page of `sample`/`long`. */
 export const MARKER = "the quick brown fox jumps over the lazy dog";
@@ -59,6 +95,7 @@ async function build(): Promise<Fixtures> {
     photo: write("photo.pdf", await photoPdf()),
     masked: write("masked.pdf", await maskedPdf()),
     brokenParms: write("broken-parms.pdf", await brokenParmsPdf()),
+    typeset: write("typeset.pdf", await typesetPdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -80,6 +117,40 @@ async function textPdf(pageCount: number): Promise<Uint8Array> {
       });
     }
   }
+  return doc.save();
+}
+
+/**
+ * One page of text at known baselines, plus a solid-colour panel with text on
+ * it. Used by `baseline.spec.ts` (does the overlay sit on the document's
+ * baseline?) and `export.spec.ts` (does an edit keep the panel's colour?).
+ */
+async function typesetPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([TYPESET_PAGE.width, TYPESET_PAGE.height]);
+  for (const run of TYPESET_RUNS) {
+    page.drawText(run.text, {
+      x: run.x,
+      y: run.baseline,
+      size: run.size,
+      font: await doc.embedFont(run.font),
+    });
+  }
+  const [r, g, b] = TYPESET_PANEL.rgb;
+  page.drawRectangle({
+    x: TYPESET_PANEL.x,
+    y: TYPESET_PANEL.y,
+    width: TYPESET_PANEL.width,
+    height: TYPESET_PANEL.height,
+    color: rgb(r / 255, g / 255, b / 255),
+  });
+  page.drawText(TYPESET_PANEL.text, {
+    x: TYPESET_PANEL.textX,
+    y: TYPESET_PANEL.baseline,
+    size: TYPESET_PANEL.size,
+    font: await doc.embedFont(StandardFonts.HelveticaBold),
+    color: rgb(1, 1, 1),
+  });
   return doc.save();
 }
 
