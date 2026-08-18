@@ -84,10 +84,14 @@ export function PropertiesPanel({
         )}
       </div>
 
+      {/* Reachable at last. This state existed but was unreachable: with nothing
+          selected the panel showed the document actions instead, so the one place
+          that explained how to get properties only appeared once you no longer
+          needed it. */}
       {!selection && (
         <p className="props__empty body-medium">
-          Select text to restyle it, or use the tools to add text and
-          redactions.
+          Nothing selected. Click any text, note, shape, redaction or link on the
+          page and its settings appear here.
         </p>
       )}
 
@@ -259,7 +263,7 @@ export function PropertiesPanel({
           <div className="props__row-actions">
             {onReset && (
               <button className="btn btn--text" onClick={onReset} data-tip="Reset style to default">
-                <Icon name="rotate" size={16} /> Reset style
+                <Icon name="reset" size={16} /> Reset style
               </button>
             )}
             {selection.kind === "textbox" && (

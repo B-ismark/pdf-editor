@@ -18,7 +18,11 @@ export default defineConfig({
     ...(executablePath ? { launchOptions: { executablePath } } : {}),
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  // Serve the production build (run `npm run build` first, which CI does).
+  // Serve the production build. `npm test` builds first — the suite tests `dist/`,
+  // so a source edit tested without a rebuild silently exercises the *previous*
+  // bundle, which is how a renamed button label produced a green local run and a
+  // red CI. Invoking `playwright test` directly skips that; build first, or use
+  // `npm test`.
   webServer: {
     command: "npx vite preview --port 4173",
     url: "http://localhost:4173",

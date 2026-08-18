@@ -159,8 +159,15 @@ body {
 }
 .appbar__name { color: var(--on-surface); font-size: 0.9375rem; font-weight: 600; letter-spacing: -0.01em; }
 .appbar__spacer { flex: 1; }
-.appbar__changes { color: var(--on-surface-variant); padding: 0 4px; }
-.appbar__download { margin-left: 4px; }
+.appbar__changes { color: var(--on-surface-variant); padding: 0 4px; white-space: nowrap; }
+/* `flex: none` is load-bearing. Every `.icon-btn` here already has it, so the
+   filled Download button was the only shrinkable item in the row — and on a
+   phone the row is over budget, so *all* of the overflow came out of the one
+   control that matters most. It collapsed to a 15px-wide sliver of a pill: still
+   clickable, unreadable as a button, and well under any touch minimum. The row
+   is now sized to fit instead (the theme control moved into the overflow menu),
+   and the primary action holds its size regardless. */
+.appbar__download { margin-left: 4px; flex: none; }
 
 /* ============ Workspace ============ */
 .workspace {
@@ -170,50 +177,15 @@ body {
   display: flex;
 }
 
-/* Tool navigation — bottom bar on phones (default), rail on ≥600. */
-.toolnav {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 20;
-  display: flex;
-  justify-content: space-around;
-  align-items: center;
-  gap: 2px;
-  background: var(--surface-container);
-  border-top: 1px solid var(--outline-variant);
-  padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
-}
-.toolnav__btn {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  flex: 1;
-  max-width: 96px;
-  border: none;
-  background: transparent;
-  color: var(--on-surface-variant);
-  cursor: pointer;
-  padding: 2px 0;
-}
-.toolnav__ind {
-  position: relative;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 26px;
-  border-radius: var(--radius-full);
-  transition: background var(--dur-short4) var(--ease-standard);
-}
-.toolnav__btn--on { color: var(--on-surface); }
-.toolnav__btn--on .toolnav__ind { background: var(--secondary-container); color: var(--on-secondary-container); }
-.toolnav__label { color: inherit; font-size: 0.6875rem; letter-spacing: 0.01em; }
-
-/* ============ Page navigator (thumbnail rail) ============ */
+/* ============ Page navigator (thumbnail rail) ============
+   A 156px rail spent 34px of it on a stacked page number and a 1px hairline
+   frame, leaving a thumbnail barely wider than 100px — and the number, set below
+   the thumb it belonged to, sat closer to the *next* page than to its own
+   (Gestalt proximity, straightforwardly inverted). The number is now a chip on
+   the thumbnail, so the rail's whole width is preview, and each item is one
+   visual object rather than two loosely stacked ones. */
 .pagenav {
-  width: 156px;
+  width: 176px;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -224,46 +196,74 @@ body {
 .pagenav__head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 8px 8px 8px 14px;
+  gap: 8px;
+  padding: 6px 6px 6px 16px;
   border-bottom: 1px solid var(--outline-variant);
   flex: none;
+  min-height: 48px;
 }
-.pagenav__title { color: var(--on-surface-variant); text-transform: uppercase; letter-spacing: 0.06em; }
+/* Sentence case at the same type level as the Inspector's tabs. The rail used to
+   shout PAGES in tracked-out uppercase micro-type while the panel opposite it
+   said "Document" in title case — two headings of the same rank, styled as if
+   they were different things. */
+.pagenav__title { color: var(--on-surface); }
+/* The page count belongs here: it was nowhere in the UI, so "how long is this
+   document" meant scrolling the rail to its end. */
+.pagenav__count {
+  color: var(--on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
+.pagenav__head .icon-btn { margin-left: auto; }
 .pagenav__list {
   flex: 1;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px;
+  gap: 4px;
+  padding: 8px;
+  overscroll-behavior: contain;
 }
 .pagenav__item {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
+  position: relative;
+  display: block;
+  width: 100%;
   border: none;
   background: transparent;
   cursor: pointer;
-  padding: 6px;
+  padding: 4px;
   border-radius: var(--radius-md);
 }
 .pagenav__item:hover { background: var(--surface-container-high); }
 .pagenav__item--on { background: var(--secondary-container); }
 .pagenav__thumb {
-  width: 100%;
-  aspect-ratio: 3 / 4;
+  position: relative;
   display: grid;
   place-items: center;
+  width: 100%;
+  aspect-ratio: 3 / 4;
   border-radius: var(--radius-xs);
-  border: 1px solid var(--outline-variant);
   overflow: hidden;
   background: var(--surface-container-lowest);
+  box-shadow: 0 0 0 1px var(--outline-variant);
 }
-.pagenav__item--on .pagenav__thumb { border-color: var(--primary); }
-.pagenav__num { color: var(--on-surface-variant); }
-.pagenav__item--on .pagenav__num { color: var(--on-secondary-container); font-weight: 700; }
+/* A ring, not a border: a border of a different width would resize the thumb and
+   shift every page below it as the active page changes. */
+.pagenav__item--on .pagenav__thumb { box-shadow: 0 0 0 2px var(--primary); }
+.pagenav__num {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--inverse-surface) 78%, transparent);
+  color: var(--inverse-on-surface);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.pagenav__item--on .pagenav__num { background: var(--primary); color: var(--on-primary); }
 .pagenav__scrim { display: none; }
 
 @media (max-width: 599px) {
@@ -272,7 +272,7 @@ body {
     top: calc(52px + env(safe-area-inset-top));
     left: 0;
     bottom: 0;
-    width: min(70vw, 220px);
+    width: min(72vw, 236px);
     box-shadow: var(--shadow-3);
     animation: pagenav-in var(--dur-med2) var(--ease-emphasized-decelerate);
   }
@@ -573,27 +573,6 @@ body {
   border: 2px solid var(--outline-variant);
 }
 
-/* ============ FAB (mobile primary action) ============ */
-.fab {
-  position: fixed;
-  right: 16px;
-  bottom: calc(88px + env(safe-area-inset-bottom));
-  z-index: 22;
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-  height: 50px;
-  padding: 0 20px;
-  border: none;
-  border-radius: var(--radius-lg);
-  background: var(--primary-container);
-  color: var(--on-primary-container);
-  box-shadow: var(--shadow-2);
-  cursor: pointer;
-  font: 500 0.9375rem/1 var(--font-plain);
-}
-.fab:disabled { opacity: 0.6; }
-
 /* ============ Tool dock (unified, all breakpoints) ============ */
 .tooldock {
   position: absolute;
@@ -641,18 +620,66 @@ body {
   overflow: hidden auto;
   animation: panel-in var(--dur-med2) var(--ease-emphasized-decelerate);
 }
-.inspector__collapse { position: absolute; top: 6px; right: 6px; z-index: 2; width: 36px; height: 36px; }
-.inspector .props { padding-top: 6px; }
+/* The tab bar. The collapse control used to float `position: absolute` over the
+   panel's own heading, overlapping it; it's a row member now. */
+.inspector__tabs {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 0 8px;
+  background: var(--surface-container-low);
+  border-bottom: 1px solid var(--outline-variant);
+}
+.inspector__tablist { display: flex; gap: 2px; flex: 1; min-width: 0; }
+.inspector__tabbtn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+  padding: 0 8px;
+  border: none;
+  background: transparent;
+  color: var(--on-surface-variant);
+  font: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.inspector__tabbtn:hover { color: var(--on-surface); }
+/* An underline indicator, M3's tab convention — a filled pill would read as a
+   toggle button and put two competing "selected" languages (pill, underline) in
+   one panel. */
+.inspector__tabbtn::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: transparent;
+}
+.inspector__tabbtn--on { color: var(--primary); }
+.inspector__tabbtn--on::after { background: var(--primary); }
+.inspector .props { padding-top: 12px; }
 .inspector .props::before { display: none; }
 .inspector .props__header .icon-btn { display: none; }
+/* The collapsed edge: icon only. It used to carry a label set sideways with
+   `writing-mode: vertical-rl`, which is slow to read, can't be scanned at a
+   glance, and only repeated what the icon said. */
 .inspector__tab {
   flex: none;
-  width: 40px;
+  width: 44px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  padding: 16px 0;
+  padding: 14px 0;
   border: none;
   border-left: 1px solid var(--outline-variant);
   background: var(--surface-container-low);
@@ -660,13 +687,6 @@ body {
   cursor: pointer;
 }
 .inspector__tab:hover { background: var(--surface-container); color: var(--on-surface); }
-.inspector__tablabel {
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
-  font: 500 0.75rem/1 var(--font-plain);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
 @media (min-width: 840px) {
   .inspector { width: 320px; }
 }
@@ -696,6 +716,12 @@ body {
 }
 .doclist__item:hover { background: var(--surface-container-high); }
 .doclist__item svg { color: var(--on-surface-variant); flex: none; }
+.doclist__note {
+  margin: 18px 12px 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--outline-variant);
+  color: var(--on-surface-variant);
+}
 
 /* ============ Menu ============ */
 .menu { position: relative; }
@@ -705,11 +731,20 @@ body {
   right: 0;
   top: calc(100% + 4px);
   z-index: 41;
-  min-width: 200px;
+  /* 200px wrapped half these labels onto a second line ("Recognise text (OCR)",
+     "Save session on this device"), which turns a scannable list into a
+     paragraph and makes the rows different heights. */
+  min-width: 268px;
   padding: 8px;
   background: var(--surface-container-high);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-3);
+  /* The menu is taller than a 900px window and had no scroll, so its last group
+     — Open another PDF, Close document — was simply cut off and unreachable. */
+  max-height: calc(100vh - 84px);
+  max-height: calc(100svh - 84px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .menu__item {
   display: flex;
@@ -726,9 +761,18 @@ body {
   font-size: 0.875rem;
   text-align: left;
 }
+.menu__item { white-space: nowrap; }
 .menu__item:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
 .menu__divider { height: 1px; background: var(--outline-variant); margin: 6px 4px; }
 .menu__check { margin-left: auto; color: var(--primary); }
+.menu__value { margin-left: auto; color: var(--on-surface-variant); }
+.menu__label {
+  display: block;
+  padding: 10px 12px 4px;
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
 
 /* "Dim pages" preview mode: soften the always-white page canvas to cut glare
    (esp. in dark mode). Preview only — the exported PDF is unaffected. */
@@ -770,7 +814,9 @@ body {
   border-radius: var(--radius-sm);
   font: 500 0.75rem/1.3 var(--font-plain);
   letter-spacing: 0.1px;
-  white-space: nowrap;
+  /* Was `nowrap` with no cap, so the long explanatory tips (the lossless-raster
+     one is a full sentence) ran off the side of the window as a single line. */
+  max-width: min(260px, calc(100vw - 16px));
   pointer-events: none;
   box-shadow: var(--shadow-2);
   animation: tip-in var(--dur-short2) var(--ease-standard-decelerate);
@@ -1790,19 +1836,6 @@ body {
 
 /* ============ Responsive: rail + side panel at ≥600px ============ */
 @media (min-width: 600px) {
-  .toolnav {
-    position: static;
-    flex-direction: column;
-    justify-content: flex-start;
-    gap: 4px;
-    /* Material navigation rail is 80dp wide. */
-    width: 80px;
-    padding: 10px 6px;
-    border-top: none;
-    border-right: 1px solid var(--outline-variant);
-  }
-  .toolnav__btn { flex: none; max-width: none; padding: 4px 0; }
-
   /* Clear the floating tool dock at the bottom. */
   .viewer__scroll { padding-bottom: calc(84px + env(safe-area-inset-bottom)); }
   .zoombar { top: 16px; right: 16px; }
@@ -1827,7 +1860,6 @@ body {
   .panel .props::before { display: none; }
   .panel .props__header .icon-btn { display: none; }
 
-  .fab { display: none; }
   /* Sit above the floating tool dock so it never covers the tools. */
   .snackbar { top: auto; bottom: 88px; }
 }
@@ -1845,6 +1877,12 @@ body {
      on phones to save room. */
   .appbar__download { padding: 0; width: 44px; }
   .appbar__download span { display: none; }
+  /* The 14px left inset exists to sit the wordmark off the edge; the wordmark is
+     hidden here, so an icon-first bar wants the same 8px as the right side — and
+     at 360px that inset is exactly what decides whether the row fits. Measured:
+     `gap: 2px` costs nothing (the flex spacer absorbs it), 3px costs 3, 4px
+     overflows. So the gap stays as designed and only the inset changes. */
+  .appbar { padding-left: 8px; }
   .appbar__name { display: none; }
   .appbar__changes { display: none; }
   /* Without its wordmark the brand is just the 28px logo, which would leave

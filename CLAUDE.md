@@ -15,7 +15,8 @@ See `README.md` for the user-facing feature list and the detailed
 password encryption, etc.). Don't duplicate that here.
 
 Two audits are on record and worth skimming before changing anything they
-touched: `docs/UI-UX-AUDIT.md` (usability, accessibility, platform conformance)
+touched: `docs/UI-UX-AUDIT.md` (usability, accessibility, platform conformance —
+**Part 3** is the shell review of the app bar, rail, Inspector, menu and icon set)
 and `docs/PRODUCT-AUDIT.md` (privacy, security, performance, export integrity —
 including measurements, and the one finding deliberately left open).
 
@@ -27,11 +28,15 @@ npm run dev        # Vite dev server
 npm run build      # tsc -b && vite build  → dist/   (run this before committing)
 npm run preview    # serve dist/ (defaults to :4173 with --port)
 npm run typecheck  # tsc -b --noEmit
-npm test           # Playwright end-to-end suite against dist/ (18 specs)
+npm test           # builds, then runs the Playwright end-to-end suite against dist/
 ```
 
 There is **no unit-test runner / linter** configured. Verification is
-`npm run build` (which type-checks) plus **`npm test`** — a Playwright suite
+`npm run build` (which type-checks) plus **`npm test`** — which *also* builds,
+deliberately: the suite serves `dist/`, so running it after a source edit without
+rebuilding exercises the previous bundle and reports a confident green. That is how
+a renamed button label passed locally and failed in CI. Invoking `playwright test`
+directly to iterate on one spec skips the rebuild — build first. It is a Playwright suite
 (`tests/`, `playwright.config.ts`) that serves `dist/` and drives it in real
 Chromium. `.github/workflows/ci.yml` runs both on PRs into `main` and on `main`
 itself (deliberately *not* on every branch push — a PR branch lives in this repo,
@@ -66,7 +71,13 @@ type-checking can't see, and each exists because it broke once:
   for the text's colour; a rotated page is declined rather than sampled at
   mis-mapped coordinates; and scrolling reads back no pixels;
 - `find.spec.ts` — the active match is on screen and clear of the find bar;
-- `phone.spec.ts` — the status message clears the zoom pill and the tool dock.
+- `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
+- `shell.spec.ts` — the app bar fits its own controls at 360/390/430px with the
+  primary action at full size, the overflow menu ends inside the window and every
+  row is one line, the Inspector names both of its jobs and keeps them reachable,
+  a tooltip on an edge control stays on screen, and counts read as English;
+- `icons.spec.ts` — every `name=` in `src/` is mapped (an unmapped one renders a
+  blank square, silently) and every mapped name is used.
 
 If you add a feature that touches privacy, the export bytes, or per-page
 rendering, add a spec for it — that's where this project's real invariants live.
@@ -268,6 +279,46 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
 - **Download via `src/download.ts`.** It attaches the anchor before clicking and
   defers `revokeObjectURL`; revoking synchronously races the browser's fetch of
   the blob and cancels downloads on Firefox/Safari.
+- **An icon name means one thing, and it has to exist.** `Icon` takes a
+  `name: string` and falls back to a bare `Square` when it isn't in the map — so a
+  typo renders an empty box with no error anywhere, which is how `name="sliders"`
+  shipped as a blank square on the Inspector's collapsed tab. Worse than a plain
+  icon is a *reused* one: `RotateCw` once stood for rotating a page, restoring a
+  session, saving one, and resetting a style, and `Shrink` stood for "compress"
+  *and* for the switch that turns compression off. Add a key per meaning, name it
+  for the meaning rather than the picture, and let `icons.spec.ts` catch the three
+  failure modes it can see: unmapped names, dead keys, and two names resolving to
+  the same component without an entry in `SHARED_GLYPHS`. If a call site needs a
+  tool's icon, take it from `TOOLS` — the command palette's hand-written copy of
+  that list had already drifted.
+  **What no spec catches: glyphs that are different components and the same
+  picture.** Lucide's `Pen` and `Pencil` share one body path (a 4px tip stroke
+  apart) and `PenLine` adds an underline to it — three components, one drawing at
+  20px, and the first rewrite of this map used all three plus `Pencil` twice.
+  Render every mapped glyph onto one sheet and look at it before you're done;
+  reading the map will not show you this.
+- **The app bar has a width budget, and the primary action never pays it.** Eight
+  48px controls do not fit a 390px phone. `.appbar__download` carries `flex: none`
+  like every `.icon-btn` around it, because when it didn't, all of the overflow
+  came out of it: Download measured 14×44 at 390px and 0×44 at 360px, where the
+  row overflowed regardless. Anything new in that row has to displace something
+  (preferences belong in the ⋯ menu), and `shell.spec.ts` fails at 360px if the
+  row can't fit itself.
+- **The Inspector has two named tabs, not one surface with two moods.** It used to
+  swap between the document actions and the selection's properties with nothing to
+  say it had, so clicking the page made Compress/Watermark/OCR vanish with no way
+  back. Selecting moves to Properties (that's what the click asked for);
+  deselecting deliberately does *not* move back, or the panel would flip on every
+  stray click. The document actions also live in the ⋯ menu — deliberately, since
+  on a phone the panel is a selection-driven sheet and the palette needs a
+  keyboard — so the two must keep the *same* groups, order, names and icons; they
+  both read from `docActions` and `DOC_GROUPS`.
+- **Floating chrome has to be clamped to the viewport.** `TooltipHost` centres its
+  bubble on the anchor with `translate(-50%)`; without the layout-effect clamp,
+  every control at a screen edge (the collapsed Inspector tab, the ⋯ button on a
+  phone) got a tooltip drawn half outside the window. Same class of bug as the
+  overflow menu having no `max-height`, which left its last two items unreachable
+  on an 820px window.
 - **No native UI.** Use the in-house `ConfirmDialog` (not `confirm()`),
   `ColorField` (not `<input type=color>`), and `TooltipHost` + `data-tip=`
   (not `title=`). `ColorField`'s popover is **portaled to `document.body`** —

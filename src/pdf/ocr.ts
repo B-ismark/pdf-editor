@@ -2,6 +2,7 @@ import { ensureEngineCache } from "./engineCache";
 import { renderPageToCanvas } from "./loader";
 import { collectWords, wordsToFragments } from "./ocrText";
 import type { PageData, TextFragment } from "./types";
+import { plural } from "../plural";
 
 /** Progress callback: 1-based page, total pages, and a coarse status. */
 export type OcrProgress = (page: number, total: number, status: string) => void;
@@ -189,7 +190,7 @@ export async function ocrPages(
 
   // Every page failed → this isn't "no text found", it's a real failure.
   if (pagesFailed === pages.length && pages.length > 0) {
-    throw new Error(`OCR failed on all ${pages.length} page(s).`);
+    throw new Error(`OCR failed on all ${plural(pages.length, "page")}.`);
   }
   return {
     perPage,
