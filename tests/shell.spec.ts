@@ -7,8 +7,8 @@ import { open, watch, expectClean } from "./helpers";
  *
  * Each assertion here is a defect that type-checking and the feature specs both
  * passed straight over, because every one of them was a *geometry* or *identity*
- * problem rather than a broken function call: a button that still worked at 15px
- * wide, a menu whose last group was painted past the bottom of the window, a
+ * problem rather than a broken function call: a primary action that still worked at
+ * 14px wide, a menu whose last group was painted past the bottom of the window, a
  * panel that swapped its contents without saying so.
  */
 
@@ -158,6 +158,39 @@ test.describe("inspector", () => {
     await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
   });
 
+  test("re-clicking what is already selected comes back to Properties", async ({ page }) => {
+    // The auto-switch keys on the selection *changing*, so re-clicking the
+    // selected element while reading the Document tab did nothing at all — a
+    // dead end you could only leave by clicking the tab. `onSelect` now sets the
+    // tab directly, since clicking a thing asks to see that thing either way.
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    const tabs = page.locator(".inspector__tabbtn");
+    const fragment = page.locator(".fragment").first();
+
+    await fragment.click();
+    await tabs.nth(0).click();
+    await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
+    await fragment.click();
+    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
+  });
+
+  test("the tab is per document, not for the session", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    const f = await fixtures();
+    await open(page, f.sample);
+    await page.locator(".fragment").first().click();
+    await expect(page.locator(".inspector__tabbtn").nth(1)).toHaveAttribute("aria-selected", "true");
+
+    // A fresh document has nothing selected, so a panel left on Properties would
+    // greet it with an empty state while its actions sat one silent click away.
+    // (Three file inputs exist once a document is open — the bare `input` selector
+    // picks the image one, which rejects a PDF without a word in the UI.)
+    await page.setInputFiles('input[accept="application/pdf,.pdf"]', f.typeset);
+    await expect(page.locator(".snackbar__msg")).toContainText("1 page ·");
+    await expect(page.locator(".inspector__tabbtn").nth(0)).toHaveAttribute("aria-selected", "true");
+  });
+
   test("collapses to an edge control with a readable name", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await open(page, (await fixtures()).sample);
@@ -169,6 +202,21 @@ test.describe("inspector", () => {
     await tab.click();
     await expect(page.locator(".inspector__tabbtn")).toHaveCount(2);
   });
+});
+
+test("the page rail toggle controls a region that exists", async ({ page }) => {
+  await open(page, (await fixtures()).sample);
+  // `aria-expanded` says something expands; `aria-controls` says what. The rail is
+  // unmounted while closed, so the reference is only set while it can resolve —
+  // a dangling IDREF is worse than none.
+  await expect(page.locator('.icon-btn[aria-label="Show pages"]')).not.toHaveAttribute(
+    "aria-controls",
+    /./,
+  );
+  await page.locator('.icon-btn[aria-label="Show pages"]').click();
+  const id = await page.locator('.icon-btn[aria-label="Hide pages"]').getAttribute("aria-controls");
+  expect(id).toBe("page-rail");
+  await expect(page.locator(`#${id}`)).toBeVisible();
 });
 
 test("the page rail states the document's length", async ({ page }) => {

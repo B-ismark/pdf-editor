@@ -798,6 +798,23 @@ Properties — that is what the click asked for — but the switch is now visibl
 reversible. Deselecting deliberately does *not* switch back, so the panel can't
 flip on a stray click into empty space. The collapsed tab is icon-only.
 
+Tabs were chosen over the two obvious alternatives. Stacking both sections in one
+scrolling panel removes the mode entirely, but in a 288–320px column it puts ten
+document actions below a properties section that is empty most of the time, and
+reads as a dumping ground. Making the panel properties-only and leaving the
+document actions in the ⋯ menu costs the discoverability that the visible list is
+the whole point of. Tabs keep each surface short, named, and one click apart —
+which is what Figma's Design/Prototype/Inspect and DevTools' Styles/Computed do
+with the same problem.
+
+Two behaviours needed fixing once the tabs existed, both found by driving it rather
+than reading it. The auto-switch keys on the selection *changing*, so re-clicking
+an element that was already selected did nothing while the Document tab was up — a
+dead end. And the tab was session state, so opening a second document could land
+you on Properties with nothing selected, greeting a fresh file with an empty state
+while its actions sat one unmentioned click away. Clicking a thing on the page now
+always shows that thing, and the tab resets per document.
+
 Two things fell out of this: `PropertiesPanel`'s "nothing selected" copy had been
 **unreachable since it was written** (with nothing selected the panel showed the
 document list instead, so the text explaining how to get properties only appeared
@@ -848,7 +865,14 @@ distinct components that are one picture at 20px, and the map had all three.
 Two things came out of that. `tests/icons.spec.ts` now fails when two names
 resolve to the same component unless the pair is declared in `SHARED_GLYPHS` with
 a reason (`rectangle`/`redact_tool` are both `Square`, and the fill *is* the
-semantics). And the near-identical-path case, which nothing mechanical catches,
+semantics) — and that check had a hole of its own on the first attempt: it
+destructured `[a, b]` out of each group of names sharing a glyph, so a group of
+*three* was judged on its first two, and a third name slipped through whenever the
+first pair was declared. It now rejects any group larger than two outright, since
+`SHARED_GLYPHS` pairs one name with one other and three names on one picture is
+never the answer. Verified by adding a third name to `Square`.
+
+And the near-identical-path case, which nothing mechanical catches,
 was found by rendering all 64 mapped glyphs onto one sheet and looking at them —
 the step to repeat when adding to this map. `edit` became `SquarePen`, the Pen
 sub-tool now renders `draw_tool` (one glyph for "freehand pen stroke", used for
@@ -858,6 +882,15 @@ beside the dock.
 
 Similarly `restore` started as `History`, which is `RotateCcw` — the `reset`
 glyph — with a clock hand added. It is `FileClock` now: the file you had, earlier.
+
+## S-5b — Copy: one product, two dialects
+
+`colour` appears 66 times in this UI, `centre` 34, plus `recognise`, `optimise`,
+`behaviour` and `Organisation` — and then **Organize pages**, in the panel, the ⋯
+menu, the command palette and the dialog's own title, sitting directly beneath the
+group heading **Organise**. The heading and the item under it disagreed about how
+to spell the same word. The user-facing strings are British now; the component file
+and its class names are code, and are left alone.
 
 ## S-6 — The page rail spent its width on everything except the page
 

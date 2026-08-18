@@ -71,9 +71,18 @@ test("no two names resolve to the same glyph unless declared", () => {
     byGlyph.set(component, [...(byGlyph.get(component) ?? []), name]);
   }
 
+  // A group of three is undeclared by construction: `SHARED_GLYPHS` pairs one name
+  // with one other, and three names on one picture is never the right answer. Only
+  // an exactly-two group can be excused, and only if the pair is declared — the
+  // first draft of this check destructured `[a, b]` out of the group and so read
+  // past a third name entirely.
   const undeclared = [...byGlyph.values()]
     .filter((names) => names.length > 1)
-    .filter(([a, b]) => SHARED_GLYPHS[a] !== b && SHARED_GLYPHS[b] !== a)
+    .filter((names) => {
+      if (names.length > 2) return true;
+      const [a, b] = names;
+      return SHARED_GLYPHS[a] !== b && SHARED_GLYPHS[b] !== a;
+    })
     .map((names) => names.join(" + "));
 
   expect(

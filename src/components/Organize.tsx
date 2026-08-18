@@ -152,13 +152,13 @@ export function Organize({
       tabIndex={-1}
       role="dialog"
       aria-modal="true"
-      aria-label="Organize pages"
+      aria-label="Organise pages"
     >
       <header className="organize__bar">
         <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">
           <Icon name="close" size={20} />
         </button>
-        <span className="title-large">Organize pages</span>
+        <span className="title-large">Organise pages</span>
         <div className="appbar__spacer" />
         <button className="btn" onClick={() => fileRef.current?.click()}>
           <Icon name="note_add" size={16} /> <span className="organize__btnlabel">Add PDF</span>

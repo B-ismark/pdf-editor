@@ -667,7 +667,6 @@ body {
 }
 .inspector__tabbtn--on { color: var(--primary); }
 .inspector__tabbtn--on::after { background: var(--primary); }
-.inspector__body { }
 .inspector .props { padding-top: 12px; }
 .inspector .props::before { display: none; }
 .inspector .props__header .icon-btn { display: none; }

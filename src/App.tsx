@@ -515,6 +515,10 @@ export function App() {
         setFileName(name);
         doc.reset(seedDoc ?? EMPTY_DOC);
         setSelection(null);
+        // A fresh document has nothing selected, so leaving the panel on
+        // Properties would greet it with an empty state while the actions it can
+        // actually use sit one unmentioned click away. The tab is per-document.
+        setPanelTab("document");
         setTool("select");
         vp.setPageWidth(Math.max(...loaded.pages.map((p) => p.viewBox.width), 1));
         vp.resetZoom();
@@ -825,7 +829,7 @@ export function App() {
   // add an action once and every surface picks it up.
   const docActions = useMemo<DocAction[]>(
     () => [
-      { id: "organize", group: "organise", label: "Organize pages", icon: "organize", keywords: "reorder rotate merge split extract", run: () => { setSelection(null); setOrganizeOpen(true); } },
+      { id: "organize", group: "organise", label: "Organise pages", icon: "organize", keywords: "reorder rotate merge split extract", run: () => { setSelection(null); setOrganizeOpen(true); } },
       { id: "image", group: "organise", label: "Add image", icon: "image", keywords: "picture photo stamp", run: () => imageInputRef.current?.click() },
       { id: "ocr", group: "text", label: "Recognise text (OCR)", icon: "scan_text", keywords: "scan searchable image ocr", run: runOcr },
       { id: "copytext", group: "text", label: "Copy all text", icon: "content_copy", keywords: "clipboard", run: copyAllText },
@@ -1845,7 +1849,9 @@ export function App() {
           // which it then covered.
           aria-label={navOpen ? "Hide pages" : "Show pages"}
           aria-expanded={navOpen}
-          aria-controls="page-rail"
+          // Only while it exists: the rail is unmounted when closed, and an
+          // `aria-controls` pointing at an absent id is a dangling reference.
+          aria-controls={navOpen ? "page-rail" : undefined}
           data-tip={navOpen ? "Hide pages" : "Show pages"}
         >
           <Icon name={navOpen ? "panel_close" : "panel_open"} size={18} />
@@ -1917,17 +1923,24 @@ export function App() {
                   ))}
                   <div className="menu__divider" />
                   <div role="group" aria-labelledby="menu-grp-view">
-                  <span className="menu__label label-small" id="menu-grp-view">
-                    View
-                  </span>
-                  <button
-                    className="menu__item"
-                    onClick={theme.cycle}
-                    role="menuitem"
-                  >
-                    <Icon name={themeIcon} size={18} /> Theme
-                    <span className="menu__value label-medium">{themeName}</span>
-                  </button>
+                    <span className="menu__label label-small" id="menu-grp-view">
+                      View
+                    </span>
+                    {/* Cycles system → light → dark in place, and deliberately
+                        leaves the menu open so the value can be seen changing.
+                        The visible row is "Theme … Dark", which reads as a
+                        setting rather than a control, so the accessible name has
+                        to say it can be operated — and it has to still contain
+                        the visible words (WCAG 2.5.3). */}
+                    <button
+                      className="menu__item"
+                      onClick={theme.cycle}
+                      role="menuitem"
+                      aria-label={`Theme: ${themeName}. Activate to change.`}
+                    >
+                      <Icon name={themeIcon} size={18} /> Theme
+                      <span className="menu__value label-medium">{themeName}</span>
+                    </button>
                   <button
                     className="menu__item"
                     onClick={() => setDimPages((v) => !v)}
@@ -2336,7 +2349,6 @@ export function App() {
                 id="panel-body"
                 role="tabpanel"
                 aria-labelledby={`panel-tab-${panelTab}`}
-                className="inspector__body"
               >
                 {panelTab === "document" ? documentPanel : propertiesPanel}
               </div>
