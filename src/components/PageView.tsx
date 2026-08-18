@@ -1,8 +1,10 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { renderPage, isRenderCancelled } from "../pdf/loader";
 import { useRenderWindow } from "../hooks/useRenderWindow";
 import { isFragmentModified, keepsSourceTypeface, resolveFragmentStyle } from "../pdf/style";
 import { usePageFonts } from "../hooks/usePageFonts";
+import { usePageColors } from "../hooks/usePageColors";
+import { offerPageCanvas } from "../pdf/fragmentColors";
 import type {
   Annotation,
   AnnotationTool,
@@ -161,6 +163,25 @@ function PageViewInner(props: Props) {
   // unedited fragment is transparent anyway, so nothing visibly changes when
   // this lands.
   const pageFonts = usePageFonts(bytes, page.pageIndex, painted);
+  // What each fragment sits on and is drawn in, once the page has been sampled.
+  const pageColors = usePageColors(bytes, page.pageIndex);
+
+  // Only a *shown* fragment (selected or edited) needs those colours, and
+  // sampling costs a full-page `getImageData` — 18ms on a 1.1M px canvas, 63ms
+  // on a 4.6M px one. Doing it as each page painted spent that on every page
+  // scrolled past, for a case most of them never reach; doing it here spends it
+  // once, on the page being edited. In a layout effect so it lands before the
+  // frame that first paints the overlay, rather than a frame of white-and-black
+  // followed by a correction.
+  const anyShown = page.fragments.some(
+    (f) =>
+      isFragmentModified(f, edits[f.id]) ||
+      (selection?.kind === "fragment" && selection.id === f.id),
+  );
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (anyShown && painted && canvas) offerPageCanvas(bytes, page, canvas);
+  }, [anyShown, painted, bytes, page]);
 
   const W = page.viewBox.width * scale;
   const Hpx = page.viewBox.height * scale;
@@ -360,7 +381,8 @@ function PageViewInner(props: Props) {
             const edit = edits[fragment.id];
             const value = edit?.text ?? fragment.original;
             const source = pageFonts.get(fragment.itemIndex) ?? null;
-            const style = resolveFragmentStyle(fragment, edit?.style ?? {}, source);
+            const colors = pageColors.get(fragment.itemIndex);
+            const style = resolveFragmentStyle(fragment, edit?.style ?? {}, source, colors?.ink);
             const modified = isFragmentModified(fragment, edit);
             const selected = selection?.kind === "fragment" && selection.id === fragment.id;
             return (
@@ -375,6 +397,7 @@ function PageViewInner(props: Props) {
                 // the same test the exporter uses to decide whether to
                 // re-embed it.
                 face={keepsSourceTypeface(edit?.style ?? {}) ? source : null}
+                backdrop={colors?.fill}
                 modified={modified}
                 selected={selected}
                 interactive={tool === "select"}

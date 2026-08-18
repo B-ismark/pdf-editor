@@ -120,11 +120,19 @@ export function keepsSourceTypeface(override: Partial<TextStyle>): boolean {
  *
  * `source` is the document's own font once it's known (see `pdf/fontInfo.ts`);
  * without it all we have is pdf.js's generic family, which carries no weight or
- * slant at all — so a bold heading came back regular. */
+ * slant at all — so a bold heading came back regular.
+ *
+ * `baseColor` is the fragment's own ink once it's known (see
+ * `pdf/fragmentColors.ts`). Black is the fallback, not the rule: it's right on
+ * the overwhelmingly common document and wrong on every light-on-dark one, where
+ * an edit used to come back black and unreadable. Resolved here so the overlay,
+ * the properties panel, and both export paths can't disagree about what colour
+ * the text is. */
 export function resolveFragmentStyle(
   fragment: TextFragment,
   override: Partial<TextStyle>,
   source?: FragmentFont | null,
+  baseColor?: string | null,
 ): TextStyle {
   const base = source ?? guessStyleFromFontFamily(fragment.fontFamily);
   return {
@@ -132,6 +140,6 @@ export function resolveFragmentStyle(
     bold: override.bold ?? base.bold,
     italic: override.italic ?? base.italic,
     size: override.size ?? fragmentSize(fragment),
-    color: override.color ?? "#000000",
+    color: override.color ?? baseColor ?? "#000000",
   };
 }

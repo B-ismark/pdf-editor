@@ -57,6 +57,14 @@ type-checking can't see, and each exists because it broke once:
 - `font.spec.ts` — an edited fragment keeps the page's typeface and weight (a
   sans document's edits are not redrawn in Times), and picking a font overrides
   it;
+- `baseline.spec.ts` — an edited fragment's glyphs sit on the baseline the
+  exporter writes to, over five faces/sizes at two fit-to-width scales;
+- `colors.spec.ts` — an edit inside a coloured panel keeps the panel's colour and
+  the text's own colour, on screen and in the exported bytes, while black text on
+  paper stays exactly black (the two fixture panels fail in opposite directions,
+  so neither fix can pass for the other); a rule under the baseline isn't mistaken
+  for the text's colour; a rotated page is declined rather than sampled at
+  mis-mapped coordinates; and scrolling reads back no pixels;
 - `find.spec.ts` — the active match is on screen and clear of the find bar;
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock.
 
@@ -128,6 +136,90 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   and they must not drift. When drawing with that face, take its weight/slant
   from the face too (`cssFont(..., face)`) — a bold face plus `font-weight:
   bold` gets synthesised bold on top of real bold.
+- **Overlays are positioned from the baseline, and the baseline is measured.**
+  A fragment's baseline is `transform[5]`, a text box's is `box.y`, and both
+  write paths draw at exactly that y — so the overlay has to land on it exactly
+  or the preview lies about the file. It is *not* `top = baseline - fontPx`: CSS
+  puts the baseline at `(lineHeight - (ascent + descent)) / 2 + ascent` from the
+  top of the line box, ~0.76–0.85em with `line-height: 1`. That off-by-a-metric
+  lifted every edit 0.15–0.24em, growing with zoom and differing per typeface,
+  for as long as the feature existed. `textBaseline.ts` probes the real layout
+  (a zero-size `inline-block` sits on its line's baseline) and caches per font
+  shorthand; `measureText`'s `fontBoundingBox*` are rounded to whole pixels and
+  leave ~0.75px on the table, which is why they aren't used. Two consequences:
+  the probe is only valid for the line-height the element actually gets (hence
+  `FRAGMENT_LINE_HEIGHT` / `TEXTBOX_LINE_HEIGHT` being passed in), and the
+  measured element must keep zero *vertical* padding.
+- **An edit's colours are sampled, not constants.** Two of them: the cover that
+  hides the original glyphs was hardcoded white (a hole through any coloured
+  pill, cell, or banner) and the replacement was drawn hardcoded black (white
+  text on a dark panel came back unreadable). Neither is in `PageData` —
+  `getTextContent()` reports no fill colour at all — so `pdf/fragmentColors.ts`
+  reads both off the raster, lazily per page, the way `fontInfo.ts` reads fonts.
+  The content stream *does* carry the colour operators, but nothing joins them to
+  text items: pdf.js splits and merges runs on its own terms, so matching them up
+  means re-running its text-state machine to recover each run's position. Four
+  things there are load-bearing:
+  - **The background comes from the glyph box's four corners**, read twice. The
+    box as a whole answers with the *text's* colour on any fragment whose ink
+    covers more than half of it — and a cover in the text's own colour makes the
+    replacement invisible, which is worse than a white box. A ring outside the box
+    escapes a tightly-fitting pill and returns whatever surrounds the pill. So:
+    a corner patch that is *pure* (one flat colour, `PURE_PATCH_SHARE`) is
+    background by construction, because glyphs bring edges and edges bring blends
+    — pure patches answer first, weighted by pixel count. That is the only way to
+    read a fragment whose `size` is its ink height rather than a font em, i.e.
+    every OCR word: their box top lands *on* the glyph tops, so the upper patches
+    sit in the ink while the lower ones are clean paper. Failing that, all four
+    patches pool into one dominance test — the original reading, kept because it's
+    the one that answers a table cell whose borders clip every patch, leaving none
+    pure. `PURE_AGREEMENT` is the safety valve: a fragment straddling a panel edge
+    has two pure patches of panel against two of paper, a 50% split that declines,
+    because half a boundary in the wrong colour is worse than white.
+  - **Ink is read above the baseline only.** Underlines, table rules and cell
+    borders live in the descender band, and ink is whatever sits furthest from
+    the background — so a rule more extreme than the text wins it. Measured: 16pt
+    `#878787` text with a black rule 4 units under its baseline read `#000000`.
+    Above the baseline there's more than enough glyph left and a horizontal rule
+    can't be mistaken for it. (A strikethrough still crosses that band and
+    survives on the distance test: ordinary text is the more extreme colour.)
+  - **Ink is gated on the em box in pixels, not the page scale.** Ink is the
+    colour furthest from the background, i.e. the glyph interior — *if* any pixel
+    is fully covered. Below ~8px of em, every pixel is a blend and the furthest
+    is a washed-out grey: measured on Helvetica black-on-white, 10pt at 0.76
+    px/unit reads `#5c5c5c` while 14pt at the same scale reads exact black. The
+    threshold is therefore per fragment (`MIN_INK_EM_PX`), and erring permissive
+    is the expensive direction — it redraws ordinary black text in grey on the
+    common document to serve the rare one. Declining leaves black, which is
+    where this started.
+  - **The store is fed by `offerPageCanvas`** from the raster the user is already
+    looking at, which is what keeps the on-screen colours and the exported ones
+    the same: one cache, one algorithm, and for any page you can actually see a
+    disagreement on, one measurement. The exporter rasterises a page itself only
+    when nobody ever looked at it — and on the redaction path it offers its own
+    raster instead, since it has one. The corollary is that a page first painted
+    at a low scale keeps that reading: sub-12px-em type on a narrow low-dpi
+    window exports black even after zooming in. Re-sampling on a better raster
+    would fix that at the cost of colours changing under the user, and was not
+    done.
+  - **It is called when a fragment is shown, not when a page paints.** One
+    full-page `getImageData` plus the tallies is 18ms on a 1.1M px canvas and
+    63ms median / 146ms worst on a 4.6M px one, on the main thread. Sampling as
+    each page painted spent that on every page scrolled past to serve a case most
+    never reach; `PageView` now samples in a layout effect gated on a selected or
+    edited fragment (before the frame, so there's no white-then-correct flash).
+    `colors.spec.ts` asserts scrolling reads back no pixels at all.
+  - **A rotated page is refused outright.** `viewBox` is the rotated viewport but
+    a fragment's `transform` is unrotated text space, and nothing reconciles them
+    — so sampling reads mis-mapped coordinates and reports them with full
+    confidence. On a `/Rotate 90` test page, black-on-white text came back with a
+    *black* background, which would paint a black rectangle over white paper.
+    Rotated text is already not repositioned in the overlay; declining keeps the
+    colours wrong in the same way, and no worse.
+  - **`resolveFragmentStyle` takes the ink as `baseColor`**, so the overlay, the
+    properties panel, and both export paths cannot disagree about what colour the
+    text is. A memo that reads it needs it as a dependency (`activeStyle` in
+    `App.tsx`) — it arrives after the page is sampled.
 - **Anything that reaches the output file is validated at the exporter**, not
   only in the UI: link URLs go through `safeLinkUrl` (`pdf/url.ts`, an
   allow-list) and copied annotation actions through `sanitize.ts` (also an
@@ -229,6 +321,18 @@ words from it, which makes for a useless assertion.
 Recognised words are
 appended to a page's `fragments` as a transparent, selectable/searchable text
 layer (so Find and search-and-redact work on scans).
+
+**An OCR fragment's `size` is the recognised ink height, not a font em**, which
+matters to `fragmentColors.ts`: its sample box is built from `size`, so the box
+top lands *on* the glyph tops rather than above them and the upper corner patches
+sit in the ink. Pooling all four patches into one dominance test therefore
+declined a large bold all-caps word outright; reading a *pure* patch as background
+regardless of the others resolves it, since the patches below the baseline are
+clean paper. An edited scan word now takes the scan's own paper and ink —
+`fill=#ffffff ink=#111111` on the `scanned` fixture, every word, and
+`ocr.spec.ts` asserts exactly that. A *noisy* scan still declines throughout,
+because no colour owns enough of a speckled page, which leaves the edit
+black-on-white as it was before any of this.
 
 **`setup-ocr` copies only the `.wasm.js` cores, not the sibling `.wasm`.** Each
 variant ships both ways — a small `<name>.js` glue that fetches `<name>.wasm`,

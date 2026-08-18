@@ -4,6 +4,13 @@ import { sanitizeDocument } from "./sanitize";
 import { safeLinkUrl } from "./url";
 import { createSourceFontEmbedder, type SourceFontEmbedder } from "./fontEmbed";
 import { NO_FONTS, readPageFonts, type PageFonts } from "./fontInfo";
+import {
+  NO_COLORS,
+  offerPageCanvas,
+  peekPageColors,
+  readPageColors,
+  type PageColors,
+} from "./fragmentColors";
 import { loadJpegEncoder, type JpegEncoder } from "./jpeg";
 import { yieldToUI } from "./yield";
 import {
@@ -29,6 +36,21 @@ import type {
   TextStyle,
   WatermarkOptions,
 } from "./types";
+
+/**
+ * The colour an edited fragment's cover is painted in.
+ *
+ * White is the fallback, not the rule: a non-redacted page is copied verbatim
+ * and edits are drawn on top, so the cover rectangle was the only thing an edit
+ * damaged — and hardcoding it white punched a hole through every coloured pill,
+ * table cell, and banner it landed in. `pdf/fragmentColors.ts` samples the flat
+ * colour behind the glyphs and says nothing when no flat colour fits, which is
+ * exactly when white is as good an answer as any.
+ */
+function coverColor(colors: PageColors, itemIndex: number) {
+  const c = hexToRgb(colors.get(itemIndex)?.fill ?? "#ffffff");
+  return rgb(c.r, c.g, c.b);
+}
 
 /** Pixels per PDF unit used when rasterising redacted pages (≈216 dpi). */
 const REDACT_SCALE = 3;
@@ -441,6 +463,15 @@ export async function exportPdf(
     // page's actual face) instead of a generic guess.
     const pageEdited = pageData.fragments.some((f) => isFragmentModified(f, edits[f.id]));
     const sourceFonts: PageFonts = pageEdited ? await readPageFonts(loaded.bytes, i) : NO_FONTS;
+    // ...and the colours around and of each edited fragment, so covering the
+    // original glyphs doesn't cost the page its artwork and the replacement
+    // isn't redrawn in a colour the document never used. Usually already
+    // sampled from the raster the user was looking at; rasterises the page only
+    // if they never scrolled to it (a restored session exported straight away).
+    // The raster path renders this page itself and samples from that raster
+    // (below), so only the vector path needs to ask for one here.
+    const pageColors: PageColors =
+      pageEdited && !needsRaster ? await readPageColors(loaded.bytes, pageData) : NO_COLORS;
 
     // Both paths produce a finished PDFPage; page numbers, watermark, and link
     // annotations are then applied uniformly on top. `done` is the 1-based
@@ -465,7 +496,12 @@ export async function exportPdf(
     for (const fragment of pageData.fragments) {
       const edit = edits[fragment.id];
       if (!isFragmentModified(fragment, edit)) continue;
-      const style = resolveFragmentStyle(fragment, edit!.style, sourceFonts.get(fragment.itemIndex));
+      const style = resolveFragmentStyle(
+        fragment,
+        edit!.style,
+        sourceFonts.get(fragment.itemIndex),
+        pageColors.get(fragment.itemIndex)?.ink,
+      );
       const x = fragment.transform[4];
       const y = fragment.transform[5];
       const descent = style.size * 0.22;
@@ -489,7 +525,7 @@ export async function exportPdf(
         y: y - descent,
         width: Math.max(fragment.width, textWidth) + style.size * 0.1,
         height: style.size * 1.2,
-        color: rgb(1, 1, 1),
+        color: coverColor(pageColors, fragment.itemIndex),
       });
       const c = hexToRgb(style.color);
       page.drawText(text, { x, y, size: style.size, font, color: rgb(c.r, c.g, c.b) });
@@ -566,6 +602,13 @@ async function rasterisePage(
   if (!ctx) throw new Error("Could not get 2D canvas context");
   const S = REDACT_SCALE;
 
+  // Read this page's colours off this raster, while it's still clean — it's
+  // about to be drawn on, and it's a better one than `readPageColors` would
+  // rasterise for itself. A no-op if the page was already sampled on screen,
+  // which keeps the on-screen and exported covers identical.
+  offerPageCanvas(loaded.bytes, pageData, canvas);
+  const pageColors = peekPageColors(loaded.bytes, pageIndex);
+
   const drawText = (
     text: string,
     x: number,
@@ -591,7 +634,8 @@ async function rasterisePage(
     const edit = edits[fragment.id];
     if (!isFragmentModified(fragment, edit)) continue;
     const source = sourceFonts.get(fragment.itemIndex) ?? null;
-    const style = resolveFragmentStyle(fragment, edit!.style, source);
+    const colors = pageColors.get(fragment.itemIndex);
+    const style = resolveFragmentStyle(fragment, edit!.style, source, colors?.ink);
     // The page's own face, on the same terms as the vector path: only while
     // the edit keeps it. `renderPageToCanvas` above has already loaded it.
     const face = keepsSourceTypeface(edit!.style) ? source : null;
@@ -610,7 +654,7 @@ async function rasterisePage(
     // Extra lines step downward from the baseline, so the cover has to grow with
     // them or the replacement text lands on top of un-covered original glyphs.
     const coverHeight = style.size * 1.2 + (lines.length - 1) * style.size * TEXTBOX_LINE_HEIGHT;
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = colors?.fill ?? "#ffffff";
     ctx.fillRect(
       (x - style.size * 0.05) * S,
       (H - (y + style.size * 0.98)) * S,

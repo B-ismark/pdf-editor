@@ -19,6 +19,7 @@ import type { PageNumberOptions, WatermarkOptions } from "./pdf/types";
 import { useHistory } from "./hooks/useHistory";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useFragmentFont } from "./hooks/usePageFonts";
+import { useFragmentColors } from "./hooks/usePageColors";
 import { usePersistentState, usePersistentFlag } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
 import { useViewport } from "./hooks/useViewport";
@@ -1163,17 +1164,30 @@ export function App() {
   const selectedFragment =
     selection?.kind === "fragment" ? fragmentById.get(selection.id) ?? null : null;
   const selectedFragmentFont = useFragmentFont(pdf?.bytes ?? null, selectedFragment);
+  // ...and its own ink, so the colour swatch shows what the text actually is
+  // rather than the black it used to default to.
+  const selectedFragmentColors = useFragmentColors(pdf?.bytes ?? null, selectedFragment);
 
   const activeStyle: TextStyle | null = useMemo(() => {
     if (selection?.kind === "fragment") {
       const f = fragmentById.get(selection.id);
-      return f ? resolveFragmentStyle(f, edits[f.id]?.style ?? {}, selectedFragmentFont) : null;
+      return f
+        ? resolveFragmentStyle(
+            f,
+            edits[f.id]?.style ?? {},
+            selectedFragmentFont,
+            selectedFragmentColors?.ink,
+          )
+        : null;
     }
     if (selection?.kind === "textbox") {
       return textBoxes.find((b) => b.id === selection.id)?.style ?? null;
     }
     return null;
-  }, [selection, fragmentById, edits, textBoxes, selectedFragmentFont]);
+    // `selectedFragmentColors` belongs in here: it arrives after the page is
+    // sampled, so a memo that didn't list it would keep showing the fragment's
+    // colour as black for as long as the selection stood.
+  }, [selection, fragmentById, edits, textBoxes, selectedFragmentFont, selectedFragmentColors]);
 
   const selectedRedaction =
     selection?.kind === "redaction" ? redactions.find((r) => r.id === selection.id) ?? null : null;

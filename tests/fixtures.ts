@@ -1,4 +1,4 @@
-import { PDFDocument, PDFName, PDFRawStream, PDFRef, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, PDFName, PDFRawStream, PDFRef, StandardFonts, degrees, rgb } from "pdf-lib";
 import { chromium } from "@playwright/test";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -26,9 +26,113 @@ export interface Fixtures {
   masked: string;
   /** Two images whose `/DecodeParms` can't be read — must be left alone. */
   brokenParms: string;
+  /** One page of known typesetting: several faces at known baselines, and text
+   * on a solid-colour panel. */
+  typeset: string;
+  /** `/Rotate 90`, with a solid black band where the *unrotated* coordinates of
+   * its black-on-white text land. */
+  rotated: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
+
+/** The single text run in the `rotated` fixture. */
+export const ROTATED_TEXT = "ROTATED-LABEL";
+
+/** Page size of the `typeset` fixture, in PDF units. */
+export const TYPESET_PAGE = { width: 460, height: 520 };
+
+/**
+ * Text running off the edge of a panel, so half of it sits on the panel and half
+ * on paper.
+ *
+ * There is no single colour behind this, and the reading has to say so: filling
+ * half a boundary with the wrong colour is worse than the white it replaces. It's
+ * the case that keeps the pure-patch reading honest — two pure patches of panel
+ * against two of paper is a 50% split, under the agreement floor.
+ */
+export const TYPESET_STRADDLE = {
+  text: "STRADDLES-EDGE",
+  x: 30,
+  baseline: 480,
+  size: 16,
+  /** The panel covers only the first part of the text. */
+  panel: { x: 20, y: 472, width: 70, height: 26, rgb: [26, 127, 55] as [number, number, number] },
+};
+
+/**
+ * Mid-tone text with a darker rule just under its baseline.
+ *
+ * Ink is the colour furthest from the background, so a rule more extreme than
+ * the text wins it: this read `#000000` for `#878787` text until ink stopped
+ * being sampled from the descender band. Underlines, table rules and cell
+ * borders all live there, and grey-on-white with a black rule is the cheapest
+ * way to state the case.
+ */
+export const TYPESET_RULED = {
+  text: "GREY-WITH-RULE",
+  x: 30,
+  baseline: 430,
+  size: 16,
+  textRgb: [135, 135, 135] as [number, number, number],
+  /** The rule: below the baseline, inside the glyph box, wider than the text. */
+  ruleY: 426,
+  ruleHeight: 2,
+  ruleWidth: 220,
+};
+
+/**
+ * Text runs in `typeset`, at baselines the specs can assert against.
+ *
+ * Deliberately a spread of faces and sizes: the baseline-placement bug this
+ * fixture exists for was proportional to the font size and different per
+ * typeface, so a single run at a single size would have passed against it.
+ */
+export const TYPESET_RUNS = [
+  { text: "Hxplg-Helvetica-24", x: 30, baseline: 370, size: 24, font: StandardFonts.Helvetica },
+  { text: "Hxplg-Helvetica-11", x: 30, baseline: 330, size: 11, font: StandardFonts.Helvetica },
+  { text: "Hxplg-Times-18", x: 30, baseline: 290, size: 18, font: StandardFonts.TimesRoman },
+  { text: "Hxplg-Courier-24", x: 30, baseline: 240, size: 24, font: StandardFonts.Courier },
+  { text: "Hxplg-Bold-20", x: 30, baseline: 190, size: 20, font: StandardFonts.HelveticaBold },
+];
+
+/**
+ * Two solid-colour panels in `typeset`, one with dark text and one with light.
+ *
+ * They test opposite failures of the same cover. On `darkText`, any near-white
+ * pixel is a hole the cover punched through the panel. On `lightText`, any dark
+ * pixel is an edit redrawn in a colour the document never used — the ink default
+ * was black, so light-on-dark text came back black and unreadable.
+ */
+export const TYPESET_PANELS = {
+  darkText: {
+    x: 24,
+    y: 60,
+    width: 260,
+    height: 56,
+    /** Fill colour, 0-255 per channel, as the raster should show it. */
+    rgb: [26, 127, 55] as [number, number, number],
+    /** One token: pdf.js breaks a text item at spacing changes, so a phrase with
+     * spaces arrives as several fragments and no single overlay carries it. */
+    text: "ON-A-PANEL",
+    textRgb: [0, 0, 0] as [number, number, number],
+    textX: 44,
+    baseline: 80,
+    size: 18,
+  },
+  lightText: {
+    x: 24,
+    y: 126,
+    width: 260,
+    height: 40,
+    rgb: [26, 127, 55] as [number, number, number],
+    text: "WHITE-ON-PANEL",
+    textRgb: [255, 255, 255] as [number, number, number],
+    textX: 44,
+    baseline: 138,
+    size: 14,
+  },
+};
 
 /** Text repeated on every page of `sample`/`long`. */
 export const MARKER = "the quick brown fox jumps over the lazy dog";
@@ -59,6 +163,8 @@ async function build(): Promise<Fixtures> {
     photo: write("photo.pdf", await photoPdf()),
     masked: write("masked.pdf", await maskedPdf()),
     brokenParms: write("broken-parms.pdf", await brokenParmsPdf()),
+    typeset: write("typeset.pdf", await typesetPdf()),
+    rotated: write("rotated.pdf", await rotatedPdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -80,6 +186,100 @@ async function textPdf(pageCount: number): Promise<Uint8Array> {
       });
     }
   }
+  return doc.save();
+}
+
+/**
+ * One page of text at known baselines, plus a solid-colour panel with text on
+ * it. Used by `baseline.spec.ts` (does the overlay sit on the document's
+ * baseline?) and `export.spec.ts` (does an edit keep the panel's colour?).
+ */
+async function typesetPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([TYPESET_PAGE.width, TYPESET_PAGE.height]);
+  for (const run of TYPESET_RUNS) {
+    page.drawText(run.text, {
+      x: run.x,
+      y: run.baseline,
+      size: run.size,
+      font: await doc.embedFont(run.font),
+    });
+  }
+  const [sr, sg, sb] = TYPESET_STRADDLE.panel.rgb;
+  page.drawRectangle({
+    x: TYPESET_STRADDLE.panel.x,
+    y: TYPESET_STRADDLE.panel.y,
+    width: TYPESET_STRADDLE.panel.width,
+    height: TYPESET_STRADDLE.panel.height,
+    color: rgb(sr / 255, sg / 255, sb / 255),
+  });
+  page.drawText(TYPESET_STRADDLE.text, {
+    x: TYPESET_STRADDLE.x,
+    y: TYPESET_STRADDLE.baseline,
+    size: TYPESET_STRADDLE.size,
+    font: await doc.embedFont(StandardFonts.HelveticaBold),
+    color: rgb(0, 0, 0),
+  });
+
+  const [gr, gg, gb] = TYPESET_RULED.textRgb;
+  page.drawText(TYPESET_RULED.text, {
+    x: TYPESET_RULED.x,
+    y: TYPESET_RULED.baseline,
+    size: TYPESET_RULED.size,
+    font: await doc.embedFont(StandardFonts.Helvetica),
+    color: rgb(gr / 255, gg / 255, gb / 255),
+  });
+  page.drawRectangle({
+    x: TYPESET_RULED.x - 10,
+    y: TYPESET_RULED.ruleY,
+    width: TYPESET_RULED.ruleWidth,
+    height: TYPESET_RULED.ruleHeight,
+    color: rgb(0, 0, 0),
+  });
+
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  for (const panel of Object.values(TYPESET_PANELS)) {
+    const [r, g, b] = panel.rgb;
+    page.drawRectangle({
+      x: panel.x,
+      y: panel.y,
+      width: panel.width,
+      height: panel.height,
+      color: rgb(r / 255, g / 255, b / 255),
+    });
+    const [tr, tg, tb] = panel.textRgb;
+    page.drawText(panel.text, {
+      x: panel.textX,
+      y: panel.baseline,
+      size: panel.size,
+      font: bold,
+      color: rgb(tr / 255, tg / 255, tb / 255),
+    });
+  }
+  return doc.save();
+}
+
+/**
+ * A rotated page laid out to catch a coordinate mix-up rather than survive one.
+ *
+ * `viewBox` is the rotated viewport but a fragment's `transform` is unrotated
+ * text space, so anything reading pixels at a fragment's coordinates reads the
+ * wrong place here. The black band sits exactly where the text's unrotated
+ * coordinates land, so a sampler that ignores `/Rotate` reports black as the
+ * background of black-on-white text — confidently, and with no way to tell.
+ */
+async function rotatedPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([400, 400]);
+  page.drawText(ROTATED_TEXT, {
+    x: 40,
+    y: 340,
+    size: 18,
+    font: await doc.embedFont(StandardFonts.HelveticaBold),
+    color: rgb(0, 0, 0),
+  });
+  page.drawRectangle({ x: 0, y: 0, width: 400, height: 300, color: rgb(0, 0, 0) });
+  page.setRotation(degrees(90));
   return doc.save();
 }
 

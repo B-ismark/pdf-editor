@@ -3,6 +3,7 @@ import { CSS_FONT, TEXTBOX_LINE_HEIGHT } from "../pdf/style";
 import { elementTap, lastEditPoint, startPointerDrag } from "../hooks/useDrag";
 import { clearGuides, setGuides, snapBox } from "../hooks/useSnap";
 import { focusEditable, placeCaretEnd } from "../caret";
+import { baselineOffset, fontShorthand } from "../textBaseline";
 import { EditDoneButton } from "./EditDoneButton";
 import type { TextBox } from "../pdf/types";
 
@@ -70,7 +71,17 @@ function TextBoxItemImpl({
 
   const fontPx = box.style.size * scale;
   const left = box.x * scale;
-  const top = (H - box.y) * scale - fontPx;
+  // `box.y` is the first line's baseline — that's where the exporter draws it —
+  // so the wrapper's top edge sits a measured baseline offset above it, not a
+  // whole font size (see `textBaseline.ts`). Subsequent lines step by
+  // TEXTBOX_LINE_HEIGHT on both sides, so anchoring line one anchors them all.
+  const shorthand = fontShorthand(
+    box.style.italic ? "italic" : "normal",
+    box.style.bold ? "bold" : "normal",
+    fontPx,
+    CSS_FONT[box.style.font],
+  );
+  const top = (H - box.y) * scale - baselineOffset(shorthand, TEXTBOX_LINE_HEIGHT, fontPx);
 
   const beginMove = (e: React.PointerEvent) => {
     onSelect(box.id);

@@ -249,9 +249,14 @@ A pragmatic, client-side editor — worth knowing where the seams are:
   Helvetica / Times / Courier, with bold & italic — when you pick a different
   font yourself, or when the original has no glyph for something you typed.
   Text drawn with a standard font supports only WinAnsi-encodable characters.
-- **White background assumed** behind edited text on non-redacted pages;
-  coloured or image backgrounds will show a white patch. (Redaction fill colour
-  is configurable.)
+- **Background and text colour are sampled, not assumed.** Editing text on a
+  coloured pill, table cell, or banner keeps that colour behind it and draws the
+  replacement in the colour the original used. Both are read from the rendered
+  page, so both decline rather than guess: an area no flat colour fits (a photo,
+  a gradient, the edge of a panel, a rotated page, a speckled scan) still gets a
+  white patch, and type too small to resolve at the scale the page was first
+  drawn at is still redrawn in black.
+  (Redaction fill colour is configurable.)
 - **Layout is not reflowed**, and images/vector graphics aren't editable, nor is
   rotated text repositioned in the overlay.
 - **Scanned PDFs have no text layer** until you run **OCR — recognise text**

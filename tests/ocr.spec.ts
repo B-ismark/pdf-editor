@@ -91,6 +91,51 @@ test.describe("OCR", () => {
    * requests, so "it caches the engine" is worth far less than "it caches
    * *nothing else*" — - not the app shell, and above all not the user's document.
    */
+  test("an edited OCR word takes the scan's own colours", async ({ page }) => {
+    // An OCR fragment sits over pixels, not text: the glyphs beneath it are part
+    // of the scan and so is its paper, and `pdf/fragmentColors.ts` reads both off
+    // that raster like any other fragment. The fixture is drawn #111 on #fff, so
+    // the reading is checkable exactly.
+    //
+    // Every word, including the large bold heading. That one used to decline:
+    // OCR sets a fragment's size to the recognised *ink height* rather than a font
+    // em (see `wordsToFragments`), so its sample box's top lands on the glyph tops
+    // instead of above them and the upper corner patches sit in the ink. Pooling
+    // all four patches into one dominance test then fell under the floor. Reading
+    // a *pure* patch as background regardless of the others answers it, since the
+    // patches below the baseline are clean paper — see `PURE_PATCH_SHARE`.
+    //
+    // A noisy scan declines throughout, which needs no fixture of its own: no
+    // colour owns enough of a speckled page for the corner test to accept it, so
+    // the edit stays black-on-white, exactly as it was before any of this.
+    test.slow();
+    await page.goto("/");
+    test.skip(!(await ocrAssetsReady(page)), "OCR assets absent — run `npm run setup-ocr`");
+    const w = watch(page);
+    await open(page, (await fixtures()).scanned);
+    await runOcr(page);
+
+    const words = page.locator('.page [role="textbox"]');
+    const count = await words.count();
+    expect(count).toBeGreaterThan(1);
+
+    for (let i = 0; i < count; i++) {
+      const el = words.nth(i);
+      await el.click();
+      await page.keyboard.press("ControlOrMeta+a");
+      await page.keyboard.type(`EDIT${i}`);
+      await expect(el).toHaveText(`EDIT${i}`);
+      // The scan's own ink and paper — #111 on #fff, not the black-on-white
+      // defaults, which are what this looked like when it declined.
+      await expect(el, `word ${i}`).toHaveCSS("color", "rgb(17, 17, 17)");
+      await expect(el.locator("xpath=preceding-sibling::div[1]")).toHaveCSS(
+        "background-color",
+        "rgb(255, 255, 255)",
+      );
+    }
+    expect(w.external, `off-origin requests: ${w.external.join(", ")}`).toEqual([]);
+  });
+
   test("the wasm core is cached for next time, and nothing else is", async ({ page }) => {
     test.slow(); // two full engine boots and a recognition pass each
     await page.goto("/");

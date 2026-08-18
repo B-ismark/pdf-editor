@@ -2,8 +2,14 @@ import { memo, useEffect, useRef } from "react";
 import { CSS_FONT } from "../pdf/style";
 import { elementTap, lastEditPoint } from "../hooks/useDrag";
 import { focusEditable, placeCaretEnd } from "../caret";
+import { baselineOffset, fontShorthand } from "../textBaseline";
 import { EditDoneButton } from "./EditDoneButton";
 import type { FragmentFont, TextFragment, TextStyle } from "../pdf/types";
+
+/** A fragment is always one line, so its box is exactly its font size tall.
+ * Shared with the baseline probe: the measured offset is only correct for the
+ * line-height the element actually gets. */
+const FRAGMENT_LINE_HEIGHT = 1;
 
 interface Props {
   fragment: TextFragment;
@@ -16,6 +22,10 @@ interface Props {
   /** The document's own font, when the edit keeps it: rendering with this is
    * what makes replaced text match the page instead of approximating it. */
   face: FragmentFont | null;
+  /** The flat colour sampled from behind these glyphs, when there is one. The
+   * cover is painted in it so an edit inside a coloured pill, cell, or banner
+   * doesn't punch a white hole through the artwork. */
+  backdrop?: string;
   /** Whether the fragment differs from its original (text or style). */
   modified: boolean;
   selected: boolean;
@@ -46,6 +56,7 @@ function EditableFragmentImpl({
   value,
   style,
   face,
+  backdrop,
   modified,
   selected,
   interactive,
@@ -83,7 +94,6 @@ function EditableFragmentImpl({
   const sizeUnits = show ? style.size : Math.hypot(c, d);
   const fontPx = sizeUnits * scale;
   const left = e * scale;
-  const top = (pageHeight - f) * scale - fontPx;
 
   // With the document's own face, take its weight and slant too: the face
   // already carries them, and asking for bold on top of a bold face makes the
@@ -92,8 +102,19 @@ function EditableFragmentImpl({
   const fontWeight = face ? face.weight : show && style.bold ? "bold" : "normal";
   const fontStyle = face ? face.slant : show && style.italic ? "italic" : "normal";
 
+  // `f` is the fragment's baseline, and the exporter draws the replacement on
+  // it exactly — so the overlay has to land on it exactly too, or the preview
+  // stops matching the file. Measured for this very font, because the offset
+  // from the box's top edge to its baseline depends on the face's metrics (see
+  // `textBaseline.ts`): a flat `- fontPx` sat every edit 0.15–0.24em too high.
+  const shorthand = fontShorthand(fontStyle, fontWeight, fontPx, fontFamily);
+  const top = (pageHeight - f) * scale - baselineOffset(shorthand, FRAGMENT_LINE_HEIGHT, fontPx);
+
   // Cover sized to the ORIGINAL glyph box so the rasterised original text is
   // fully hidden (no peeking / duplication), independent of the new text.
+  // White only until the page has been sampled (or when no flat colour fits the
+  // area): that's where this started, and it's right on white paper.
+  const coverColor = backdrop ?? "#ffffff";
   const origFontPx = Math.hypot(c, d) * scale;
   const cover = {
     left: e * scale - 1.5,
@@ -113,6 +134,7 @@ function EditableFragmentImpl({
             top: `${cover.top}px`,
             width: `${cover.width}px`,
             height: `${cover.height}px`,
+            background: coverColor,
           }}
         />
       )}
@@ -136,8 +158,8 @@ function EditableFragmentImpl({
           fontWeight,
           fontStyle,
           color: show ? style.color : "transparent",
-          background: show ? "#fff" : undefined,
-          lineHeight: 1,
+          background: show ? coverColor : undefined,
+          lineHeight: FRAGMENT_LINE_HEIGHT,
           pointerEvents: interactive ? "auto" : "none",
         }}
         onPointerDown={(e) => {

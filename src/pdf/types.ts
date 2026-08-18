@@ -78,6 +78,11 @@ export interface PageData {
   pageIndex: number;
   /** Unscaled page dimensions in PDF units (== points). */
   viewBox: { width: number; height: number };
+  /** `/Rotate`, in degrees (0/90/180/270). `viewBox` is the *rotated* viewport,
+   * but a fragment's `transform` is unrotated text space — nothing reconciles
+   * the two, which is why rotated text isn't repositioned in the overlay and
+   * why `fragmentColors.ts` refuses to sample these pages at all. */
+  rotation: number;
   fragments: TextFragment[];
   /** Interactive form fields on this page (empty if none). */
   fields: FormField[];
