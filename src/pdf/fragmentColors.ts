@@ -91,6 +91,26 @@ const MIN_BG_SHARE = 0.7;
 const MIN_INK_SHARE = 0.02;
 const MIN_INK_DISTANCE = 60;
 
+/**
+ * When a single corner patch counts as *pure* — one colour and essentially
+ * nothing else — and how much of the pure pixels the winner must hold.
+ *
+ * This is what separates ink from background without looking outside the box. A
+ * patch containing glyphs is never pure: glyphs bring edges, and edges bring
+ * blends. So a patch that is one flat colour is background, whatever the rest of
+ * the box looks like — which is the only way to read a fragment whose `size` is
+ * its *ink height* rather than a font em. OCR words are exactly that (see
+ * `wordsToFragments`): their box top lands on the glyph tops, so the upper
+ * patches sit in the ink while the lower ones are clean paper, and pooling all
+ * four together landed under {@link MIN_BG_SHARE} and declined.
+ *
+ * The agreement floor is what still declines a fragment straddling the edge of a
+ * panel: two pure patches of panel against two of paper is a 50% split, and
+ * filling half a boundary with the wrong colour is worse than white.
+ */
+const PURE_PATCH_SHARE = 0.95;
+const PURE_AGREEMENT = 0.75;
+
 /** Corner patch size, as a fraction of the glyph box. Small enough to stay in
  * the ascender/descender space at the ends of a line — which is background on
  * all but the most crowded text — and large enough to out-vote a stem that
@@ -235,8 +255,8 @@ export function sampleColors(
   for (const fragment of pageData.fragments) {
     const size = fragmentSize(fragment);
     const box = toPixels(glyphBox(fragment, size), H, scale);
-    const background = dominant(image, cornersOf(box));
-    if (!background || background.share < MIN_BG_SHARE) continue;
+    const background = backgroundOf(image, box);
+    if (!background) continue;
     const ink = inkColor(image, toPixels(inkBox(fragment, size), H, scale), background.key, size * scale);
     found.set(fragment.itemIndex, { fill: hex(background.key), ...(ink ? { ink } : {}) });
   }
@@ -304,9 +324,53 @@ function cornersOf(box: Box): Box[] {
   ];
 }
 
-/** The most common opaque colour across some regions, and the share of them it
- * owns. Regions are clamped to the canvas; null if they all fall outside it. */
-function dominant(image: ImageData, boxes: Box[]): { key: number; share: number } | null {
+/**
+ * The colour behind a fragment, or null when the corners don't agree on one.
+ *
+ * Two readings, in order. A corner patch that is *pure* is background by
+ * construction (see {@link PURE_PATCH_SHARE}), so pure patches answer first,
+ * weighted by pixel count — which is what lets a fragment whose glyphs fill its
+ * own box still find its background. Failing that, the four patches are pooled
+ * into one dominance test: the original reading, kept because it is the one that
+ * answers a table cell whose borders clip every patch, leaving none of them pure.
+ */
+function backgroundOf(image: ImageData, box: Box): { key: number; share: number } | null {
+  const pure = cornersOf(box)
+    .map((patch) => dominant(image, [patch]))
+    .filter((d) => d !== null)
+    .filter((d) => d!.share >= PURE_PATCH_SHARE);
+
+  if (pure.length) {
+    const byColor = new Map<number, number>();
+    let total = 0;
+    for (const d of pure) {
+      byColor.set(d!.key, (byColor.get(d!.key) ?? 0) + d!.count);
+      total += d!.count;
+    }
+    let best = -1;
+    let bestCount = 0;
+    for (const [key, n] of byColor) {
+      if (n > bestCount) {
+        best = key;
+        bestCount = n;
+      }
+    }
+    if (best >= 0 && bestCount / total >= PURE_AGREEMENT) {
+      return { key: best, share: bestCount / total };
+    }
+  }
+
+  const pooled = dominant(image, cornersOf(box));
+  return pooled && pooled.share >= MIN_BG_SHARE ? pooled : null;
+}
+
+/** The most common opaque colour across some regions, its share of them, and how
+ * many pixels it accounts for. Regions are clamped to the canvas; null if they
+ * all fall outside it. */
+function dominant(
+  image: ImageData,
+  boxes: Box[],
+): { key: number; share: number; count: number } | null {
   const counts = new Map<number, number>();
   let total = 0;
   for (const box of boxes) total += tally(image, box, counts);
@@ -320,7 +384,7 @@ function dominant(image: ImageData, boxes: Box[]): { key: number; share: number 
       bestCount = n;
     }
   }
-  return best < 0 ? null : { key: best, share: bestCount / total };
+  return best < 0 ? null : { key: best, share: bestCount / total, count: bestCount };
 }
 
 /**

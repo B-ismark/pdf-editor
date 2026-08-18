@@ -97,14 +97,13 @@ test.describe("OCR", () => {
     // that raster like any other fragment. The fixture is drawn #111 on #fff, so
     // the reading is checkable exactly.
     //
-    // Not every word resolves, and the reason is worth knowing: OCR sets a
-    // fragment's size to the recognised *ink height* rather than a font em (see
-    // `wordsToFragments`), so for a large bold all-caps word the sample box's top
-    // lands on the glyph tops instead of above them, the upper corner patches sit
-    // in the ink, and the background test declines. Hence the two assertions:
-    // every word is either the scan's own colours or the black-and-white default
-    // — never some third colour — and at least one word does resolve, so a
-    // pipeline that quietly stopped sampling would still fail this.
+    // Every word, including the large bold heading. That one used to decline:
+    // OCR sets a fragment's size to the recognised *ink height* rather than a font
+    // em (see `wordsToFragments`), so its sample box's top lands on the glyph tops
+    // instead of above them and the upper corner patches sit in the ink. Pooling
+    // all four patches into one dominance test then fell under the floor. Reading
+    // a *pure* patch as background regardless of the others answers it, since the
+    // patches below the baseline are clean paper — see `PURE_PATCH_SHARE`.
     //
     // A noisy scan declines throughout, which needs no fixture of its own: no
     // colour owns enough of a speckled page for the corner test to accept it, so
@@ -120,24 +119,20 @@ test.describe("OCR", () => {
     const count = await words.count();
     expect(count).toBeGreaterThan(1);
 
-    let readTheScan = 0;
     for (let i = 0; i < count; i++) {
       const el = words.nth(i);
       await el.click();
       await page.keyboard.press("ControlOrMeta+a");
       await page.keyboard.type(`EDIT${i}`);
       await expect(el).toHaveText(`EDIT${i}`);
-      const ink = await el.evaluate((e) => getComputedStyle(e).color);
-      // The scan's ink, or the default it falls back to when it declines.
-      expect(["rgb(17, 17, 17)", "rgb(0, 0, 0)"], `word ${i} ink`).toContain(ink);
-      if (ink === "rgb(17, 17, 17)") readTheScan++;
-      // The paper either way — never a colour the scan doesn't have.
+      // The scan's own ink and paper — #111 on #fff, not the black-on-white
+      // defaults, which are what this looked like when it declined.
+      await expect(el, `word ${i}`).toHaveCSS("color", "rgb(17, 17, 17)");
       await expect(el.locator("xpath=preceding-sibling::div[1]")).toHaveCSS(
         "background-color",
         "rgb(255, 255, 255)",
       );
     }
-    expect(readTheScan, "no OCR word picked up the scan's own ink").toBeGreaterThan(0);
     expect(w.external, `off-origin requests: ${w.external.join(", ")}`).toEqual([]);
   });
 

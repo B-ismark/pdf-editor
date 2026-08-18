@@ -2,7 +2,14 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ROTATED_TEXT, TYPESET_PAGE, TYPESET_PANELS, TYPESET_RULED, fixtures } from "./fixtures";
+import {
+  ROTATED_TEXT,
+  TYPESET_PAGE,
+  TYPESET_PANELS,
+  TYPESET_RULED,
+  TYPESET_STRADDLE,
+  fixtures,
+} from "./fixtures";
 import { expectClean, open, pageTexts, watch } from "./helpers";
 
 /**
@@ -219,5 +226,25 @@ test("a rule under the baseline is not mistaken for the text's colour", async ({
   const [r, g, b] = TYPESET_RULED.textRgb;
   const id = await editText(page, TYPESET_RULED.text, "EDITED-RULED");
   await expect(page.locator(`.fragment[data-id="${id}"]`)).toHaveCSS("color", `rgb(${r}, ${g}, ${b})`);
+  expectClean(w);
+});
+
+test("text straddling the edge of a panel is declined, not half-filled", async ({ page }) => {
+  // A pure corner patch is background by construction, which is what lets a
+  // fragment whose glyphs fill its own box find its background at all. This is
+  // the other side of that: two pure patches of panel against two of paper is a
+  // 50% split, no colour is *the* background, and white is the honest answer —
+  // half a boundary in the wrong colour would be worse than what it replaced.
+  const w = watch(page);
+  const { typeset } = await fixtures();
+  await open(page, typeset);
+
+  const id = await editText(page, TYPESET_STRADDLE.text, "EDITED-STRADDLE");
+  const el = page.locator(`.fragment[data-id="${id}"]`);
+  await expect(el.locator("xpath=preceding-sibling::div[1]")).toHaveCSS(
+    "background-color",
+    "rgb(255, 255, 255)",
+  );
+  await expect(el).toHaveCSS("color", "rgb(0, 0, 0)");
   expectClean(w);
 });

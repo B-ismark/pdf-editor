@@ -40,7 +40,25 @@ export interface Fixtures {
 export const ROTATED_TEXT = "ROTATED-LABEL";
 
 /** Page size of the `typeset` fixture, in PDF units. */
-export const TYPESET_PAGE = { width: 460, height: 470 };
+export const TYPESET_PAGE = { width: 460, height: 520 };
+
+/**
+ * Text running off the edge of a panel, so half of it sits on the panel and half
+ * on paper.
+ *
+ * There is no single colour behind this, and the reading has to say so: filling
+ * half a boundary with the wrong colour is worse than the white it replaces. It's
+ * the case that keeps the pure-patch reading honest — two pure patches of panel
+ * against two of paper is a 50% split, under the agreement floor.
+ */
+export const TYPESET_STRADDLE = {
+  text: "STRADDLES-EDGE",
+  x: 30,
+  baseline: 480,
+  size: 16,
+  /** The panel covers only the first part of the text. */
+  panel: { x: 20, y: 472, width: 70, height: 26, rgb: [26, 127, 55] as [number, number, number] },
+};
 
 /**
  * Mid-tone text with a darker rule just under its baseline.
@@ -187,6 +205,22 @@ async function typesetPdf(): Promise<Uint8Array> {
       font: await doc.embedFont(run.font),
     });
   }
+  const [sr, sg, sb] = TYPESET_STRADDLE.panel.rgb;
+  page.drawRectangle({
+    x: TYPESET_STRADDLE.panel.x,
+    y: TYPESET_STRADDLE.panel.y,
+    width: TYPESET_STRADDLE.panel.width,
+    height: TYPESET_STRADDLE.panel.height,
+    color: rgb(sr / 255, sg / 255, sb / 255),
+  });
+  page.drawText(TYPESET_STRADDLE.text, {
+    x: TYPESET_STRADDLE.x,
+    y: TYPESET_STRADDLE.baseline,
+    size: TYPESET_STRADDLE.size,
+    font: await doc.embedFont(StandardFonts.HelveticaBold),
+    color: rgb(0, 0, 0),
+  });
+
   const [gr, gg, gb] = TYPESET_RULED.textRgb;
   page.drawText(TYPESET_RULED.text, {
     x: TYPESET_RULED.x,

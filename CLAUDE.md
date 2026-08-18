@@ -160,11 +160,22 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   text items: pdf.js splits and merges runs on its own terms, so matching them up
   means re-running its text-state machine to recover each run's position. Four
   things there are load-bearing:
-  - **The background comes from the glyph box's four corners.** The box as a
-    whole answers with the *text's* colour on any fragment whose ink covers more
-    than half of it — and a cover in the text's own colour makes the replacement
-    invisible, which is worse than a white box. A ring outside the box escapes a
-    tightly-fitting pill and returns whatever surrounds the pill.
+  - **The background comes from the glyph box's four corners**, read twice. The
+    box as a whole answers with the *text's* colour on any fragment whose ink
+    covers more than half of it — and a cover in the text's own colour makes the
+    replacement invisible, which is worse than a white box. A ring outside the box
+    escapes a tightly-fitting pill and returns whatever surrounds the pill. So:
+    a corner patch that is *pure* (one flat colour, `PURE_PATCH_SHARE`) is
+    background by construction, because glyphs bring edges and edges bring blends
+    — pure patches answer first, weighted by pixel count. That is the only way to
+    read a fragment whose `size` is its ink height rather than a font em, i.e.
+    every OCR word: their box top lands *on* the glyph tops, so the upper patches
+    sit in the ink while the lower ones are clean paper. Failing that, all four
+    patches pool into one dominance test — the original reading, kept because it's
+    the one that answers a table cell whose borders clip every patch, leaving none
+    pure. `PURE_AGREEMENT` is the safety valve: a fragment straddling a panel edge
+    has two pure patches of panel against two of paper, a 50% split that declines,
+    because half a boundary in the wrong colour is worse than white.
   - **Ink is read above the baseline only.** Underlines, table rules and cell
     borders live in the descender band, and ink is whatever sits furthest from
     the background — so a rule more extreme than the text wins it. Measured: 16pt
@@ -312,15 +323,16 @@ appended to a page's `fragments` as a transparent, selectable/searchable text
 layer (so Find and search-and-redact work on scans).
 
 **An OCR fragment's `size` is the recognised ink height, not a font em**, which
-matters to `fragmentColors.ts`: its sample box is built from `size`, so for a
-large bold all-caps word the box top lands *on* the glyph tops rather than above
-them, the upper corner patches sit in the ink, and the background test declines
-(the edit stays black-on-white). Smaller words resolve and take the scan's own
-paper and ink — measured `fill=#ffffff ink=#111111` on the `scanned` fixture. A
-*noisy* scan declines throughout, because no colour owns enough of a speckled
-page. All of that is the safe direction, and `ocr.spec.ts` pins it: every word is
-either the scan's colours or the default, never a third colour, and at least one
-resolves.
+matters to `fragmentColors.ts`: its sample box is built from `size`, so the box
+top lands *on* the glyph tops rather than above them and the upper corner patches
+sit in the ink. Pooling all four patches into one dominance test therefore
+declined a large bold all-caps word outright; reading a *pure* patch as background
+regardless of the others resolves it, since the patches below the baseline are
+clean paper. An edited scan word now takes the scan's own paper and ink —
+`fill=#ffffff ink=#111111` on the `scanned` fixture, every word, and
+`ocr.spec.ts` asserts exactly that. A *noisy* scan still declines throughout,
+because no colour owns enough of a speckled page, which leaves the edit
+black-on-white as it was before any of this.
 
 **`setup-ocr` copies only the `.wasm.js` cores, not the sibling `.wasm`.** Each
 variant ships both ways — a small `<name>.js` glue that fetches `<name>.wasm`,
