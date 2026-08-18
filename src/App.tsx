@@ -15,6 +15,7 @@ import { boxCX, boxCY } from "./pdf/bbox";
 import { findUnsafeCovers, type CoverWarning } from "./pdf/redactionSafety";
 import { useAutosave } from "./hooks/useAutosave";
 import { downloadBytes, downloadText } from "./download";
+import { plural } from "./plural";
 import type { PageNumberOptions, WatermarkOptions } from "./pdf/types";
 import { useHistory } from "./hooks/useHistory";
 import { useMediaQuery } from "./hooks/useMediaQuery";
@@ -138,11 +139,6 @@ const DOC_GROUPS: { key: DocAction["group"]; label: string }[] = [
   { key: "text", label: "Text" },
   { key: "finish", label: "Finish" },
 ];
-
-/** `3 pages`, `1 page` — never `1 page(s)`, which is a stand-in for copy, not copy. */
-function plural(n: number, one: string, many = `${one}s`): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
 
 /** The Inspector's two jobs, each with its own tab. */
 type PanelTab = "document" | "properties";
@@ -302,10 +298,15 @@ export function App() {
     theme.mode === "light" ? "Light" : theme.mode === "dark" ? "Dark" : "System";
   const themeLabel = `${themeName} theme`;
 
-  // Selecting something on the page moves the panel to Properties — that is what
-  // you asked for by clicking. Deselecting does *not* move it back: the panel
-  // would then flip on every click into empty space, and Properties has a real
-  // empty state for exactly this. One tab switch per intent, none per accident.
+  // Selecting something moves the panel to Properties — that is what you asked
+  // for by selecting. Deselecting does *not* move it back: the panel would then
+  // flip on every click into empty space, and Properties has a real empty state
+  // for exactly this. One tab switch per intent, none per accident.
+  //
+  // This covers the paths that don't go through `onSelect` above — adding a text
+  // box, a redaction or a link all select the new object so it can be styled
+  // straight away, and Find selects its match. `onSelect` handles the one case
+  // this can't see: re-clicking what is already selected.
   const selectedKey = panelSelection ? `${panelSelection.kind}-${panelSelection.id}` : null;
   useEffect(() => {
     if (selectedKey) setPanelTab("properties");
@@ -1079,6 +1080,12 @@ export function App() {
     setEditingId(null);
     setSheetOpen(false);
     setSelection(sel);
+    // Clicking a thing on the page asks to see that thing — including when it is
+    // already the selection. The effect below can't cover that case, because the
+    // selection didn't change; without this, re-clicking the selected element
+    // while reading the Document tab did nothing at all. `onSelect(null)`
+    // (clicking empty space) deliberately doesn't move the panel.
+    if (sel) setPanelTab("properties");
   }, []);
 
   /** Enter text-edit mode for the current selection (mobile): make it editable,
@@ -1838,6 +1845,7 @@ export function App() {
           // which it then covered.
           aria-label={navOpen ? "Hide pages" : "Show pages"}
           aria-expanded={navOpen}
+          aria-controls="page-rail"
           data-tip={navOpen ? "Hide pages" : "Show pages"}
         >
           <Icon name={navOpen ? "panel_close" : "panel_open"} size={18} />

@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { ICON_NAMES } from "../src/components/Icon";
+import { ICON_MAP, ICON_NAMES, SHARED_GLYPHS } from "../src/components/Icon";
 
 /**
  * The icon map's two failure modes, neither of which the type-checker can see.
@@ -13,11 +13,18 @@ import { ICON_NAMES } from "../src/components/Icon";
  * was never a key in the map.
  *
  * The second mode is subtler and was the whole of the icon problem here: one glyph
- * standing for several unrelated actions. That can't be asserted mechanically (some
- * sharing is correct — `rectangle` and `redact_tool` are both squares, one filled),
- * so it's checked at the map instead, by giving every meaning its own key. What
- * *can* be asserted is that no key is dead weight, since an unused key is how the
- * map drifts out of step with the UI it describes.
+ * standing for several unrelated actions. It *can* be asserted — by requiring that
+ * two names resolving to the same Lucide component are declared in `SHARED_GLYPHS`
+ * with a reason. That check is here because de-duplicating the map introduced a
+ * fresh duplicate: `edit` and `draw_tool` both came out as `Pencil`, and both are
+ * on screen at once (the selection bar floats over the canvas with the dock still
+ * showing). Reasoning about names caught the old duplicates; only comparing the
+ * resolved glyphs caught the new one.
+ *
+ * The blind spot that remains: Lucide's `Pen`, `Pencil` and `PenLine` are the *same*
+ * body path, differing by a single 4px stroke, so they are distinct components and
+ * one picture. Nothing mechanical catches that — it took rendering all 60-odd
+ * glyphs onto one sheet and looking at them. Do that when adding to this map.
  */
 
 /** Every `.ts`/`.tsx` file under `src/`. */
@@ -56,6 +63,31 @@ test("every icon name in the source is mapped", () => {
     .map(([name, files]) => `${name} (${[...new Set(files)].join(", ")})`);
 
   expect(unmapped, "these names fall back to a blank square").toEqual([]);
+});
+
+test("no two names resolve to the same glyph unless declared", () => {
+  const byGlyph = new Map<unknown, string[]>();
+  for (const [name, component] of Object.entries(ICON_MAP)) {
+    byGlyph.set(component, [...(byGlyph.get(component) ?? []), name]);
+  }
+
+  const undeclared = [...byGlyph.values()]
+    .filter((names) => names.length > 1)
+    .filter(([a, b]) => SHARED_GLYPHS[a] !== b && SHARED_GLYPHS[b] !== a)
+    .map((names) => names.join(" + "));
+
+  expect(
+    undeclared,
+    "these names are one picture wearing two meanings — give one its own glyph, " +
+      "or declare the pair in SHARED_GLYPHS with a reason",
+  ).toEqual([]);
+
+  // A stale entry in SHARED_GLYPHS would silently license a real duplicate later.
+  for (const [a, b] of Object.entries(SHARED_GLYPHS)) {
+    expect(ICON_MAP[a], `SHARED_GLYPHS names ${a}, which isn't in the map`).toBeTruthy();
+    expect(ICON_MAP[b], `SHARED_GLYPHS names ${b}, which isn't in the map`).toBeTruthy();
+    expect(ICON_MAP[a], `${a} and ${b} no longer share a glyph — drop the entry`).toBe(ICON_MAP[b]);
+  }
 });
 
 test("every mapped icon is actually used", () => {

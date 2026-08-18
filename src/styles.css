@@ -743,6 +743,7 @@ body {
   /* The menu is taller than a 900px window and had no scroll, so its last group
      — Open another PDF, Close document — was simply cut off and unreachable. */
   max-height: calc(100vh - 84px);
+  max-height: calc(100svh - 84px);
   overflow-y: auto;
   overscroll-behavior: contain;
 }
@@ -1877,8 +1878,12 @@ body {
      on phones to save room. */
   .appbar__download { padding: 0; width: 44px; }
   .appbar__download span { display: none; }
-  /* 7 controls at 48px plus gaps needs every pixel on a 360px phone. */
-  .appbar { padding: 0 4px; gap: 0; }
+  /* The 14px left inset exists to sit the wordmark off the edge; the wordmark is
+     hidden here, so an icon-first bar wants the same 8px as the right side — and
+     at 360px that inset is exactly what decides whether the row fits. Measured:
+     `gap: 2px` costs nothing (the flex spacer absorbs it), 3px costs 3, 4px
+     overflows. So the gap stays as designed and only the inset changes. */
+  .appbar { padding-left: 8px; }
   .appbar__name { display: none; }
   .appbar__changes { display: none; }
   /* Without its wordmark the brand is just the 28px logo, which would leave

@@ -35,11 +35,12 @@ function barMetrics(page: Page) {
 test.describe("app bar", () => {
   // 360px is the narrowest mainstream phone; every control has to fit inside it,
   // because the row's only shrinkable member was the primary action and *all* of
-  // the overflow came out of it — Download collapsed to a 15px sliver of a pill,
-  // still clickable, no longer readable as a button, and far under any touch
-  // minimum. `flex: none` alone would just have clipped the overflow menu
-  // instead, so the fix was to size the row to its contents (the theme control
-  // moved into that menu, where the other preferences already live).
+  // the overflow came out of it. Reproduced against the previous code: Download
+  // measured 14×44 at 390px and 0×44 at 360px, where the row overflowed by 8px
+  // anyway — a primary action under WCAG 2.5.8's 24×24 minimum, then absent.
+  // `flex: none` alone would only have moved the clipping onto the overflow menu,
+  // so the fix was to size the row to its contents (the theme control went into
+  // that menu, where the other preferences already live).
   for (const width of [360, 390, 430]) {
     test(`fits its controls at ${width}px, primary action at full size`, async ({ browser }) => {
       const ctx = await browser.newContext({

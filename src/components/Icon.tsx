@@ -24,7 +24,7 @@ import {
   FilePlus,
   FileText,
   Highlighter,
-  History,
+  FileClock,
   Image as ImageIcon,
   Images,
   LayoutGrid,
@@ -39,7 +39,6 @@ import {
   Palette,
   PanelLeftClose,
   PanelLeftOpen,
-  Pen,
   PenLine,
   Pencil,
   Plus,
@@ -54,6 +53,7 @@ import {
   SlidersHorizontal,
   Slash,
   Square,
+  SquarePen,
   Stamp,
   StickyNote,
   Sun,
@@ -91,6 +91,10 @@ interface Props {
  */
 const MAP: Record<string, LucideIcon> = {
   // ---- brand ----
+  /* `PenLine` is `Pencil` without the tip stroke, so the logo *is* another pencil.
+     Left as it is on purpose: it renders inside a filled brand chip at the far
+     left, never adjacent to the dock's Draw tool, and a pen is what this product
+     is. Noted rather than pretended away. */
   brand: PenLine,
 
   // ---- tools (the dock) ----
@@ -105,7 +109,12 @@ const MAP: Record<string, LucideIcon> = {
 
   // ---- draw sub-tools ----
   highlighter: Highlighter,
-  pen: Pen,
+  /* No `pen` key: the Pen sub-tool renders `draw_tool`. Lucide's `Pen` and
+     `Pencil` are the *same* body path — `Pencil` is `Pen` plus a 4px tip stroke —
+     so at 20px they are one picture, and the drawbar sits directly under the dock
+     where both would show at once. One glyph for "freehand pen stroke", used for
+     the family and for the member that is its default, says something true;
+     two indistinguishable glyphs claim a difference that isn't there. */
   rectangle: Square,
   /** A diagonal stroke. `Minus` is the decrement/zoom-out glyph, not a shape. */
   line_tool: Slash,
@@ -124,8 +133,10 @@ const MAP: Record<string, LucideIcon> = {
   content_copy: Copy,
   /** Appearance (colour / font), as opposed to editing the content itself. */
   palette: Palette,
-  /** Edit the content of the selected thing. */
-  edit: Pencil,
+  /** Edit the content of the selected thing. A pencil *on a surface* — a bare
+   * pencil is `draw_tool`, and `SelectionBar` sits over the canvas with the dock
+   * still showing, so the two were on screen together as the same drawing. */
+  edit: SquarePen,
 
   // ---- files in & out ----
   upload_file: Upload,
@@ -152,8 +163,10 @@ const MAP: Record<string, LucideIcon> = {
   certificate: BadgeCheck,
   /** Session kept on this device. */
   save_local: Save,
-  /** Bring a previous session back. */
-  restore: History,
+  /** Bring a previous session back. `History` was the obvious pick and the wrong
+   * one: it is `RotateCcw` — the `reset` glyph — with a clock hand added, same arc,
+   * same arrowhead. A document with a clock says "the file you had, earlier". */
+  restore: FileClock,
 
   // ---- chrome ----
   more_vert: MoreVertical,
@@ -198,7 +211,26 @@ const MAP: Record<string, LucideIcon> = {
  * `aria-pressed`. A prop that can only make things worse is not worth honouring. */
 const FILLED = new Set(["redact_tool"]);
 
-/** Every semantic name this app can draw. Exported for the integrity spec. */
+/**
+ * Semantic names that deliberately share one glyph, and why.
+ *
+ * Sharing is not automatically wrong — but it has to be a decision, not an
+ * accident, which is why `icons.spec.ts` fails on any pair that isn't listed here.
+ * That check exists because de-duplicating this map *introduced* a duplicate:
+ * `edit` and `draw_tool` were both `Pencil`, on screen together, which is the
+ * fault the whole exercise was about.
+ */
+export const SHARED_GLYPHS: Record<string, string> = {
+  // A shape tool draws an outlined rectangle; a redaction is a solid black box.
+  // Same rectangle, and the fill is the difference — which is the real semantics,
+  // not a workaround. `FILLED` is what keeps them apart on screen.
+  rectangle: "redact_tool",
+};
+
+/** The map itself, for the integrity spec — names *and* the glyph each resolves to. */
+export const ICON_MAP: Readonly<Record<string, LucideIcon>> = MAP;
+
+/** Every semantic name this app can draw. */
 export const ICON_NAMES = Object.keys(MAP);
 
 /** Render a Lucide icon by the app's semantic name. */

@@ -52,7 +52,7 @@ export function PageNav({ bytes, pageCount, onClose }: Props) {
   };
 
   return (
-    <nav className="pagenav" aria-label="Pages">
+    <nav id="page-rail" className="pagenav" aria-label="Pages">
       <div className="pagenav__head">
         <span className="pagenav__title title-small">Pages</span>
         <span className="pagenav__count label-medium">{pageCount}</span>

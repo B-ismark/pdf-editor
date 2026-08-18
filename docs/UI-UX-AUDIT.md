@@ -734,15 +734,30 @@ looks like a bug in the code that causes it.
 
 Eight controls at 44–48px cannot fit a 390px app bar. Every `.icon-btn` carried
 `flex: none`; the filled **Download** button did not — so *all* of the overflow
-came out of the one control that mattered most. Measured at 390px: a 15×37px
-sliver of a pill, still clickable, no longer readable as a button, and well under
-every touch minimum in the guidelines this project already follows.
+came out of the one control that mattered most. Reproduced against the previous
+code and measured off the DOM:
+
+| Viewport | Download button | App bar |
+| --- | --- | --- |
+| 430px | 44 × 44 | fits |
+| 390px | **14 × 44** | fits, by eating the button |
+| 360px | **0 × 44** | still overflows by 8px |
+
+So the primary action was crushed to a 14px-wide pill on a 390px phone and to
+*nothing at all* on a 360px one — under WCAG 2.5.8's 24×24 minimum in the first
+case and absent in the second, while the row overflowed anyway. (Only the width
+ever collapsed; the pill kept its 44px height throughout, which is what made it
+read as a sliver rather than as a missing control.)
 
 **Fixed** by sizing the row to its contents rather than letting it eat itself: the
 theme control moved into the overflow menu (below), and `.appbar__download` got
-`flex: none` so it can never be the thing that gives. `tests/shell.spec.ts`
-measures `scrollWidth`, the last control's right edge, and the Download button's
-box at 360/390/430px — adding a ninth control fails the 360px case.
+`flex: none` so it can never be the thing that gives. The compact override is one
+property — `padding-left: 8px`, dropping the 14px inset that exists to sit the
+wordmark off the edge, which is hidden at this width anyway. Measured before
+choosing it: `gap: 2px` (the designed value) costs nothing, because the flex
+spacer absorbs it; 3px costs 3px; 4px overflows. `tests/shell.spec.ts` measures
+`scrollWidth`, the last control's right edge, and the Download button's box at
+360/390/430px — adding a ninth control fails the 360px case.
 
 ## S-2 — The theme toggle sat in the app bar, after the overflow menu
 
@@ -818,10 +833,31 @@ it did nothing at all.
 **Fixed:** every meaning has its own key and its own glyph; keys are named for
 what they mean rather than which picture they are; the dead `filled` prop is gone
 (the active tool is already stated by the dock's background and `aria-pressed`).
-`tests/icons.spec.ts` fails if any `name=` in `src/` isn't mapped, and if any
-mapped name is never used. The command palette's hand-written second copy of the
-tool list — which had drifted to icon names the dock no longer used — now derives
-from `TOOLS`.
+The command palette's hand-written second copy of the tool list — which had
+drifted to icon names the dock no longer used — now derives from `TOOLS`.
+
+**And the first pass at this introduced a duplicate of its own**, which is worth
+recording because it shows what reasoning about names can't catch. Rewriting the
+map produced `edit: Pencil` for the selection bar's *Edit* button and
+`draw_tool: Pencil` for the dock — the same component, and the selection bar
+floats over the canvas with the dock still showing, so they were on screen
+together. Worse, Lucide's `Pen` and `Pencil` are the *same body path*, differing
+by one 4px tip stroke, and `PenLine` is that body plus an underline: three
+distinct components that are one picture at 20px, and the map had all three.
+
+Two things came out of that. `tests/icons.spec.ts` now fails when two names
+resolve to the same component unless the pair is declared in `SHARED_GLYPHS` with
+a reason (`rectangle`/`redact_tool` are both `Square`, and the fill *is* the
+semantics). And the near-identical-path case, which nothing mechanical catches,
+was found by rendering all 64 mapped glyphs onto one sheet and looking at them —
+the step to repeat when adding to this map. `edit` became `SquarePen`, the Pen
+sub-tool now renders `draw_tool` (one glyph for "freehand pen stroke", used for
+the family and for the member that is its default), and the brand's pencil is
+left alone deliberately: it sits in a filled brand chip at the far left, never
+beside the dock.
+
+Similarly `restore` started as `History`, which is `RotateCcw` — the `reset`
+glyph — with a clock hand added. It is `FileClock` now: the file you had, earlier.
 
 ## S-6 — The page rail spent its width on everything except the page
 

@@ -282,15 +282,24 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   icon is a *reused* one: `RotateCw` once stood for rotating a page, restoring a
   session, saving one, and resetting a style, and `Shrink` stood for "compress"
   *and* for the switch that turns compression off. Add a key per meaning, name it
-  for the meaning rather than the picture, and let `icons.spec.ts` catch both
-  failure modes. If a call site needs a tool's icon, take it from `TOOLS` — the
-  command palette's hand-written copy of that list had already drifted.
+  for the meaning rather than the picture, and let `icons.spec.ts` catch the three
+  failure modes it can see: unmapped names, dead keys, and two names resolving to
+  the same component without an entry in `SHARED_GLYPHS`. If a call site needs a
+  tool's icon, take it from `TOOLS` — the command palette's hand-written copy of
+  that list had already drifted.
+  **What no spec catches: glyphs that are different components and the same
+  picture.** Lucide's `Pen` and `Pencil` share one body path (a 4px tip stroke
+  apart) and `PenLine` adds an underline to it — three components, one drawing at
+  20px, and the first rewrite of this map used all three plus `Pencil` twice.
+  Render every mapped glyph onto one sheet and look at it before you're done;
+  reading the map will not show you this.
 - **The app bar has a width budget, and the primary action never pays it.** Eight
   48px controls do not fit a 390px phone. `.appbar__download` carries `flex: none`
   like every `.icon-btn` around it, because when it didn't, all of the overflow
-  came out of it and Download became a 15px sliver. Anything new in that row has
-  to displace something (preferences belong in the ⋯ menu), and `shell.spec.ts`
-  fails at 360px if the row can't fit itself.
+  came out of it: Download measured 14×44 at 390px and 0×44 at 360px, where the
+  row overflowed regardless. Anything new in that row has to displace something
+  (preferences belong in the ⋯ menu), and `shell.spec.ts` fails at 360px if the
+  row can't fit itself.
 - **The Inspector has two named tabs, not one surface with two moods.** It used to
   swap between the document actions and the selection's properties with nothing to
   say it had, so clicking the page made Compress/Watermark/OCR vanish with no way

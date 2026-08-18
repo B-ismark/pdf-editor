@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Icon } from "./Icon";
+import { plural } from "../plural";
 import { Thumbnail } from "./Thumbnail";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useModal } from "../hooks/useModal";
@@ -115,7 +116,7 @@ export function Organize({
       const bytes = await buildFromPlan(plan, sources);
       const ab = new ArrayBuffer(bytes.byteLength);
       new Uint8Array(ab).set(bytes);
-      onApply(ab, `${plan.length === 1 ? "1 page" : `${plan.length} pages`} after organising`);
+      onApply(ab, `${plural(plan.length, "page")} after organising`);
     } catch {
       setErr("Couldn't rebuild the document. Please try again.");
     } finally {

@@ -11,7 +11,7 @@ interface Props {
 
 const SUBTOOLS: { key: AnnotationTool; icon: string; label: string }[] = [
   { key: "highlight", icon: "highlighter", label: "Highlight" },
-  { key: "pen", icon: "pen", label: "Pen" },
+  { key: "pen", icon: "draw_tool", label: "Pen" },
   { key: "rect", icon: "rectangle", label: "Rectangle" },
   { key: "line", icon: "line_tool", label: "Line" },
   { key: "arrow", icon: "arrow_tool", label: "Arrow" },
