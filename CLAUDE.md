@@ -59,8 +59,10 @@ type-checking can't see, and each exists because it broke once:
   it;
 - `baseline.spec.ts` — an edited fragment's glyphs sit on the baseline the
   exporter writes to, over five faces/sizes at two fit-to-width scales;
-- `backdrop.spec.ts` — an edit inside a coloured panel keeps the panel's colour,
-  on screen and in the exported bytes, and one on paper stays white;
+- `colors.spec.ts` — an edit inside a coloured panel keeps the panel's colour and
+  the text's own colour, on screen and in the exported bytes, while black text on
+  paper stays exactly black (the two fixture panels fail in opposite directions,
+  so neither fix can pass for the other);
 - `find.spec.ts` — the active match is on screen and clear of the find bar;
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock.
 
@@ -146,22 +148,42 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   the probe is only valid for the line-height the element actually gets (hence
   `FRAGMENT_LINE_HEIGHT` / `TEXTBOX_LINE_HEIGHT` being passed in), and the
   measured element must keep zero *vertical* padding.
-- **The cover behind an edit is sampled, not white.** A non-redacted page is
-  copied verbatim, so the cover rectangle that hides the original glyphs is the
-  only thing an edit can damage — and hardcoded white punched a hole through
-  every coloured pill, cell, and banner it landed in. `pdf/backdrop.ts` samples
-  the flat colour and, crucially, reports *nothing* when no flat colour fits, so
-  callers fall back to white. Two things there are load-bearing: it measures the
-  glyph box **and** a box inflated by 0.3em and requires them to agree, because
-  the most common colour of the glyph box alone is the *text's* colour on any
-  fragment whose ink covers more than half of it — and a cover in the text's own
-  colour makes the replacement invisible, which is worse than a white box. And
-  the store is fed by `offerPageCanvas` from the raster the user is already
-  looking at, which is what keeps the on-screen cover and the exported cover the
-  same colour: one cache, one algorithm, and for any page you can actually see a
-  disagreement on, one measurement. Note the *text* colour is still not read
-  from the document (`resolveFragmentStyle` defaults to black), so an edit on a
-  dark panel comes back black.
+- **An edit's colours are sampled, not constants.** Two of them: the cover that
+  hides the original glyphs was hardcoded white (a hole through any coloured
+  pill, cell, or banner) and the replacement was drawn hardcoded black (white
+  text on a dark panel came back unreadable). Neither is in `PageData` —
+  `getTextContent()` reports no fill colour at all — so `pdf/fragmentColors.ts`
+  reads both off the raster, lazily per page, the way `fontInfo.ts` reads fonts.
+  The content stream *does* carry the colour operators, but nothing joins them to
+  text items: pdf.js splits and merges runs on its own terms, so matching them up
+  means re-running its text-state machine to recover each run's position. Four
+  things there are load-bearing:
+  - **The background comes from the glyph box's four corners.** The box as a
+    whole answers with the *text's* colour on any fragment whose ink covers more
+    than half of it — and a cover in the text's own colour makes the replacement
+    invisible, which is worse than a white box. A ring outside the box escapes a
+    tightly-fitting pill and returns whatever surrounds the pill.
+  - **Ink is gated on the em box in pixels, not the page scale.** Ink is the
+    colour furthest from the background, i.e. the glyph interior — *if* any pixel
+    is fully covered. Below ~8px of em, every pixel is a blend and the furthest
+    is a washed-out grey: measured on Helvetica black-on-white, 10pt at 0.76
+    px/unit reads `#5c5c5c` while 14pt at the same scale reads exact black. The
+    threshold is therefore per fragment (`MIN_INK_EM_PX`), and erring permissive
+    is the expensive direction — it redraws ordinary black text in grey on the
+    common document to serve the rare one. Declining leaves black, which is
+    where this started.
+  - **The store is fed by `offerPageCanvas`** from the raster the user is already
+    looking at, which is what keeps the on-screen colours and the exported ones
+    the same: one cache, one algorithm, and for any page you can actually see a
+    disagreement on, one measurement. The exporter rasterises a page itself only
+    when nobody ever looked at it. The corollary is that a page first painted at
+    a low scale keeps that reading — sub-12px-em type on a narrow low-dpi window
+    exports black even after zooming in. Re-sampling on a better raster would fix
+    that at the cost of colours changing under the user, and was not done.
+  - **`resolveFragmentStyle` takes the ink as `baseColor`**, so the overlay, the
+    properties panel, and both export paths cannot disagree about what colour the
+    text is. A memo that reads it needs it as a dependency (`activeStyle` in
+    `App.tsx`) — it arrives after the page is sampled.
 - **Anything that reaches the output file is validated at the exporter**, not
   only in the UI: link URLs go through `safeLinkUrl` (`pdf/url.ts`, an
   allow-list) and copied annotation actions through `sanitize.ts` (also an

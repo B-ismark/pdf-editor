@@ -51,21 +51,42 @@ export const TYPESET_RUNS = [
   { text: "Hxplg-Bold-20", x: 30, baseline: 190, size: 20, font: StandardFonts.HelveticaBold },
 ];
 
-/** A solid-colour panel in `typeset` with white text on it — an edit here must
- * not punch a white hole through the panel. */
-export const TYPESET_PANEL = {
-  x: 24,
-  y: 60,
-  width: 260,
-  height: 56,
-  /** Fill colour, 0-255 per channel, as the raster should show it. */
-  rgb: [26, 127, 55] as [number, number, number],
-  /** One token: pdf.js breaks a text item at spacing changes, so a phrase with
-   * spaces arrives as several fragments and no single overlay carries it. */
-  text: "ON-A-PANEL",
-  textX: 44,
-  baseline: 80,
-  size: 18,
+/**
+ * Two solid-colour panels in `typeset`, one with dark text and one with light.
+ *
+ * They test opposite failures of the same cover. On `darkText`, any near-white
+ * pixel is a hole the cover punched through the panel. On `lightText`, any dark
+ * pixel is an edit redrawn in a colour the document never used — the ink default
+ * was black, so light-on-dark text came back black and unreadable.
+ */
+export const TYPESET_PANELS = {
+  darkText: {
+    x: 24,
+    y: 60,
+    width: 260,
+    height: 56,
+    /** Fill colour, 0-255 per channel, as the raster should show it. */
+    rgb: [26, 127, 55] as [number, number, number],
+    /** One token: pdf.js breaks a text item at spacing changes, so a phrase with
+     * spaces arrives as several fragments and no single overlay carries it. */
+    text: "ON-A-PANEL",
+    textRgb: [0, 0, 0] as [number, number, number],
+    textX: 44,
+    baseline: 80,
+    size: 18,
+  },
+  lightText: {
+    x: 24,
+    y: 126,
+    width: 260,
+    height: 40,
+    rgb: [26, 127, 55] as [number, number, number],
+    text: "WHITE-ON-PANEL",
+    textRgb: [255, 255, 255] as [number, number, number],
+    textX: 44,
+    baseline: 138,
+    size: 14,
+  },
 };
 
 /** Text repeated on every page of `sample`/`long`. */
@@ -138,23 +159,25 @@ async function typesetPdf(): Promise<Uint8Array> {
       font: await doc.embedFont(run.font),
     });
   }
-  const [r, g, b] = TYPESET_PANEL.rgb;
-  page.drawRectangle({
-    x: TYPESET_PANEL.x,
-    y: TYPESET_PANEL.y,
-    width: TYPESET_PANEL.width,
-    height: TYPESET_PANEL.height,
-    color: rgb(r / 255, g / 255, b / 255),
-  });
-  // Black on the panel, not white: that makes any near-white pixel inside the
-  // panel in an exported copy a hole punched by the cover, and nothing else.
-  page.drawText(TYPESET_PANEL.text, {
-    x: TYPESET_PANEL.textX,
-    y: TYPESET_PANEL.baseline,
-    size: TYPESET_PANEL.size,
-    font: await doc.embedFont(StandardFonts.HelveticaBold),
-    color: rgb(0, 0, 0),
-  });
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  for (const panel of Object.values(TYPESET_PANELS)) {
+    const [r, g, b] = panel.rgb;
+    page.drawRectangle({
+      x: panel.x,
+      y: panel.y,
+      width: panel.width,
+      height: panel.height,
+      color: rgb(r / 255, g / 255, b / 255),
+    });
+    const [tr, tg, tb] = panel.textRgb;
+    page.drawText(panel.text, {
+      x: panel.textX,
+      y: panel.baseline,
+      size: panel.size,
+      font: bold,
+      color: rgb(tr / 255, tg / 255, tb / 255),
+    });
+  }
   return doc.save();
 }
 
