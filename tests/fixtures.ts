@@ -60,7 +60,9 @@ export const TYPESET_PANEL = {
   height: 56,
   /** Fill colour, 0-255 per channel, as the raster should show it. */
   rgb: [26, 127, 55] as [number, number, number],
-  text: "ON A PANEL",
+  /** One token: pdf.js breaks a text item at spacing changes, so a phrase with
+   * spaces arrives as several fragments and no single overlay carries it. */
+  text: "ON-A-PANEL",
   textX: 44,
   baseline: 80,
   size: 18,
@@ -144,12 +146,14 @@ async function typesetPdf(): Promise<Uint8Array> {
     height: TYPESET_PANEL.height,
     color: rgb(r / 255, g / 255, b / 255),
   });
+  // Black on the panel, not white: that makes any near-white pixel inside the
+  // panel in an exported copy a hole punched by the cover, and nothing else.
   page.drawText(TYPESET_PANEL.text, {
     x: TYPESET_PANEL.textX,
     y: TYPESET_PANEL.baseline,
     size: TYPESET_PANEL.size,
     font: await doc.embedFont(StandardFonts.HelveticaBold),
-    color: rgb(1, 1, 1),
+    color: rgb(0, 0, 0),
   });
   return doc.save();
 }

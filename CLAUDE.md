@@ -57,6 +57,10 @@ type-checking can't see, and each exists because it broke once:
 - `font.spec.ts` — an edited fragment keeps the page's typeface and weight (a
   sans document's edits are not redrawn in Times), and picking a font overrides
   it;
+- `baseline.spec.ts` — an edited fragment's glyphs sit on the baseline the
+  exporter writes to, over five faces/sizes at two fit-to-width scales;
+- `backdrop.spec.ts` — an edit inside a coloured panel keeps the panel's colour,
+  on screen and in the exported bytes, and one on paper stays white;
 - `find.spec.ts` — the active match is on screen and clear of the find bar;
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock.
 
@@ -128,6 +132,36 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   and they must not drift. When drawing with that face, take its weight/slant
   from the face too (`cssFont(..., face)`) — a bold face plus `font-weight:
   bold` gets synthesised bold on top of real bold.
+- **Overlays are positioned from the baseline, and the baseline is measured.**
+  A fragment's baseline is `transform[5]`, a text box's is `box.y`, and both
+  write paths draw at exactly that y — so the overlay has to land on it exactly
+  or the preview lies about the file. It is *not* `top = baseline - fontPx`: CSS
+  puts the baseline at `(lineHeight - (ascent + descent)) / 2 + ascent` from the
+  top of the line box, ~0.76–0.85em with `line-height: 1`. That off-by-a-metric
+  lifted every edit 0.15–0.24em, growing with zoom and differing per typeface,
+  for as long as the feature existed. `textBaseline.ts` probes the real layout
+  (a zero-size `inline-block` sits on its line's baseline) and caches per font
+  shorthand; `measureText`'s `fontBoundingBox*` are rounded to whole pixels and
+  leave ~0.75px on the table, which is why they aren't used. Two consequences:
+  the probe is only valid for the line-height the element actually gets (hence
+  `FRAGMENT_LINE_HEIGHT` / `TEXTBOX_LINE_HEIGHT` being passed in), and the
+  measured element must keep zero *vertical* padding.
+- **The cover behind an edit is sampled, not white.** A non-redacted page is
+  copied verbatim, so the cover rectangle that hides the original glyphs is the
+  only thing an edit can damage — and hardcoded white punched a hole through
+  every coloured pill, cell, and banner it landed in. `pdf/backdrop.ts` samples
+  the flat colour and, crucially, reports *nothing* when no flat colour fits, so
+  callers fall back to white. Two things there are load-bearing: it measures the
+  glyph box **and** a box inflated by 0.3em and requires them to agree, because
+  the most common colour of the glyph box alone is the *text's* colour on any
+  fragment whose ink covers more than half of it — and a cover in the text's own
+  colour makes the replacement invisible, which is worse than a white box. And
+  the store is fed by `offerPageCanvas` from the raster the user is already
+  looking at, which is what keeps the on-screen cover and the exported cover the
+  same colour: one cache, one algorithm, and for any page you can actually see a
+  disagreement on, one measurement. Note the *text* colour is still not read
+  from the document (`resolveFragmentStyle` defaults to black), so an edit on a
+  dark panel comes back black.
 - **Anything that reaches the output file is validated at the exporter**, not
   only in the UI: link URLs go through `safeLinkUrl` (`pdf/url.ts`, an
   allow-list) and copied annotation actions through `sanitize.ts` (also an

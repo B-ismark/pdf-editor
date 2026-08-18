@@ -3,6 +3,8 @@ import { renderPage, isRenderCancelled } from "../pdf/loader";
 import { useRenderWindow } from "../hooks/useRenderWindow";
 import { isFragmentModified, keepsSourceTypeface, resolveFragmentStyle } from "../pdf/style";
 import { usePageFonts } from "../hooks/usePageFonts";
+import { usePageBackdrops } from "../hooks/usePageBackdrops";
+import { offerPageCanvas } from "../pdf/backdrop";
 import type {
   Annotation,
   AnnotationTool,
@@ -137,6 +139,11 @@ function PageViewInner(props: Props) {
       handle.promise
         .then(() => {
           if (!cancelled) {
+            // Sample the colour behind each fragment off the raster we just
+            // painted, so an edit's cover matches the artwork underneath it
+            // instead of punching a white hole through it. Once per page, from
+            // the very pixels the user is looking at — see `pdf/backdrop.ts`.
+            offerPageCanvas(bytes, page, canvas);
             setPainted(true);
             setError(null);
           }
@@ -161,6 +168,8 @@ function PageViewInner(props: Props) {
   // unedited fragment is transparent anyway, so nothing visibly changes when
   // this lands.
   const pageFonts = usePageFonts(bytes, page.pageIndex, painted);
+  // The colour each fragment's cover should be, once the page has been sampled.
+  const backdrops = usePageBackdrops(bytes, page.pageIndex);
 
   const W = page.viewBox.width * scale;
   const Hpx = page.viewBox.height * scale;
@@ -375,6 +384,7 @@ function PageViewInner(props: Props) {
                 // the same test the exporter uses to decide whether to
                 // re-embed it.
                 face={keepsSourceTypeface(edit?.style ?? {}) ? source : null}
+                backdrop={backdrops.get(fragment.itemIndex)}
                 modified={modified}
                 selected={selected}
                 interactive={tool === "select"}

@@ -4,6 +4,7 @@ import { sanitizeDocument } from "./sanitize";
 import { safeLinkUrl } from "./url";
 import { createSourceFontEmbedder, type SourceFontEmbedder } from "./fontEmbed";
 import { NO_FONTS, readPageFonts, type PageFonts } from "./fontInfo";
+import { NO_BACKDROPS, readPageBackdrops, type PageBackdrops } from "./backdrop";
 import { loadJpegEncoder, type JpegEncoder } from "./jpeg";
 import { yieldToUI } from "./yield";
 import {
@@ -29,6 +30,21 @@ import type {
   TextStyle,
   WatermarkOptions,
 } from "./types";
+
+/**
+ * The colour an edited fragment's cover is painted in.
+ *
+ * White is the fallback, not the rule: a non-redacted page is copied verbatim
+ * and edits are drawn on top, so the cover rectangle was the only thing an edit
+ * damaged — and hardcoding it white punched a hole through every coloured pill,
+ * table cell, and banner it landed in. `pdf/backdrop.ts` samples the flat colour
+ * behind the glyphs and says nothing when no flat colour fits, which is exactly
+ * when white is as good an answer as any.
+ */
+function coverColor(backdrops: PageBackdrops, itemIndex: number) {
+  const c = hexToRgb(backdrops.get(itemIndex) ?? "#ffffff");
+  return rgb(c.r, c.g, c.b);
+}
 
 /** Pixels per PDF unit used when rasterising redacted pages (≈216 dpi). */
 const REDACT_SCALE = 3;
@@ -441,6 +457,13 @@ export async function exportPdf(
     // page's actual face) instead of a generic guess.
     const pageEdited = pageData.fragments.some((f) => isFragmentModified(f, edits[f.id]));
     const sourceFonts: PageFonts = pageEdited ? await readPageFonts(loaded.bytes, i) : NO_FONTS;
+    // ...and the colour behind each edited fragment, so covering the original
+    // glyphs doesn't cost the page its artwork. Usually already sampled from the
+    // raster the user was looking at; rasterises the page only if they never
+    // scrolled to it (a restored session exported straight away).
+    const backdrops: PageBackdrops = pageEdited
+      ? await readPageBackdrops(loaded.bytes, pageData)
+      : NO_BACKDROPS;
 
     // Both paths produce a finished PDFPage; page numbers, watermark, and link
     // annotations are then applied uniformly on top. `done` is the 1-based
@@ -453,7 +476,7 @@ export async function exportPdf(
     };
 
     if (needsRaster) {
-      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, await getJpegEncoder());
+      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, backdrops, pageBoxes, pageRedactions, pageAnnots, pageStamps, await getJpegEncoder());
       applyPageLayers(rasterPage);
       continue;
     }
@@ -489,7 +512,7 @@ export async function exportPdf(
         y: y - descent,
         width: Math.max(fragment.width, textWidth) + style.size * 0.1,
         height: style.size * 1.2,
-        color: rgb(1, 1, 1),
+        color: coverColor(backdrops, fragment.itemIndex),
       });
       const c = hexToRgb(style.color);
       page.drawText(text, { x, y, size: style.size, font, color: rgb(c.r, c.g, c.b) });
@@ -553,6 +576,7 @@ async function rasterisePage(
   pageIndex: number,
   edits: Edits,
   sourceFonts: PageFonts,
+  backdrops: PageBackdrops,
   boxes: TextBox[],
   redactions: Redaction[],
   annots: Annotation[],
@@ -610,7 +634,7 @@ async function rasterisePage(
     // Extra lines step downward from the baseline, so the cover has to grow with
     // them or the replacement text lands on top of un-covered original glyphs.
     const coverHeight = style.size * 1.2 + (lines.length - 1) * style.size * TEXTBOX_LINE_HEIGHT;
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = backdrops.get(fragment.itemIndex) ?? "#ffffff";
     ctx.fillRect(
       (x - style.size * 0.05) * S,
       (H - (y + style.size * 0.98)) * S,

@@ -22,6 +22,10 @@ interface Props {
   /** The document's own font, when the edit keeps it: rendering with this is
    * what makes replaced text match the page instead of approximating it. */
   face: FragmentFont | null;
+  /** The flat colour sampled from behind these glyphs, when there is one. The
+   * cover is painted in it so an edit inside a coloured pill, cell, or banner
+   * doesn't punch a white hole through the artwork. */
+  backdrop?: string;
   /** Whether the fragment differs from its original (text or style). */
   modified: boolean;
   selected: boolean;
@@ -52,6 +56,7 @@ function EditableFragmentImpl({
   value,
   style,
   face,
+  backdrop,
   modified,
   selected,
   interactive,
@@ -107,6 +112,9 @@ function EditableFragmentImpl({
 
   // Cover sized to the ORIGINAL glyph box so the rasterised original text is
   // fully hidden (no peeking / duplication), independent of the new text.
+  // White only until the page has been sampled (or when no flat colour fits the
+  // area): that's where this started, and it's right on white paper.
+  const coverColor = backdrop ?? "#ffffff";
   const origFontPx = Math.hypot(c, d) * scale;
   const cover = {
     left: e * scale - 1.5,
@@ -126,6 +134,7 @@ function EditableFragmentImpl({
             top: `${cover.top}px`,
             width: `${cover.width}px`,
             height: `${cover.height}px`,
+            background: coverColor,
           }}
         />
       )}
@@ -149,7 +158,7 @@ function EditableFragmentImpl({
           fontWeight,
           fontStyle,
           color: show ? style.color : "transparent",
-          background: show ? "#fff" : undefined,
+          background: show ? coverColor : undefined,
           lineHeight: FRAGMENT_LINE_HEIGHT,
           pointerEvents: interactive ? "auto" : "none",
         }}
