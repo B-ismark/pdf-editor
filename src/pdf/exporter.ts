@@ -4,7 +4,13 @@ import { sanitizeDocument } from "./sanitize";
 import { safeLinkUrl } from "./url";
 import { createSourceFontEmbedder, type SourceFontEmbedder } from "./fontEmbed";
 import { NO_FONTS, readPageFonts, type PageFonts } from "./fontInfo";
-import { NO_COLORS, readPageColors, type PageColors } from "./fragmentColors";
+import {
+  NO_COLORS,
+  offerPageCanvas,
+  peekPageColors,
+  readPageColors,
+  type PageColors,
+} from "./fragmentColors";
 import { loadJpegEncoder, type JpegEncoder } from "./jpeg";
 import { yieldToUI } from "./yield";
 import {
@@ -462,9 +468,10 @@ export async function exportPdf(
     // isn't redrawn in a colour the document never used. Usually already
     // sampled from the raster the user was looking at; rasterises the page only
     // if they never scrolled to it (a restored session exported straight away).
-    const pageColors: PageColors = pageEdited
-      ? await readPageColors(loaded.bytes, pageData)
-      : NO_COLORS;
+    // The raster path renders this page itself and samples from that raster
+    // (below), so only the vector path needs to ask for one here.
+    const pageColors: PageColors =
+      pageEdited && !needsRaster ? await readPageColors(loaded.bytes, pageData) : NO_COLORS;
 
     // Both paths produce a finished PDFPage; page numbers, watermark, and link
     // annotations are then applied uniformly on top. `done` is the 1-based
@@ -477,7 +484,7 @@ export async function exportPdf(
     };
 
     if (needsRaster) {
-      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageColors, pageBoxes, pageRedactions, pageAnnots, pageStamps, await getJpegEncoder());
+      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, await getJpegEncoder());
       applyPageLayers(rasterPage);
       continue;
     }
@@ -582,7 +589,6 @@ async function rasterisePage(
   pageIndex: number,
   edits: Edits,
   sourceFonts: PageFonts,
-  pageColors: PageColors,
   boxes: TextBox[],
   redactions: Redaction[],
   annots: Annotation[],
@@ -595,6 +601,13 @@ async function rasterisePage(
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not get 2D canvas context");
   const S = REDACT_SCALE;
+
+  // Read this page's colours off this raster, while it's still clean — it's
+  // about to be drawn on, and it's a better one than `readPageColors` would
+  // rasterise for itself. A no-op if the page was already sampled on screen,
+  // which keeps the on-screen and exported covers identical.
+  offerPageCanvas(loaded.bytes, pageData, canvas);
+  const pageColors = peekPageColors(loaded.bytes, pageIndex);
 
   const drawText = (
     text: string,

@@ -137,8 +137,15 @@ function publish(bytes: ArrayBuffer, pageIndex: number, found: PageColors): Page
  * This is what keeps the overlay and the exported file in agreement. Both read
  * this one cache, and a page the user has looked at fills it from the very
  * raster they were looking at — so for every page where a disagreement could be
- * noticed, there is only one measurement to disagree with. Cheap enough to be
- * unconditional: no extra render, one `getImageData`, once per page.
+ * noticed, there is only one measurement to disagree with.
+ *
+ * Not free, and therefore not called on every paint: one full-page
+ * `getImageData` plus the per-fragment tallies measured 18ms median on a 1.1M px
+ * canvas and 63ms median (146ms worst) on a 4.6M px one — per page, on the main
+ * thread. Paying that while scrolling, for pages nobody edits, is several
+ * dropped frames each to serve a case that may never arrive, so `PageView` calls
+ * this only once a fragment on the page is actually shown. Callers may call it
+ * freely: it returns immediately if the page is already sampled.
  */
 export function offerPageCanvas(
   bytes: ArrayBuffer,
@@ -205,6 +212,15 @@ export function sampleColors(
   pageData: PageData,
   scale: number,
 ): PageColors | null {
+  // A rotated page's raster is rotated but its fragment transforms are not, and
+  // nothing in this app reconciles the two. Sampling one reads whatever happens
+  // to be at the mis-mapped coordinates and reports it with full confidence: on
+  // a /Rotate 90 or 180 test page, black text on white paper came back with a
+  // *black* background, so an edit would have painted a black rectangle over
+  // white paper and drawn black text on it. Declining leaves white and black,
+  // which is wrong in the same way the overlay position is already wrong there,
+  // and no worse.
+  if (pageData.rotation !== 0) return null;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx || !canvas.width || !canvas.height) return null;
   let image: ImageData;

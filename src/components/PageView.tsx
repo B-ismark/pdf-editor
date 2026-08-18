@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { renderPage, isRenderCancelled } from "../pdf/loader";
 import { useRenderWindow } from "../hooks/useRenderWindow";
 import { isFragmentModified, keepsSourceTypeface, resolveFragmentStyle } from "../pdf/style";
@@ -139,11 +139,6 @@ function PageViewInner(props: Props) {
       handle.promise
         .then(() => {
           if (!cancelled) {
-            // Read each fragment's background and ink off the raster we just
-            // painted, so an edit's cover matches the artwork underneath it and
-            // its text matches the text it replaces. Once per page, from the
-            // very pixels the user is looking at — see `pdf/fragmentColors.ts`.
-            offerPageCanvas(bytes, page, canvas);
             setPainted(true);
             setError(null);
           }
@@ -170,6 +165,23 @@ function PageViewInner(props: Props) {
   const pageFonts = usePageFonts(bytes, page.pageIndex, painted);
   // What each fragment sits on and is drawn in, once the page has been sampled.
   const pageColors = usePageColors(bytes, page.pageIndex);
+
+  // Only a *shown* fragment (selected or edited) needs those colours, and
+  // sampling costs a full-page `getImageData` — 18ms on a 1.1M px canvas, 63ms
+  // on a 4.6M px one. Doing it as each page painted spent that on every page
+  // scrolled past, for a case most of them never reach; doing it here spends it
+  // once, on the page being edited. In a layout effect so it lands before the
+  // frame that first paints the overlay, rather than a frame of white-and-black
+  // followed by a correction.
+  const anyShown = page.fragments.some(
+    (f) =>
+      isFragmentModified(f, edits[f.id]) ||
+      (selection?.kind === "fragment" && selection.id === f.id),
+  );
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (anyShown && painted && canvas) offerPageCanvas(bytes, page, canvas);
+  }, [anyShown, painted, bytes, page]);
 
   const W = page.viewBox.width * scale;
   const Hpx = page.viewBox.height * scale;

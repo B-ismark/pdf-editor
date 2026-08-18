@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TYPESET_PAGE, TYPESET_PANELS, fixtures } from "./fixtures";
+import { ROTATED_TEXT, TYPESET_PAGE, TYPESET_PANELS, fixtures } from "./fixtures";
 import { expectClean, open, pageTexts, watch } from "./helpers";
 
 /**
@@ -140,5 +140,68 @@ test("an exported edit keeps the panel and the text colour", async ({ page }) =>
   expect(after.dark.fill).toBeGreaterThan(after.dark.total * 0.5);
   expect(after.light.dark, "the edit was redrawn in black on a dark panel").toBe(0);
   expect(after.light.white, "the edit is there, in the document's own white").toBeGreaterThan(0);
+  expectClean(w);
+});
+
+test("a rotated page is left alone rather than sampled wrongly", async ({ page }) => {
+  // The raster is rotated and the fragment transforms are not, so reading pixels
+  // at a fragment's coordinates reads the wrong place. The fixture puts a solid
+  // black band exactly there: before this was gated, black-on-white text came
+  // back with a black background, and an edit would have painted a black
+  // rectangle over white paper with black text on it. White and black is wrong
+  // here in the same way the overlay's position already is — and no worse.
+  const w = watch(page);
+  const { rotated } = await fixtures();
+  await open(page, rotated);
+
+  const id = await editText(page, ROTATED_TEXT, "EDITED-ROTATED");
+  const el = page.locator(`.fragment[data-id="${id}"]`);
+  await expect(el).toHaveCSS("color", "rgb(0, 0, 0)");
+  await expect(el.locator("xpath=preceding-sibling::div[1]")).toHaveCSS(
+    "background-color",
+    "rgb(255, 255, 255)",
+  );
+  expectClean(w);
+});
+
+test("scrolling a document nobody edits samples nothing", async ({ page }) => {
+  // Sampling is a full-page `getImageData` plus per-fragment tallies: 18ms on a
+  // 1.1M px canvas, 63ms median and 146ms worst on a 4.6M px one. It used to run
+  // as each page painted, which spent that on every page scrolled past to serve
+  // a case most of them never reach. Now it waits for a fragment to be shown.
+  const w = watch(page);
+  const { sample } = await fixtures();
+  await open(page, sample);
+  const reads = await page.evaluate(() => {
+    let n = 0;
+    const proto = CanvasRenderingContext2D.prototype;
+    const real = proto.getImageData;
+    proto.getImageData = function (...args: unknown[]) {
+      n++;
+      // @ts-expect-error forwarding to the real implementation
+      return real.apply(this, args);
+    };
+    (window as unknown as { __reads: () => number }).__reads = () => n;
+    return true;
+  });
+  expect(reads).toBe(true);
+
+  for (let i = 0; i < 6; i++) {
+    await page.mouse.move(640, 500);
+    await page.mouse.wheel(0, 900);
+    await page.waitForTimeout(300);
+  }
+  const afterScroll = await page.evaluate(() =>
+    (window as unknown as { __reads: () => number }).__reads(),
+  );
+  expect(afterScroll, "scrolling read back pixels it did not need").toBe(0);
+
+  // Selecting one fragment does sample — once.
+  await page.locator(".fragment").first().click();
+  await page.waitForTimeout(400);
+  const afterSelect = await page.evaluate(() =>
+    (window as unknown as { __reads: () => number }).__reads(),
+  );
+  expect(afterSelect).toBeGreaterThan(0);
   expectClean(w);
 });

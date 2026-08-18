@@ -62,7 +62,8 @@ type-checking can't see, and each exists because it broke once:
 - `colors.spec.ts` — an edit inside a coloured panel keeps the panel's colour and
   the text's own colour, on screen and in the exported bytes, while black text on
   paper stays exactly black (the two fixture panels fail in opposite directions,
-  so neither fix can pass for the other);
+  so neither fix can pass for the other); a rotated page is declined rather than
+  sampled at mis-mapped coordinates; and scrolling reads back no pixels;
 - `find.spec.ts` — the active match is on screen and clear of the find bar;
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock.
 
@@ -176,10 +177,26 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
     looking at, which is what keeps the on-screen colours and the exported ones
     the same: one cache, one algorithm, and for any page you can actually see a
     disagreement on, one measurement. The exporter rasterises a page itself only
-    when nobody ever looked at it. The corollary is that a page first painted at
-    a low scale keeps that reading — sub-12px-em type on a narrow low-dpi window
-    exports black even after zooming in. Re-sampling on a better raster would fix
-    that at the cost of colours changing under the user, and was not done.
+    when nobody ever looked at it — and on the redaction path it offers its own
+    raster instead, since it has one. The corollary is that a page first painted
+    at a low scale keeps that reading: sub-12px-em type on a narrow low-dpi
+    window exports black even after zooming in. Re-sampling on a better raster
+    would fix that at the cost of colours changing under the user, and was not
+    done.
+  - **It is called when a fragment is shown, not when a page paints.** One
+    full-page `getImageData` plus the tallies is 18ms on a 1.1M px canvas and
+    63ms median / 146ms worst on a 4.6M px one, on the main thread. Sampling as
+    each page painted spent that on every page scrolled past to serve a case most
+    never reach; `PageView` now samples in a layout effect gated on a selected or
+    edited fragment (before the frame, so there's no white-then-correct flash).
+    `colors.spec.ts` asserts scrolling reads back no pixels at all.
+  - **A rotated page is refused outright.** `viewBox` is the rotated viewport but
+    a fragment's `transform` is unrotated text space, and nothing reconciles them
+    — so sampling reads mis-mapped coordinates and reports them with full
+    confidence. On a `/Rotate 90` test page, black-on-white text came back with a
+    *black* background, which would paint a black rectangle over white paper.
+    Rotated text is already not repositioned in the overlay; declining keeps the
+    colours wrong in the same way, and no worse.
   - **`resolveFragmentStyle` takes the ink as `baseColor`**, so the overlay, the
     properties panel, and both export paths cannot disagree about what colour the
     text is. A memo that reads it needs it as a dependency (`activeStyle` in

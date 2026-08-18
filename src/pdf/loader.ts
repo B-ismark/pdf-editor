@@ -91,6 +91,7 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
     pages.push({
       pageIndex: p,
       viewBox: { width: viewport.width, height: viewport.height },
+      rotation: ((page.rotate % 360) + 360) % 360,
       fragments,
       fields,
     });

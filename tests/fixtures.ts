@@ -1,4 +1,4 @@
-import { PDFDocument, PDFName, PDFRawStream, PDFRef, StandardFonts, rgb } from "pdf-lib";
+import { PDFDocument, PDFName, PDFRawStream, PDFRef, StandardFonts, degrees, rgb } from "pdf-lib";
 import { chromium } from "@playwright/test";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,9 +29,15 @@ export interface Fixtures {
   /** One page of known typesetting: several faces at known baselines, and text
    * on a solid-colour panel. */
   typeset: string;
+  /** `/Rotate 90`, with a solid black band where the *unrotated* coordinates of
+   * its black-on-white text land. */
+  rotated: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
+
+/** The single text run in the `rotated` fixture. */
+export const ROTATED_TEXT = "ROTATED-LABEL";
 
 /** Page size of the `typeset` fixture, in PDF units. */
 export const TYPESET_PAGE = { width: 460, height: 420 };
@@ -119,6 +125,7 @@ async function build(): Promise<Fixtures> {
     masked: write("masked.pdf", await maskedPdf()),
     brokenParms: write("broken-parms.pdf", await brokenParmsPdf()),
     typeset: write("typeset.pdf", await typesetPdf()),
+    rotated: write("rotated.pdf", await rotatedPdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -178,6 +185,30 @@ async function typesetPdf(): Promise<Uint8Array> {
       color: rgb(tr / 255, tg / 255, tb / 255),
     });
   }
+  return doc.save();
+}
+
+/**
+ * A rotated page laid out to catch a coordinate mix-up rather than survive one.
+ *
+ * `viewBox` is the rotated viewport but a fragment's `transform` is unrotated
+ * text space, so anything reading pixels at a fragment's coordinates reads the
+ * wrong place here. The black band sits exactly where the text's unrotated
+ * coordinates land, so a sampler that ignores `/Rotate` reports black as the
+ * background of black-on-white text — confidently, and with no way to tell.
+ */
+async function rotatedPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([400, 400]);
+  page.drawText(ROTATED_TEXT, {
+    x: 40,
+    y: 340,
+    size: 18,
+    font: await doc.embedFont(StandardFonts.HelveticaBold),
+    color: rgb(0, 0, 0),
+  });
+  page.drawRectangle({ x: 0, y: 0, width: 400, height: 300, color: rgb(0, 0, 0) });
+  page.setRotation(degrees(90));
   return doc.save();
 }
 

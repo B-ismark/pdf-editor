@@ -31,9 +31,22 @@
 /** Ascenders, descenders and a cap, so the probe line is a full-height one. */
 const PROBE_TEXT = "Hxljgp";
 
-/** Keyed by `${font shorthand}|${lineHeight}` — the shorthand carries the size,
- * so every size is measured rather than scaled from a reference. */
+/**
+ * Keyed by `${font shorthand}|${lineHeight}` — the shorthand carries the size,
+ * so every size is measured rather than scaled from one reference measurement.
+ * That's deliberate: the browser rounds a face's ascent and descent to whole
+ * pixels *per size*, so an offset scaled from a reference size misses the real
+ * layout by up to ~0.9px, while measuring at the size in question reproduces it
+ * including the rounding.
+ *
+ * The cost is that zooming mints a new key per distinct font size per step
+ * (~4 sizes and ~5ms of probing on a body-text page), so the cap keeps a long
+ * session of zooming from growing this without bound. Dropping the whole map is
+ * fine — every entry is re-derivable, and the pages on screen re-probe on their
+ * next render.
+ */
 const cache = new Map<string, number>();
+const MAX_CACHE = 512;
 
 let host: HTMLElement | null = null;
 
@@ -79,6 +92,7 @@ export function baselineOffset(font: string, lineHeight: number, fallbackPx: num
   el.remove();
 
   if (!Number.isFinite(offset) || offset <= 0) return fallbackPx;
+  if (cache.size >= MAX_CACHE) cache.clear();
   cache.set(key, offset);
   return offset;
 }
