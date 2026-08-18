@@ -96,7 +96,7 @@ export function LinkItem({ link, scale, pageHeight, pageWidth, selected, interac
       data-tip={link.url || "No URL yet"}
     >
       <span className="linkbox__chip">
-        <Icon name="link" size={12} />
+        <Icon name="link_tool" size={12} />
       </span>
       {selected &&
         interactive &&

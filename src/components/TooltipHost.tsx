@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 interface TipState {
   text: string;
@@ -16,6 +16,9 @@ const SHOW_DELAY = 110; // ms — deliberately fast
  */
 export function TooltipHost() {
   const [tip, setTip] = useState<TipState | null>(null);
+  /** Horizontal position after clamping to the viewport, when it differs. */
+  const [x, setX] = useState<number | null>(null);
+  const box = useRef<HTMLDivElement | null>(null);
   const timer = useRef<number | undefined>(undefined);
   const current = useRef<HTMLElement | null>(null);
 
@@ -24,6 +27,7 @@ export function TooltipHost() {
       window.clearTimeout(timer.current);
       current.current = null;
       setTip(null);
+      setX(null);
     };
 
     const show = (el: HTMLElement) => {
@@ -35,6 +39,7 @@ export function TooltipHost() {
         if (current.current !== el || !el.isConnected) return;
         const r = el.getBoundingClientRect();
         const above = r.top > 44;
+        setX(null);
         setTip({
           text,
           x: Math.round(r.left + r.width / 2),
@@ -72,12 +77,29 @@ export function TooltipHost() {
     };
   }, []);
 
+  // The bubble is centred on its anchor with `translate(-50%)` and was never
+  // clamped, so any control near an edge got a tooltip half off the screen — the
+  // collapsed Inspector tab sits *at* the right edge, and on a phone so does the
+  // overflow menu. Measured after layout and before paint, so the correction
+  // never shows.
+  useLayoutEffect(() => {
+    if (!tip || !box.current) return;
+    const half = box.current.offsetWidth / 2;
+    const margin = 8;
+    const lo = half + margin;
+    const hi = window.innerWidth - half - margin;
+    // A bubble wider than the window can't satisfy both edges; prefer the left.
+    const wanted = Math.round(hi < lo ? lo : Math.min(Math.max(tip.x, lo), hi));
+    setX(wanted === tip.x ? null : wanted);
+  }, [tip]);
+
   if (!tip) return null;
   return (
     <div
+      ref={box}
       className={`tooltip tooltip--${tip.placement}`}
       role="tooltip"
-      style={{ left: `${tip.x}px`, top: `${tip.y}px` }}
+      style={{ left: `${x ?? tip.x}px`, top: `${tip.y}px` }}
     >
       {tip.text}
     </div>

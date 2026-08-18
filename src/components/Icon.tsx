@@ -8,44 +8,53 @@ import {
   AlignVerticalJustifyEnd,
   AlignVerticalJustifyStart,
   ArrowUpRight,
+  BadgeCheck,
   Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
-  Combine,
   Command,
   Contrast,
   Copy,
   CopyPlus,
   Download,
-  Droplets,
   Eraser,
+  FileDown,
   FilePlus,
   FileText,
-  Hash,
   Highlighter,
-  Hourglass,
+  History,
   Image as ImageIcon,
-  Layers,
+  Images,
+  LayoutGrid,
   Link,
-  ListChecks,
+  ListOrdered,
+  Maximize2,
   Minus,
   Monitor,
   Moon,
   MousePointer2,
   MoreVertical,
-  PanelLeft,
-  Pencil,
+  Palette,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Pen,
   PenLine,
+  Pencil,
   Plus,
   Redo2,
+  RotateCcw,
   RotateCw,
+  Save,
   ScanText,
   Search,
   Shrink,
   Signature,
+  SlidersHorizontal,
+  Slash,
   Square,
+  Stamp,
   StickyNote,
   Sun,
   Trash2,
@@ -59,60 +68,116 @@ import {
 interface Props {
   name: string;
   size?: number;
-  filled?: boolean;
   className?: string;
 }
 
-/** Maps the app's semantic icon names to Lucide icon components. */
+/**
+ * Maps the app's semantic icon names to Lucide icon components.
+ *
+ * **One glyph, one meaning.** The map used to reuse a glyph across unrelated —
+ * sometimes opposite — actions, which is worse than a merely plain icon: it
+ * teaches the wrong thing. `RotateCw` stood for rotating a page *and* restoring
+ * a session *and* saving one *and* resetting a text style; `Shrink` stood for
+ * "compress the file" *and* for the switch that turns compression off; `Download`
+ * for the PDF and for a .txt sidecar; `Image` for importing one and for exporting
+ * the whole document as a set. Each pair now has its own glyph, and the key names
+ * say what the icon *means* rather than which picture it happens to be — that's
+ * what stopped `tag` (a hashtag) from standing in for "Page numbers".
+ *
+ * Adding a name here is the only way to get an icon: an unmapped name used to
+ * fall back to a bare `Square`, which is how the properties-panel tab shipped
+ * showing an empty box where its settings glyph belonged. `icons.spec.ts` now
+ * fails the build's test run if any `name=` in `src/` isn't a key below.
+ */
 const MAP: Record<string, LucideIcon> = {
-  stylus_note: PenLine,
-  arrow_selector_tool: MousePointer2,
-  text_fields: Type,
-  select: Square, // redact (rendered filled)
-  draw: Pencil,
-  signature: Signature,
+  // ---- brand ----
+  brand: PenLine,
+
+  // ---- tools (the dock) ----
+  select_tool: MousePointer2,
+  text_tool: Type,
+  draw_tool: Pencil,
+  sign_tool: Signature,
+  /** Redaction is a solid black box — the one icon that reads better filled. */
+  redact_tool: Square,
+  whiteout_tool: Eraser,
+  link_tool: Link,
+
+  // ---- draw sub-tools ----
   highlighter: Highlighter,
+  pen: Pen,
   rectangle: Square,
-  line_tool: Minus,
+  /** A diagonal stroke. `Minus` is the decrement/zoom-out glyph, not a shape. */
+  line_tool: Slash,
   arrow_tool: ArrowUpRight,
   sticky_note: StickyNote,
+
+  // ---- history & editing ----
   undo: Undo2,
   redo: Redo2,
-  download: Download,
+  /** Rotate a page clockwise. Distinct from `reset` and `restore`. */
+  rotate: RotateCw,
+  /** Revert a style to its default. */
+  reset: RotateCcw,
+  delete: Trash2,
+  duplicate: CopyPlus,
+  content_copy: Copy,
+  /** Appearance (colour / font), as opposed to editing the content itself. */
+  palette: Palette,
+  /** Edit the content of the selected thing. */
+  edit: Pencil,
+
+  // ---- files in & out ----
   upload_file: Upload,
+  /** The exported PDF — the primary output. */
+  download: Download,
+  /** A plain-text sidecar, not the PDF. */
+  text_download: FileDown,
   picture_as_pdf: FileText,
   note_add: FilePlus,
+  /** Bring one image in. */
   image: ImageIcon,
-  tag: Hash,
-  watermark: Droplets,
+  /** Send every page out as an image. */
+  images: Images,
+
+  // ---- document actions ----
+  organize: LayoutGrid,
+  page_numbers: ListOrdered,
+  watermark: Stamp,
+  compress: Shrink,
+  /** The inverse of `compress`: keep the redaction raster bit-exact. */
+  lossless: Maximize2,
+  scan_text: ScanText,
+  /** A cryptographic signature, not a drawn one. */
+  certificate: BadgeCheck,
+  /** Session kept on this device. */
+  save_local: Save,
+  /** Bring a previous session back. */
+  restore: History,
+
+  // ---- chrome ----
   more_vert: MoreVertical,
   close: X,
-  delete: Trash2,
   add: Plus,
   remove: Minus,
   chevron_left: ChevronLeft,
   chevron_right: ChevronRight,
+  chevron_up: ChevronUp,
+  chevron_down: ChevronDown,
   check: Check,
   contrast: Contrast,
-  rotate: RotateCw,
-  hourglass_top: Hourglass,
   light_mode: Sun,
   dark_mode: Moon,
   system_mode: Monitor,
   search: Search,
-  content_copy: Copy,
-  duplicate: CopyPlus,
   command: Command,
-  link: Link,
-  eraser: Eraser,
-  compress: Shrink,
-  combine: Combine,
-  layers: Layers,
-  scan_text: ScanText,
-  form: ListChecks,
-  panel: PanelLeft,
-  chevron_up: ChevronUp,
-  chevron_down: ChevronDown,
+  /** The properties/inspector panel. */
+  sliders: SlidersHorizontal,
+  /** Stateful pair for the page rail toggle, so the icon reports the outcome. */
+  panel_open: PanelLeftOpen,
+  panel_close: PanelLeftClose,
+
+  // ---- alignment (multi-select bar) ----
   align_left: AlignHorizontalJustifyStart,
   align_center_h: AlignHorizontalJustifyCenter,
   align_right: AlignHorizontalJustifyEnd,
@@ -123,8 +188,18 @@ const MAP: Record<string, LucideIcon> = {
   distribute_v: AlignVerticalDistributeCenter,
 };
 
-/** Icons that read best filled (e.g. the redaction "black box"). */
-const FILLED = new Set(["select"]);
+/** Icons that read best filled (e.g. the redaction "black box").
+ *
+ * There used to be a `filled` prop as well, declared in `Props`, passed by the
+ * tool dock as `filled={tool === t.key}` — and silently dropped by the component,
+ * which never destructured it. It is gone rather than wired up: Lucide glyphs are
+ * open stroke paths, so filling `Signature` or `MousePointer2` yields a blob, and
+ * the active tool is already stated twice over by the dock's `--on` background and
+ * `aria-pressed`. A prop that can only make things worse is not worth honouring. */
+const FILLED = new Set(["redact_tool"]);
+
+/** Every semantic name this app can draw. Exported for the integrity spec. */
+export const ICON_NAMES = Object.keys(MAP);
 
 /** Render a Lucide icon by the app's semantic name. */
 export function Icon({ name, size = 24, className }: Props) {

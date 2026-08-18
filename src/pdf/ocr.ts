@@ -189,7 +189,7 @@ export async function ocrPages(
 
   // Every page failed → this isn't "no text found", it's a real failure.
   if (pagesFailed === pages.length && pages.length > 0) {
-    throw new Error(`OCR failed on all ${pages.length} page(s).`);
+    throw new Error(`OCR failed on all ${pages.length === 1 ? "1 page" : `${pages.length} pages`}.`);
   }
   return {
     perPage,

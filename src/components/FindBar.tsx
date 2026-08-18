@@ -59,7 +59,7 @@ export function FindBar({ query, count, active, onQuery, onNext, onPrev, onRedac
         disabled={!count}
         data-tip="Redact every match"
       >
-        <Icon name="select" size={16} /> Redact all
+        <Icon name="redact_tool" size={16} /> Redact all
       </button>
       <button className="icon-btn icon-btn--sm" onClick={onClose} aria-label="Close find" data-tip="Close · Esc">
         <Icon name="close" size={18} />

@@ -54,11 +54,11 @@ export function SelectionBar({ selection, annotationKind, onEdit, onStyle, onDel
       <span className="selbar__sep" />
       {editable && (
         <button className="selbar__btn" onClick={onEdit}>
-          <Icon name="text_fields" size={18} /> Edit
+          <Icon name="edit" size={18} /> Edit
         </button>
       )}
       <button className="selbar__btn" onClick={onStyle}>
-        <Icon name="draw" size={18} /> {styleLabel}
+        <Icon name={kind === "link" ? "link_tool" : "palette"} size={18} /> {styleLabel}
       </button>
       <button className="selbar__btn selbar__btn--danger" onClick={onDelete} aria-label="Delete">
         <Icon name="delete" size={18} />

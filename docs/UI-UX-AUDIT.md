@@ -718,6 +718,168 @@ compete with the assistive one.
 
 ---
 
+# Part 3 — Shell review (2026-08-18)
+
+**Scope:** the chrome around the document — app bar, page rail, Inspector,
+overflow menu, tooltips, icon set. **Method:** the app driven in a real browser
+at 360 / 390 / 1280 / 1440px in both themes, with the *rendered geometry*
+measured rather than the source read. Every finding below passed type-checking,
+passed the existing 40-spec suite, and is plainly visible in a screenshot — which
+is the point: these are placement, identity and naming faults, and none of them
+looks like a bug in the code that causes it.
+
+## S-1 — The primary action was the only thing the app bar could sacrifice
+
+**Severity:** High. **Standard:** WCAG 2.5.8, Apple 44pt, Material 48dp.
+
+Eight controls at 44–48px cannot fit a 390px app bar. Every `.icon-btn` carried
+`flex: none`; the filled **Download** button did not — so *all* of the overflow
+came out of the one control that mattered most. Measured at 390px: a 15×37px
+sliver of a pill, still clickable, no longer readable as a button, and well under
+every touch minimum in the guidelines this project already follows.
+
+**Fixed** by sizing the row to its contents rather than letting it eat itself: the
+theme control moved into the overflow menu (below), and `.appbar__download` got
+`flex: none` so it can never be the thing that gives. `tests/shell.spec.ts`
+measures `scrollWidth`, the last control's right edge, and the Download button's
+box at 360/390/430px — adding a ninth control fails the 360px case.
+
+## S-2 — The theme toggle sat in the app bar, after the overflow menu
+
+**Severity:** Low (but it paid for S-1). **Standard:** Material top-app-bar
+guidance; overflow is conventionally last.
+
+A once-in-a-while preference held permanent space in the most valuable strip of
+the UI, at the same visual weight as the document actions, and *to the right of*
+the ⋯ button — so the control that is by convention last no longer was. **Fixed:**
+it's a row in the overflow menu beside the other preferences, showing its current
+value ("Theme · Dark"). It stays in the bar on the start screen, which has no menu.
+
+## S-3 — The overflow menu clipped its last group with no way to scroll
+
+**Severity:** High — two actions were unreachable. The menu is taller than an
+820–900px window and had no `max-height`, so **Open another PDF** and **Close
+document** were painted past the bottom edge. **Fixed:** `max-height` plus
+`overflow-y: auto`. Half its labels also wrapped to two lines at `min-width:
+200px`, turning a scannable list into uneven blocks; widened to 268px with
+`nowrap`. The spec asserts the menu ends inside the window, the last item can be
+reached, and every row is one line tall.
+
+## S-4 — The Inspector changed identity without saying so
+
+**Severity:** High. **Standard:** Nielsen #1 (visibility of system status), #6
+(recognition over recall).
+
+One panel did two unrelated jobs — a list of document/finishing commands, and the
+properties of the selection — and swapped between them on selection with nothing
+anywhere to indicate it had. Clicking the page made **Compress PDF**,
+**Watermark** and **OCR** vanish, and there was no way back to them without
+deselecting first. The collapsed edge tab hinted at the state with a word set
+sideways in `writing-mode: vertical-rl`.
+
+**Fixed:** two labelled tabs, **Document** and **Properties**, with the standard
+ARIA tabs pattern and roving arrow-key focus. Selecting something still moves to
+Properties — that is what the click asked for — but the switch is now visible and
+reversible. Deselecting deliberately does *not* switch back, so the panel can't
+flip on a stray click into empty space. The collapsed tab is icon-only.
+
+Two things fell out of this: `PropertiesPanel`'s "nothing selected" copy had been
+**unreachable since it was written** (with nothing selected the panel showed the
+document list instead, so the text explaining how to get properties only appeared
+once you no longer needed it), and the collapse control stopped floating
+`position: absolute` over the panel's own heading.
+
+## S-5 — One glyph, several meanings; one name, no glyph
+
+**Severity:** Medium. **Standard:** Nielsen #4 (consistency and standards).
+
+The icon map reused pictures across unrelated — sometimes opposite — actions:
+
+| Glyph | Stood for |
+| --- | --- |
+| `RotateCw` | rotate a page · restore a session · save a session · reset a text style |
+| `Shrink` | compress the file · **and** the switch that turns compression off |
+| `Download` | the exported PDF · a .txt sidecar |
+| `Image` | import one image · export every page as images |
+| `Signature` | the draw-a-signature tool · sign with an X.509 certificate |
+| `Minus` | the line tool · zoom out / decrease |
+
+Metaphors were loose in the same places: a hashtag for **Page numbers** (mapped
+under the key `tag`), a water droplet for **Watermark**, stacked layers for
+**Organize pages**. `SelectionBar` used a `Type` glyph for *Edit* and a pencil for
+*Style* — the two exactly the wrong way round.
+
+And `name="sliders"` was never a key in the map, so the Inspector's collapsed tab
+rendered `Icon`'s silent `Square` fallback: a blank box where its settings glyph
+belonged. The `filled` prop had the same shape of fault — declared in `Props`,
+passed by the tool dock as `filled={tool === t.key}`, and never destructured, so
+it did nothing at all.
+
+**Fixed:** every meaning has its own key and its own glyph; keys are named for
+what they mean rather than which picture they are; the dead `filled` prop is gone
+(the active tool is already stated by the dock's background and `aria-pressed`).
+`tests/icons.spec.ts` fails if any `name=` in `src/` isn't mapped, and if any
+mapped name is never used. The command palette's hand-written second copy of the
+tool list — which had drifted to icon names the dock no longer used — now derives
+from `TOOLS`.
+
+## S-6 — The page rail spent its width on everything except the page
+
+**Severity:** Medium. **Standard:** Gestalt proximity.
+
+Of 156px, ~34 went to a stacked page number and a hairline frame, leaving a
+thumbnail barely over 100px. The number sat *below* the thumbnail it belonged to
+— nearer the next page than its own — and the document's page count appeared
+nowhere in the UI, so "how long is this?" meant scrolling the rail to its end.
+The rail's heading shouted `PAGES` in tracked-out uppercase micro-type while the
+panel opposite said "Document" in title case: two headings of equal rank, styled
+as if they were different things.
+
+**Fixed:** 176px of which nearly all is preview, the number as a chip on the
+thumbnail (one visual object, not two stacked), the count in the header, sentence
+case at the same type level as the Inspector's tabs, and an active-page *ring*
+rather than a border, so the list doesn't reflow as the active page changes. The
+accessible name carries what the chip shows: "Page 3 of 12 (current)".
+
+## S-7 — Tooltips were never clamped to the viewport
+
+**Severity:** Medium. The bubble is centred on its anchor with
+`translate(-50%)` and had no bound, so any control near an edge got a tooltip
+drawn half outside the window — the collapsed Inspector tab sits *at* the right
+edge, and on a phone so does the ⋯ button. `white-space: nowrap` with no
+`max-width` also meant the sentence-long tips (the lossless-raster explanation)
+ran off the side as one line. **Fixed:** measured in a layout effect and clamped
+before paint, with a `max-width` so long tips wrap instead.
+
+Separately, the page-rail toggle was named **"Toggle page thumbnails"** — which
+leaves the current state to be guessed — and tipped **"Pages"**, the same word as
+the heading of the rail it opens, which it then covered. Both now state the
+outcome: *Show pages* / *Hide pages*.
+
+## S-8 — Dead code the stylesheet still described
+
+`.toolnav` (40 lines, plus a `@media` override) and `.fab` (20 lines) styled two
+components that no longer exist — a bottom navigation bar and a mobile FAB, both
+replaced by the tool dock. Removed. Also removed: `1 page(s) · 300 text
+fragments`, which is a placeholder for copy rather than copy, wherever it
+appeared.
+
+## Not changed, and why
+
+- **The document actions appear in both the Document tab and the ⋯ menu.** With
+  the two now sharing one taxonomy — same groups, same order, same names, same
+  icons — this is an ordinary primary/secondary pair rather than a contradiction.
+  Removing them from the menu would leave phones, where the panel is a
+  selection-driven sheet and the command palette needs a keyboard, with no way to
+  reach them at all.
+- **The tool dock and zoom pill still float over the page.** Documented
+  trade-offs with their reasoning at the CSS; the alternative placements were
+  tried and collide with each other (see `tests/phone.spec.ts`).
+- **Pages stay white in dark mode** unless *Dim pages* is on. Fidelity to the
+  file is the default on purpose; finding #15 in Part 1 is the standing item.
+
+---
+
 ## Updated sequencing (Part 1 + Part 2)
 
 - **Quick wins:** P-2/#2 (zoom lock), M-1/#7 (targets), plus the Part 1 trivials

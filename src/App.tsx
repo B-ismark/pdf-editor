@@ -1,4 +1,4 @@
-import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { PageView, type AnnotSpec } from "./components/PageView";
 import { translateAnnotation } from "./components/AnnotationLayer";
 import { PropertiesPanel } from "./components/PropertiesPanel";
@@ -139,14 +139,26 @@ const DOC_GROUPS: { key: DocAction["group"]; label: string }[] = [
   { key: "finish", label: "Finish" },
 ];
 
+/** `3 pages`, `1 page` — never `1 page(s)`, which is a stand-in for copy, not copy. */
+function plural(n: number, one: string, many = `${one}s`): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** The Inspector's two jobs, each with its own tab. */
+type PanelTab = "document" | "properties";
+const PANEL_TABS: { key: PanelTab; label: string; icon: string }[] = [
+  { key: "document", label: "Document", icon: "picture_as_pdf" },
+  { key: "properties", label: "Properties", icon: "sliders" },
+];
+
 const TOOLS: { key: NavKey; label: string; icon: string }[] = [
-  { key: "select", label: "Select", icon: "arrow_selector_tool" },
-  { key: "text", label: "Add text", icon: "text_fields" },
-  { key: "draw", label: "Draw", icon: "draw" },
-  { key: "sign", label: "Sign", icon: "signature" },
-  { key: "redact", label: "Redact", icon: "select" },
-  { key: "whiteout", label: "Whiteout", icon: "eraser" },
-  { key: "link", label: "Link", icon: "link" },
+  { key: "select", label: "Select", icon: "select_tool" },
+  { key: "text", label: "Add text", icon: "text_tool" },
+  { key: "draw", label: "Draw", icon: "draw_tool" },
+  { key: "sign", label: "Sign", icon: "sign_tool" },
+  { key: "redact", label: "Redact", icon: "redact_tool" },
+  { key: "whiteout", label: "Whiteout", icon: "whiteout_tool" },
+  { key: "link", label: "Link", icon: "link_tool" },
 ];
 
 // Single-key tool shortcuts (ignored while typing or when a modal is open).
@@ -264,6 +276,7 @@ export function App() {
   // to hand the canvas maximum room; it's never empty (properties when
   // something is selected, document/finishing actions otherwise).
   const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [panelTab, setPanelTab] = useState<PanelTab>("document");
   const [compressOpen, setCompressOpen] = useState(false);
   const [signCertOpen, setSignCertOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -285,12 +298,35 @@ export function App() {
   const panelSelection = selection && selection.kind !== "stamp" ? selection : null;
   const themeIcon =
     theme.mode === "light" ? "light_mode" : theme.mode === "dark" ? "dark_mode" : "system_mode";
-  const themeLabel =
-    theme.mode === "light"
-      ? "Light theme"
-      : theme.mode === "dark"
-        ? "Dark theme"
-        : "System theme";
+  const themeName =
+    theme.mode === "light" ? "Light" : theme.mode === "dark" ? "Dark" : "System";
+  const themeLabel = `${themeName} theme`;
+
+  // Selecting something on the page moves the panel to Properties — that is what
+  // you asked for by clicking. Deselecting does *not* move it back: the panel
+  // would then flip on every click into empty space, and Properties has a real
+  // empty state for exactly this. One tab switch per intent, none per accident.
+  const selectedKey = panelSelection ? `${panelSelection.kind}-${panelSelection.id}` : null;
+  useEffect(() => {
+    if (selectedKey) setPanelTab("properties");
+  }, [selectedKey]);
+
+  /** Roving focus across the panel tabs (WAI-ARIA tabs pattern). */
+  const onPanelTabKeyDown = useCallback((e: ReactKeyboardEvent<HTMLElement>) => {
+    const delta = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+    if (!delta && e.key !== "Home" && e.key !== "End") return;
+    e.preventDefault();
+    setPanelTab((cur) => {
+      const i = PANEL_TABS.findIndex((t) => t.key === cur);
+      const next =
+        e.key === "Home"
+          ? 0
+          : e.key === "End"
+            ? PANEL_TABS.length - 1
+            : (i + delta + PANEL_TABS.length) % PANEL_TABS.length;
+      return PANEL_TABS[next].key;
+    });
+  }, []);
 
   // Per-page buckets, recomputed only when the underlying list changes.
   const boxesByPage = useMemo(() => bucketByPage(textBoxes), [textBoxes]);
@@ -483,7 +519,7 @@ export function App() {
         vp.resetZoom();
         setStatus("ready");
         const total = loaded.pages.reduce((n, p) => n + p.fragments.length, 0);
-        setMessage(note ?? `${loaded.pages.length} page(s) · ${total} text fragments`);
+        setMessage(note ?? `${plural(loaded.pages.length, "page")} · ${plural(total, "text fragment")}`);
       } catch (err) {
         setStatus("error");
         setMessage(pdfOpenError(err));
@@ -715,7 +751,7 @@ export function App() {
       });
       setPdf({ ...pdf, pages });
       setStatus("ready");
-      const partial = pagesFailed > 0 ? ` (${pagesFailed} page(s) couldn't be read)` : "";
+      const partial = pagesFailed > 0 ? ` (${plural(pagesFailed, "page")} couldn't be read)` : "";
       setMessage(
         added > 0
           ? `OCR added ${added} words — now searchable and redactable.${partial}`
@@ -788,16 +824,16 @@ export function App() {
   // add an action once and every surface picks it up.
   const docActions = useMemo<DocAction[]>(
     () => [
-      { id: "organize", group: "organise", label: "Organize pages", icon: "layers", keywords: "reorder rotate merge split extract", run: () => { setSelection(null); setOrganizeOpen(true); } },
+      { id: "organize", group: "organise", label: "Organize pages", icon: "organize", keywords: "reorder rotate merge split extract", run: () => { setSelection(null); setOrganizeOpen(true); } },
       { id: "image", group: "organise", label: "Add image", icon: "image", keywords: "picture photo stamp", run: () => imageInputRef.current?.click() },
-      { id: "ocr", group: "text", label: "OCR — recognise text", icon: "scan_text", keywords: "scan searchable image", run: runOcr },
+      { id: "ocr", group: "text", label: "Recognise text (OCR)", icon: "scan_text", keywords: "scan searchable image ocr", run: runOcr },
       { id: "copytext", group: "text", label: "Copy all text", icon: "content_copy", keywords: "clipboard", run: copyAllText },
-      { id: "exporttext", group: "text", label: "Export text (.txt)", icon: "download", keywords: "save txt plain", run: exportTextFile },
-      { id: "numbers", group: "finish", label: "Page numbers", icon: "tag", keywords: "pagination folio", run: () => { setSelection(null); setFinishTab("numbers"); } },
+      { id: "exporttext", group: "text", label: "Export text (.txt)", icon: "text_download", keywords: "save txt plain", run: exportTextFile },
+      { id: "numbers", group: "finish", label: "Page numbers", icon: "page_numbers", keywords: "pagination folio", run: () => { setSelection(null); setFinishTab("numbers"); } },
       { id: "watermark", group: "finish", label: "Watermark", icon: "watermark", keywords: "draft stamp", run: () => { setSelection(null); setFinishTab("watermark"); } },
-      { id: "eximg", group: "finish", label: "Export as images", icon: "image", keywords: "png zip export", run: exportImages },
+      { id: "eximg", group: "finish", label: "Export as images", icon: "images", keywords: "png zip export", run: exportImages },
       { id: "compress", group: "finish", label: "Compress PDF", icon: "compress", keywords: "shrink reduce size optimise", run: openCompress },
-      { id: "sign-cert", group: "finish", label: "Sign with certificate", icon: "signature", keywords: "digital signature pades certificate p12 sign", run: () => { setSelection(null); setSignCertOpen(true); } },
+      { id: "sign-cert", group: "finish", label: "Sign with certificate", icon: "certificate", keywords: "digital signature pades certificate p12 sign", run: () => { setSelection(null); setSignCertOpen(true); } },
     ],
     [runOcr, copyAllText, exportTextFile, exportImages, openCompress],
   );
@@ -1780,14 +1816,14 @@ export function App() {
           data-tip="Close document"
         >
           <span className="appbar__logo">
-            <Icon name="stylus_note" size={18} filled />
+            <Icon name="brand" size={18} />
           </span>
           <span className="title-large appbar__name">PDF Editor</span>
         </button>
       ) : (
         <div className="appbar__brand">
           <span className="appbar__logo">
-            <Icon name="stylus_note" size={18} filled />
+            <Icon name="brand" size={18} />
           </span>
           <span className="title-large appbar__name">PDF Editor</span>
         </div>
@@ -1796,11 +1832,15 @@ export function App() {
         <button
           className={`icon-btn${navOpen ? " icon-btn--on" : ""}`}
           onClick={() => setNavOpen((v) => !v)}
-          aria-label="Toggle page thumbnails"
-          aria-pressed={navOpen}
-          data-tip="Pages"
+          // A toggle should say what it will do, not what it is: "Toggle page
+          // thumbnails" left the user to guess the current state, and the
+          // tooltip read "Pages" — the same word as the rail's own heading,
+          // which it then covered.
+          aria-label={navOpen ? "Hide pages" : "Show pages"}
+          aria-expanded={navOpen}
+          data-tip={navOpen ? "Hide pages" : "Show pages"}
         >
-          <Icon name="panel" size={18} />
+          <Icon name={navOpen ? "panel_close" : "panel_open"} size={18} />
         </button>
       )}
       {!pdf && <div className="appbar__spacer" />}
@@ -1835,24 +1875,51 @@ export function App() {
               <>
                 <div className="menu__scrim" onClick={() => setMenuOpen(false)} />
                 <div className="menu__list" role="menu" ref={menuListRef} onKeyDown={onMenuKeyDown}>
+                  {/* Same groups, same order, same names as the Inspector's
+                      Document tab. They were only separated by hairlines here,
+                      so the menu read as one 13-item wall while the panel showed
+                      three short lists — the same commands, twice, filed
+                      differently. */}
                   {DOC_GROUPS.map((grp, gi) => (
                     <Fragment key={grp.key}>
                       {gi > 0 && <div className="menu__divider" />}
-                      {docActions
-                        .filter((a) => a.group === grp.key)
-                        .map((a) => (
-                          <button
-                            key={a.id}
-                            className="menu__item"
-                            role="menuitem"
-                            onClick={() => { setMenuOpen(false); a.run(); }}
-                          >
-                            <Icon name={a.icon} size={18} /> {a.label}
-                          </button>
-                        ))}
+                      {/* `role="group"` with a labelled heading, not a bare span:
+                          a `role="menu"` may only contain menuitems, groups and
+                          separators, so a loose label is either ignored or
+                          reported as a stray item. This way the grouping reaches
+                          assistive tech too, instead of being purely visual. */}
+                      <div role="group" aria-labelledby={`menu-grp-${grp.key}`}>
+                        <span className="menu__label label-small" id={`menu-grp-${grp.key}`}>
+                          {grp.label}
+                        </span>
+                        {docActions
+                          .filter((a) => a.group === grp.key)
+                          .map((a) => (
+                            <button
+                              key={a.id}
+                              className="menu__item"
+                              role="menuitem"
+                              onClick={() => { setMenuOpen(false); a.run(); }}
+                            >
+                              <Icon name={a.icon} size={18} /> {a.label}
+                            </button>
+                          ))}
+                      </div>
                     </Fragment>
                   ))}
                   <div className="menu__divider" />
+                  <div role="group" aria-labelledby="menu-grp-view">
+                  <span className="menu__label label-small" id="menu-grp-view">
+                    View
+                  </span>
+                  <button
+                    className="menu__item"
+                    onClick={theme.cycle}
+                    role="menuitem"
+                  >
+                    <Icon name={themeIcon} size={18} /> Theme
+                    <span className="menu__value label-medium">{themeName}</span>
+                  </button>
                   <button
                     className="menu__item"
                     onClick={() => setDimPages((v) => !v)}
@@ -1868,7 +1935,7 @@ export function App() {
                     role="menuitemcheckbox"
                     aria-checked={autosaveOn}
                   >
-                    <Icon name="rotate" size={18} /> Save session on this device
+                    <Icon name="save_local" size={18} /> Save session on this device
                     {autosaveOn && <Icon name="check" size={16} className="menu__check" />}
                   </button>
                   <button
@@ -1878,30 +1945,45 @@ export function App() {
                     aria-checked={losslessRaster}
                     data-tip="Redacted pages export bit-exact, at several times the file size"
                   >
-                    <Icon name="compress" size={18} /> Lossless redacted pages
+                    <Icon name="lossless" size={18} /> Lossless redacted pages
                     {losslessRaster && <Icon name="check" size={16} className="menu__check" />}
                   </button>
+                  </div>
                   <div className="menu__divider" />
-                  <button className="menu__item" onClick={reset} role="menuitem">
-                    <Icon name="note_add" size={18} /> Open another PDF
-                  </button>
-                  <button className="menu__item" onClick={goHome} role="menuitem">
-                    <Icon name="close" size={18} /> Close document
-                  </button>
+                  <div role="group" aria-labelledby="menu-grp-file">
+                    <span className="menu__label label-small" id="menu-grp-file">
+                      File
+                    </span>
+                    <button className="menu__item" onClick={reset} role="menuitem">
+                      <Icon name="note_add" size={18} /> Open another PDF
+                    </button>
+                    <button className="menu__item" onClick={goHome} role="menuitem">
+                      <Icon name="close" size={18} /> Close document
+                    </button>
+                  </div>
                 </div>
               </>
             )}
           </div>
         </>
       )}
-      <button
-        className="icon-btn"
-        onClick={theme.cycle}
-        aria-label={`Theme: ${themeLabel}. Click to change.`}
-        data-tip={themeLabel}
-      >
-        <Icon name={themeIcon} size={20} />
-      </button>
+      {/* No theme button here. It used to sit permanently in the app bar — at the
+          same weight as the document actions, and *after* the overflow menu, so
+          the one control that is conventionally last no longer was. It's a
+          once-in-a-while preference, so it lives with the other preferences in
+          that menu; on a phone the 48px it was holding is also the difference
+          between the bar fitting and the primary action being crushed. On the
+          start screen, where there is no menu, it stays. */}
+      {!pdf && (
+        <button
+          className="icon-btn"
+          onClick={theme.cycle}
+          aria-label={`Theme: ${themeLabel}. Click to change.`}
+          data-tip={themeLabel}
+        >
+          <Icon name={themeIcon} size={20} />
+        </button>
+      )}
     </header>
   );
 
@@ -1923,13 +2005,11 @@ export function App() {
     />
   );
 
-  // The Inspector's "nothing selected" state: the document + finishing actions
-  // that used to hide in the overflow menu, now grouped and always in reach.
+  // Document-wide actions. No heading of its own — the panel's "Document" tab
+  // names it, and a tab plus an identical title underneath is the same word
+  // twice.
   const documentPanel = (
     <div className="props">
-      <div className="props__header">
-        <span className="props__title title-medium">Document</span>
-      </div>
       <div className="doclist">
         {DOC_GROUPS.map((grp) => (
           <Fragment key={grp.key}>
@@ -1944,6 +2024,12 @@ export function App() {
           </Fragment>
         ))}
       </div>
+      {/* The tab's tail was ~300px of empty surface on any normal window. The
+          product's one real claim belongs somewhere calm and permanent, and this
+          is the only place in the editor that had room for it. */}
+      <p className="doclist__note body-small">
+        Every action here runs in this browser. Your file is never uploaded.
+      </p>
     </div>
   );
 
@@ -1968,7 +2054,7 @@ export function App() {
         >
           {restorable && (
             <div className="restore-banner">
-              <span className="restore-banner__icon"><Icon name="rotate" size={22} /></span>
+              <span className="restore-banner__icon"><Icon name="restore" size={22} /></span>
               <div className="restore-banner__text">
                 <b className="title-small">Restore your last session?</b>
                 <span className="body-small">{restorable.fileName}</span>
@@ -2123,7 +2209,7 @@ export function App() {
                     aria-label={t.label}
                     data-tip={`${t.label} · ${TOOL_SHORTCUT[t.key]}`}
                   >
-                    <Icon name={t.icon} size={20} filled={tool === t.key} />
+                    <Icon name={t.icon} size={20} />
                   </button>
                 </span>
               ))}
@@ -2202,25 +2288,62 @@ export function App() {
         {isWide ? (
           inspectorOpen ? (
             <aside className="inspector">
-              <button
-                className="inspector__collapse icon-btn"
-                onClick={() => setInspectorOpen(false)}
-                aria-label="Collapse panel"
-                data-tip="Collapse"
+              {/* Two tabs, not one surface wearing two hats. This panel used to
+                  swap between a list of document actions and the properties of
+                  the selection with nothing to say it had — so the controls you
+                  came for vanished the moment you clicked the page, and the ones
+                  that replaced them looked like they had always been there.
+                  Naming both states makes the switch legible and, more to the
+                  point, reversible: you can read a fragment's properties and
+                  still get back to Compress without deselecting. */}
+              <div className="inspector__tabs">
+                <div className="inspector__tablist" role="tablist" aria-label="Panel">
+                  {PANEL_TABS.map((t) => (
+                    <button
+                      key={t.key}
+                      id={`panel-tab-${t.key}`}
+                      role="tab"
+                      className={`inspector__tabbtn${panelTab === t.key ? " inspector__tabbtn--on" : ""}`}
+                      aria-selected={panelTab === t.key}
+                      aria-controls="panel-body"
+                      tabIndex={panelTab === t.key ? 0 : -1}
+                      onClick={() => setPanelTab(t.key)}
+                      onKeyDown={onPanelTabKeyDown}
+                    >
+                      <Icon name={t.icon} size={16} />
+                      <span className="label-large">{t.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  className="icon-btn icon-btn--sm"
+                  onClick={() => setInspectorOpen(false)}
+                  aria-label="Hide panel"
+                  data-tip="Hide panel"
+                >
+                  <Icon name="chevron_right" size={18} />
+                </button>
+              </div>
+              <div
+                id="panel-body"
+                role="tabpanel"
+                aria-labelledby={`panel-tab-${panelTab}`}
+                className="inspector__body"
               >
-                <Icon name="chevron_right" size={18} />
-              </button>
-              {panelSelection ? propertiesPanel : documentPanel}
+                {panelTab === "document" ? documentPanel : propertiesPanel}
+              </div>
             </aside>
           ) : (
             <button
               className="inspector__tab"
               onClick={() => setInspectorOpen(true)}
-              aria-label="Open panel"
-              data-tip="Open panel"
+              // The label used to be set sideways with `writing-mode`, which is
+              // slow to read at any size and was carrying the same information
+              // the icon already gives.
+              aria-label="Show panel"
+              data-tip="Show panel"
             >
               <Icon name="sliders" size={18} />
-              <span className="inspector__tablabel">{panelSelection ? "Edit" : "Document"}</span>
             </button>
           )
         ) : (
@@ -2371,16 +2494,19 @@ export function App() {
           onClose={() => setCmdOpen(false)}
           commands={
             [
-              { id: "select", label: "Select tool", hint: "V", icon: "arrow_selector_tool", run: () => pickTool("select") },
-              { id: "text", label: "Add text", hint: "T", icon: "text_fields", run: () => pickTool("text") },
-              { id: "draw", label: "Draw", hint: "D", icon: "draw", run: () => pickTool("draw") },
-              { id: "sign", label: "Sign", hint: "S", icon: "signature", run: () => pickTool("sign") },
-              { id: "redact", label: "Redact", hint: "R", icon: "select", run: () => pickTool("redact") },
-              { id: "whiteout", label: "Whiteout", hint: "W", icon: "eraser", run: () => pickTool("whiteout") },
-              { id: "link", label: "Add link", hint: "L", icon: "link", run: () => pickTool("link") },
+              // Tools come from `TOOLS`, not a second hand-written copy of it: the
+              // palette's duplicate list had drifted to icon names the dock no
+              // longer used, so half the tools drew a blank square here.
+              ...TOOLS.map((t) => ({
+                id: t.key,
+                label: t.label,
+                hint: TOOL_SHORTCUT[t.key],
+                icon: t.icon,
+                run: () => pickTool(t.key),
+              })),
               { id: "duplicate", label: "Duplicate selection", hint: "Ctrl+D", icon: "duplicate", disabled: !selection || selection.kind === "fragment", run: duplicateSelection },
               { id: "find", label: "Find in document", hint: "Ctrl+F", icon: "search", run: openFind },
-              { id: "pages", label: "Toggle page thumbnails", icon: "panel", run: () => setNavOpen((v) => !v) },
+              { id: "pages", label: navOpen ? "Hide page thumbnails" : "Show page thumbnails", icon: navOpen ? "panel_close" : "panel_open", run: () => setNavOpen((v) => !v) },
               { id: "undo", label: "Undo", hint: "Ctrl+Z", icon: "undo", disabled: !doc.canUndo, run: undo },
               { id: "redo", label: "Redo", hint: "Ctrl+Shift+Z", icon: "redo", disabled: !doc.canRedo, run: redo },
               // Document/finishing actions come from the shared source of truth.

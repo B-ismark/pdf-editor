@@ -54,7 +54,8 @@ export function PageNav({ bytes, pageCount, onClose }: Props) {
   return (
     <nav className="pagenav" aria-label="Pages">
       <div className="pagenav__head">
-        <span className="pagenav__title label-medium">Pages</span>
+        <span className="pagenav__title title-small">Pages</span>
+        <span className="pagenav__count label-medium">{pageCount}</span>
         {onClose && (
           <button className="icon-btn icon-btn--sm" onClick={onClose} aria-label="Close pages" data-tip="Close">
             <Icon name="close" size={18} />
@@ -68,12 +69,17 @@ export function PageNav({ bytes, pageCount, onClose }: Props) {
             className={`pagenav__item${i === active ? " pagenav__item--on" : ""}`}
             onClick={() => jump(i)}
             aria-current={i === active ? "page" : undefined}
-            aria-label={`Go to page ${i + 1}`}
+            // The page number is drawn as a chip on the thumbnail, so it is
+            // decorative here — the accessible name has to carry it, and say
+            // which page is the one you're on.
+            aria-label={`Page ${i + 1} of ${pageCount}${i === active ? " (current)" : ""}`}
           >
             <span className="pagenav__thumb">
               <Thumbnail bytes={bytes} index={i} rotation={0} />
+              <span className="pagenav__num label-small" aria-hidden="true">
+                {i + 1}
+              </span>
             </span>
-            <span className="pagenav__num label-medium">{i + 1}</span>
           </button>
         ))}
       </div>
