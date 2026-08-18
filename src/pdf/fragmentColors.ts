@@ -237,7 +237,7 @@ export function sampleColors(
     const box = toPixels(glyphBox(fragment, size), H, scale);
     const background = dominant(image, cornersOf(box));
     if (!background || background.share < MIN_BG_SHARE) continue;
-    const ink = inkColor(image, box, background.key, size * scale);
+    const ink = inkColor(image, toPixels(inkBox(fragment, size), H, scale), background.key, size * scale);
     found.set(fragment.itemIndex, { fill: hex(background.key), ...(ink ? { ink } : {}) });
   }
   return found;
@@ -258,6 +258,27 @@ function glyphBox(fragment: TextFragment, size: number): Box {
     y: fragment.transform[5] - size * 0.22,
     w: Math.max(fragment.width, size * 0.5),
     h: size * 1.2,
+  };
+}
+
+/**
+ * The band ink is read from: the glyph box, minus everything below the baseline.
+ *
+ * Underlines, table rules, and cell borders live in that descender band, and ink
+ * is whatever sits furthest from the background — so a rule more extreme than the
+ * text wins. Measured: 16pt grey `#878787` text with a black rule 4 units under
+ * its baseline read `#000000`, i.e. an edit would have come back black. Above the
+ * baseline there is more than enough glyph left to read, and a horizontal rule
+ * can no longer be mistaken for it. A strikethrough still crosses this band, but
+ * that case survives on its own terms: the text is the more extreme colour in
+ * every ordinary version of it.
+ */
+function inkBox(fragment: TextFragment, size: number): Box {
+  return {
+    x: fragment.transform[4],
+    y: fragment.transform[5],
+    w: Math.max(fragment.width, size * 0.5),
+    h: size * 0.98,
   };
 }
 

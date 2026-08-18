@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ROTATED_TEXT, TYPESET_PAGE, TYPESET_PANELS, fixtures } from "./fixtures";
+import { ROTATED_TEXT, TYPESET_PAGE, TYPESET_PANELS, TYPESET_RULED, fixtures } from "./fixtures";
 import { expectClean, open, pageTexts, watch } from "./helpers";
 
 /**
@@ -203,5 +203,21 @@ test("scrolling a document nobody edits samples nothing", async ({ page }) => {
     (window as unknown as { __reads: () => number }).__reads(),
   );
   expect(afterSelect).toBeGreaterThan(0);
+  expectClean(w);
+});
+
+test("a rule under the baseline is not mistaken for the text's colour", async ({ page }) => {
+  // Ink is whatever sits furthest from the background, so a rule more extreme
+  // than the text used to win it: `#878787` text with a black rule 4 units under
+  // its baseline came back `#000000`. Ink is now read above the baseline only,
+  // which is where the glyphs are and where underlines, table rules and cell
+  // borders are not.
+  const w = watch(page);
+  const { typeset } = await fixtures();
+  await open(page, typeset);
+
+  const [r, g, b] = TYPESET_RULED.textRgb;
+  const id = await editText(page, TYPESET_RULED.text, "EDITED-RULED");
+  await expect(page.locator(`.fragment[data-id="${id}"]`)).toHaveCSS("color", `rgb(${r}, ${g}, ${b})`);
   expectClean(w);
 });

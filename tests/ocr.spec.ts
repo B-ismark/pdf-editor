@@ -91,6 +91,56 @@ test.describe("OCR", () => {
    * requests, so "it caches the engine" is worth far less than "it caches
    * *nothing else*" — - not the app shell, and above all not the user's document.
    */
+  test("an edited OCR word takes the scan's own colours", async ({ page }) => {
+    // An OCR fragment sits over pixels, not text: the glyphs beneath it are part
+    // of the scan and so is its paper, and `pdf/fragmentColors.ts` reads both off
+    // that raster like any other fragment. The fixture is drawn #111 on #fff, so
+    // the reading is checkable exactly.
+    //
+    // Not every word resolves, and the reason is worth knowing: OCR sets a
+    // fragment's size to the recognised *ink height* rather than a font em (see
+    // `wordsToFragments`), so for a large bold all-caps word the sample box's top
+    // lands on the glyph tops instead of above them, the upper corner patches sit
+    // in the ink, and the background test declines. Hence the two assertions:
+    // every word is either the scan's own colours or the black-and-white default
+    // — never some third colour — and at least one word does resolve, so a
+    // pipeline that quietly stopped sampling would still fail this.
+    //
+    // A noisy scan declines throughout, which needs no fixture of its own: no
+    // colour owns enough of a speckled page for the corner test to accept it, so
+    // the edit stays black-on-white, exactly as it was before any of this.
+    test.slow();
+    await page.goto("/");
+    test.skip(!(await ocrAssetsReady(page)), "OCR assets absent — run `npm run setup-ocr`");
+    const w = watch(page);
+    await open(page, (await fixtures()).scanned);
+    await runOcr(page);
+
+    const words = page.locator('.page [role="textbox"]');
+    const count = await words.count();
+    expect(count).toBeGreaterThan(1);
+
+    let readTheScan = 0;
+    for (let i = 0; i < count; i++) {
+      const el = words.nth(i);
+      await el.click();
+      await page.keyboard.press("ControlOrMeta+a");
+      await page.keyboard.type(`EDIT${i}`);
+      await expect(el).toHaveText(`EDIT${i}`);
+      const ink = await el.evaluate((e) => getComputedStyle(e).color);
+      // The scan's ink, or the default it falls back to when it declines.
+      expect(["rgb(17, 17, 17)", "rgb(0, 0, 0)"], `word ${i} ink`).toContain(ink);
+      if (ink === "rgb(17, 17, 17)") readTheScan++;
+      // The paper either way — never a colour the scan doesn't have.
+      await expect(el.locator("xpath=preceding-sibling::div[1]")).toHaveCSS(
+        "background-color",
+        "rgb(255, 255, 255)",
+      );
+    }
+    expect(readTheScan, "no OCR word picked up the scan's own ink").toBeGreaterThan(0);
+    expect(w.external, `off-origin requests: ${w.external.join(", ")}`).toEqual([]);
+  });
+
   test("the wasm core is cached for next time, and nothing else is", async ({ page }) => {
     test.slow(); // two full engine boots and a recognition pass each
     await page.goto("/");

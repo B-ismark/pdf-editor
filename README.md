@@ -253,8 +253,9 @@ A pragmatic, client-side editor — worth knowing where the seams are:
   coloured pill, table cell, or banner keeps that colour behind it and draws the
   replacement in the colour the original used. Both are read from the rendered
   page, so both decline rather than guess: an area no flat colour fits (a photo,
-  a gradient, the edge of a panel) still gets a white patch, and type too small
-  to resolve at the scale the page was first drawn at is still redrawn in black.
+  a gradient, the edge of a panel, a rotated page, a speckled scan) still gets a
+  white patch, and type too small to resolve at the scale the page was first
+  drawn at is still redrawn in black.
   (Redaction fill colour is configurable.)
 - **Layout is not reflowed**, and images/vector graphics aren't editable, nor is
   rotated text repositioned in the overlay.

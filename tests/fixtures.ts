@@ -40,7 +40,28 @@ export interface Fixtures {
 export const ROTATED_TEXT = "ROTATED-LABEL";
 
 /** Page size of the `typeset` fixture, in PDF units. */
-export const TYPESET_PAGE = { width: 460, height: 420 };
+export const TYPESET_PAGE = { width: 460, height: 470 };
+
+/**
+ * Mid-tone text with a darker rule just under its baseline.
+ *
+ * Ink is the colour furthest from the background, so a rule more extreme than
+ * the text wins it: this read `#000000` for `#878787` text until ink stopped
+ * being sampled from the descender band. Underlines, table rules and cell
+ * borders all live there, and grey-on-white with a black rule is the cheapest
+ * way to state the case.
+ */
+export const TYPESET_RULED = {
+  text: "GREY-WITH-RULE",
+  x: 30,
+  baseline: 430,
+  size: 16,
+  textRgb: [135, 135, 135] as [number, number, number],
+  /** The rule: below the baseline, inside the glyph box, wider than the text. */
+  ruleY: 426,
+  ruleHeight: 2,
+  ruleWidth: 220,
+};
 
 /**
  * Text runs in `typeset`, at baselines the specs can assert against.
@@ -166,6 +187,22 @@ async function typesetPdf(): Promise<Uint8Array> {
       font: await doc.embedFont(run.font),
     });
   }
+  const [gr, gg, gb] = TYPESET_RULED.textRgb;
+  page.drawText(TYPESET_RULED.text, {
+    x: TYPESET_RULED.x,
+    y: TYPESET_RULED.baseline,
+    size: TYPESET_RULED.size,
+    font: await doc.embedFont(StandardFonts.Helvetica),
+    color: rgb(gr / 255, gg / 255, gb / 255),
+  });
+  page.drawRectangle({
+    x: TYPESET_RULED.x - 10,
+    y: TYPESET_RULED.ruleY,
+    width: TYPESET_RULED.ruleWidth,
+    height: TYPESET_RULED.ruleHeight,
+    color: rgb(0, 0, 0),
+  });
+
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   for (const panel of Object.values(TYPESET_PANELS)) {
     const [r, g, b] = panel.rgb;

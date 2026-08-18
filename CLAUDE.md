@@ -62,8 +62,9 @@ type-checking can't see, and each exists because it broke once:
 - `colors.spec.ts` — an edit inside a coloured panel keeps the panel's colour and
   the text's own colour, on screen and in the exported bytes, while black text on
   paper stays exactly black (the two fixture panels fail in opposite directions,
-  so neither fix can pass for the other); a rotated page is declined rather than
-  sampled at mis-mapped coordinates; and scrolling reads back no pixels;
+  so neither fix can pass for the other); a rule under the baseline isn't mistaken
+  for the text's colour; a rotated page is declined rather than sampled at
+  mis-mapped coordinates; and scrolling reads back no pixels;
 - `find.spec.ts` — the active match is on screen and clear of the find bar;
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock.
 
@@ -164,6 +165,13 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
     than half of it — and a cover in the text's own colour makes the replacement
     invisible, which is worse than a white box. A ring outside the box escapes a
     tightly-fitting pill and returns whatever surrounds the pill.
+  - **Ink is read above the baseline only.** Underlines, table rules and cell
+    borders live in the descender band, and ink is whatever sits furthest from
+    the background — so a rule more extreme than the text wins it. Measured: 16pt
+    `#878787` text with a black rule 4 units under its baseline read `#000000`.
+    Above the baseline there's more than enough glyph left and a horizontal rule
+    can't be mistaken for it. (A strikethrough still crosses that band and
+    survives on the distance test: ordinary text is the more extreme colour.)
   - **Ink is gated on the em box in pixels, not the page scale.** Ink is the
     colour furthest from the background, i.e. the glyph interior — *if* any pixel
     is fully covered. Below ~8px of em, every pixel is a blend and the furthest
@@ -302,6 +310,17 @@ words from it, which makes for a useless assertion.
 Recognised words are
 appended to a page's `fragments` as a transparent, selectable/searchable text
 layer (so Find and search-and-redact work on scans).
+
+**An OCR fragment's `size` is the recognised ink height, not a font em**, which
+matters to `fragmentColors.ts`: its sample box is built from `size`, so for a
+large bold all-caps word the box top lands *on* the glyph tops rather than above
+them, the upper corner patches sit in the ink, and the background test declines
+(the edit stays black-on-white). Smaller words resolve and take the scan's own
+paper and ink — measured `fill=#ffffff ink=#111111` on the `scanned` fixture. A
+*noisy* scan declines throughout, because no colour owns enough of a speckled
+page. All of that is the safe direction, and `ocr.spec.ts` pins it: every word is
+either the scan's colours or the default, never a third colour, and at least one
+resolves.
 
 **`setup-ocr` copies only the `.wasm.js` cores, not the sibling `.wasm`.** Each
 variant ships both ways — a small `<name>.js` glue that fetches `<name>.wasm`,
