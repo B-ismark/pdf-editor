@@ -816,6 +816,22 @@ td b { font-weight: 600; }
 .step h3 { margin-bottom: 4px; }
 .step p { color: var(--pg-ink-soft); font-size: 0.925rem; }
 
+/* shipped / proposed status strip */
+.status {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 10px 16px;
+  align-items: baseline;
+  margin-top: 26px;
+  padding: 22px 24px;
+  border-radius: 16px;
+  background: var(--pg-slab);
+  border: 1px solid var(--pg-rule);
+}
+.status h3 { grid-column: 1 / -1; margin-bottom: 2px; }
+.status p { color: var(--pg-ink-soft); font-size: 0.92rem; }
+.status .tag { align-self: center; }
+
 .foot {
   margin-top: 84px;
   padding-top: 26px;
@@ -1437,10 +1453,34 @@ html[data-motion="off"] * { transition-duration: 0.01ms !important; }
     </div>
   </section>
 
+  <div class="status">
+    <h3>What shipped from this page</h3>
+    <span class="tag tag--go">shipped</span>
+    <p><b>The joint (A), rebuilt.</b> The selected Inspector tab is joined to the panel by two concave
+    fillets — but hung off the button's own <code>::before</code>/<code>::after</code> rather than a
+    floating dock, so there is no rect to measure and no <code>ResizeObserver</code>. That removed the
+    single biggest cost on this page. Masked, not <code>corner-shape</code>d, because it is the only
+    thing saying which tab owns the panel and therefore has to render off Chromium.</p>
+    <span class="tag tag--go">shipped</span>
+    <p><b>Squircles (D)</b> across chrome as one <code>@supports</code> block, and never on a page, a
+    canvas or a thumbnail.</p>
+    <span class="tag tag--go">shipped</span>
+    <p><b>Shape-as-state (F)</b> replacing the underline indicator, and <code>--ease-spring</code>
+    rewritten as a real <code>linear()</code> spring with a second no-ring scheme beside it.</p>
+    <span class="tag tag--care">not built</span>
+    <p><b>The anchored tail (C)</b> and <b>the grown tool dock (B)</b>. Both still need runtime
+    measurement, and neither had a problem urgent enough to justify it once the Inspector turned out
+    not to need one.</p>
+    <span class="tag tag--care">not built</span>
+    <p><b>The perforated seam (E).</b> The weakest of the five: it decorates a boundary the group
+    headings already state.</p>
+  </div>
+
   <p class="foot">
-    Prototype only — nothing in <code>src/</code> was changed. Specimens use the app's real
-    <code>theme.css</code> tokens, the real <code>docActions</code> list, and the real 288/320px Inspector
-    widths, so what renders here is what would render there.
+    The specimens above use the app's real <code>theme.css</code> tokens, the real
+    <code>docActions</code> list, and the real 288/320px Inspector widths. What shipped differs from
+    Prototype A in one way worth knowing: anchoring the joint to the button instead of to a floating
+    dock made the measurement problem disappear entirely.
   </p>
 </div>
 
