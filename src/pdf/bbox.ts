@@ -39,6 +39,8 @@ export function annotationBox(a: Annotation): Box {
   switch (a.kind) {
     case "highlight":
     case "rect":
+    case "check":
+    case "cross":
       return rectBox(a);
     case "line":
     case "arrow":

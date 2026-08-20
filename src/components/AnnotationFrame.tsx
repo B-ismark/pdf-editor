@@ -1,10 +1,10 @@
 import { useRef } from "react";
 import { SelectionFrame, type Geom } from "./SelectionFrame";
-import type { Annotation } from "../pdf/types";
+import type { Annotation, BoxAnnotation } from "../pdf/types";
 
 interface Props {
-  /** A box-shaped annotation (rect or highlight). */
-  annot: Extract<Annotation, { kind: "rect" | "highlight" }>;
+  /** A box-shaped annotation — rect, highlight, tick or cross. */
+  annot: BoxAnnotation;
   scale: number;
   pageHeight: number;
   onMove: (annot: Annotation, key: string) => void;
@@ -13,8 +13,8 @@ interface Props {
 const MIN = 6;
 
 /** Transparent HTML overlay that hosts the resize/rotate handles for a selected
- * rect or highlight annotation. The shape itself is drawn in the SVG layer; this
- * only carries the chrome, so its body is click-through (handles capture). */
+ * box annotation. The shape itself is drawn in the SVG layer; this only carries
+ * the chrome, so its body is click-through (handles capture). */
 export function AnnotationFrame({ annot: a, scale, pageHeight: H, onMove }: Props) {
   const boxRef = useRef<HTMLDivElement>(null);
   const left = a.x * scale;

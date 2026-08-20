@@ -5,6 +5,8 @@ import { isFragmentModified, keepsSourceTypeface, resolveFragmentStyle } from ".
 import { usePageFonts } from "../hooks/usePageFonts";
 import { usePageColors } from "../hooks/usePageColors";
 import { offerPageCanvas } from "../pdf/fragmentColors";
+import { isBoxAnnotation } from "../pdf/types";
+import { DEFAULT_MARK_SIZE, MARK_PATHS } from "../pdf/marks";
 import type {
   Annotation,
   AnnotationTool,
@@ -280,6 +282,21 @@ function PageViewInner(props: Props) {
         page.pageIndex,
         (cur.mode === "highlight" ? { kind: "highlight", ...base } : { kind: "rect", ...base, strokeWidth: width }) as AnnotSpec,
       );
+    } else if (cur.mode === "check" || cur.mode === "cross") {
+      // A click drops one mark; a drag sizes it. Requiring a drag would make
+      // filling a thirty-field form thirty drags, and a checkbox is smaller
+      // than MIN_DRAG anyway — the gesture that fits the task is the tap.
+      const drag = w >= MIN_DRAG && h >= MIN_DRAG;
+      const centre = toPdf(cur.x0, cur.y0);
+      const box = drag
+        ? { x: left / scale, y: H - (top + h) / scale, width: w / scale, height: h / scale }
+        : {
+            x: centre.x - DEFAULT_MARK_SIZE / 2,
+            y: centre.y - DEFAULT_MARK_SIZE / 2,
+            width: DEFAULT_MARK_SIZE,
+            height: DEFAULT_MARK_SIZE,
+          };
+      onAddAnnotation(page.pageIndex, { kind: cur.mode, ...box, color, strokeWidth: width } as AnnotSpec);
     } else if (cur.mode === "line" || cur.mode === "arrow") {
       if (Math.hypot(w, h) < MIN_DRAG) return;
       const p0 = toPdf(cur.x0, cur.y0), p1 = toPdf(cur.x1, cur.y1);
@@ -361,12 +378,12 @@ function PageViewInner(props: Props) {
             onMove={onMoveAnnotation}
           />
 
-          {/* Resize/rotate chrome for a selected rect or highlight box. */}
+          {/* Resize/rotate chrome for a selected box annotation. */}
           {tool === "select" &&
             selection?.kind === "annotation" &&
             (() => {
               const sel = nonNote.find((a) => a.id === selection.id);
-              if (!sel || (sel.kind !== "rect" && sel.kind !== "highlight")) return null;
+              if (!sel || !isBoxAnnotation(sel)) return null;
               return (
                 <AnnotationFrame
                   annot={sel}
@@ -613,6 +630,18 @@ function DrawPreview({ g, color, width, scale }: { g: Gesture; color: string; wi
     <svg className="annot-svg" width="100%" height="100%" style={{ pointerEvents: "none" }}>
       {g.mode === "highlight" && <rect x={left} y={top} width={w} height={h} fill={color} opacity={0.4} />}
       {g.mode === "rect" && <rect x={left} y={top} width={w} height={h} fill="none" stroke={color} strokeWidth={sw} />}
+      {(g.mode === "check" || g.mode === "cross") &&
+        MARK_PATHS[g.mode].map((line, i) => (
+          <polyline
+            key={i}
+            points={line.map(([ux, uy]) => `${left + ux * w},${top + (1 - uy) * h}`).join(" ")}
+            fill="none"
+            stroke={color}
+            strokeWidth={Math.max(sw, Math.min(w, h) * 0.12)}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        ))}
       {(g.mode === "line" || g.mode === "arrow") && (
         <line x1={g.x0} y1={g.y0} x2={g.x1} y2={g.y1} stroke={color} strokeWidth={sw} strokeLinecap="round" />
       )}

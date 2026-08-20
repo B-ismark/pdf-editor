@@ -55,6 +55,24 @@
   --radius-xxl: 48px;
   --radius-full: 9999px;
 
+  /* ---- Shape: corner style ----
+     `corner-shape` is Chromium-only today and silently ignored everywhere
+     else, where the radius alone still yields an ordinary rounded corner.
+     That makes it safe as an enhancement and unsafe as a signal: it is only
+     ever used to soften a shape the app already has, never to carry state.
+     State that depends on a cut corner uses `--joint-fillet` below, which is
+     masked and therefore renders everywhere. */
+  --corner-soft: squircle;
+
+  /* ---- The joint ----
+     The concave fillets that tie a selected tab to the surface it opens, so
+     the panel is visibly *that tab's* rather than a second thing that happens
+     to sit underneath. Drawn with a radial-gradient mask rather than
+     `corner-shape: scoop` precisely because this one is load-bearing — it has
+     to render on Safari and Firefox too. The fillets carry no border and no
+     shadow, so masking the paint instead of the box costs nothing here. */
+  --joint-fillet: 10px;
+
   /* ---- Typography ----
      System-font-first by design. Naming a web font first would either produce a
      silent fallback (the font is never loaded — no CDN, see index.html) or
@@ -70,8 +88,26 @@
   --ease-standard-accelerate: cubic-bezier(0.3, 0, 1, 1);
   --ease-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
   --ease-emphasized-accelerate: cubic-bezier(0.3, 0, 0.8, 0.15);
-  /* Springy overshoot approximation for expressive press/appear. */
-  --ease-spring: cubic-bezier(0.2, 0.9, 0.2, 1.15);
+
+  /* Physics-based springs — the primary motion model in M3 Expressive, and the
+     one thing in this file that was still an approximation. A cubic-bezier can
+     overshoot once and then stop; a spring overshoots and *settles*, and the
+     settle is the part that reads as physical rather than merely fast. The old
+     value was commented as an approximation and, being a bezier, could not be
+     anything else. `linear()` states the curve outright and is supported in
+     every current browser, so this is a straight upgrade.
+
+     Two schemes, because a bounce that suits a tab pill is wrong on a dialog:
+     `--ease-spring` rings visibly, `--ease-settle` arrives without ringing. */
+  --ease-spring: linear(
+    0, 0.009 1.3%, 0.037 2.7%, 0.153 5.8%, 0.484 12%, 0.71 16.3%,
+    0.869 20.7%, 0.98 25.2%, 1.048 30%, 1.077 35.2%, 1.075 42%,
+    1.036 54%, 1.008 68%, 0.999 82%, 1
+  );
+  --ease-settle: linear(
+    0, 0.017 2%, 0.128 6.4%, 0.463 15%, 0.71 22%, 0.87 29%,
+    0.954 36%, 0.99 45%, 1
+  );
 
   /* ---- Motion: duration ---- */
   --dur-short2: 100ms;

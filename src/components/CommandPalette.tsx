@@ -9,6 +9,9 @@ export interface Command {
   icon?: string;
   /** Extra words to match against. */
   keywords?: string;
+  /** Set when running this opens something rather than doing it, so the palette
+   * marks it the way the Inspector and the ⋯ menu do. */
+  opens?: "dialog";
   run: () => void;
   disabled?: boolean;
 }
@@ -104,6 +107,7 @@ export function CommandPalette({ commands, onClose }: Props) {
               {c.icon && <Icon name={c.icon} size={18} />}
               <span className="cmdk__label">{c.label}</span>
               {c.hint && <span className="cmdk__hint label-medium">{c.hint}</span>}
+              {c.opens && <Icon name="opens_dialog" size={16} className="opens-mark" />}
             </button>
           ))}
         </div>
