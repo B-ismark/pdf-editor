@@ -55,24 +55,25 @@ test("a selected fragment is marked without putting chrome beside its glyphs", a
   await expect(cover).toHaveCount(1);
 
   const marks = await cover.evaluate((el) => {
-    const box = el.getBoundingClientRect();
     const read = (which: "::before" | "::after") => {
       const cs = getComputedStyle(el, which);
       return { height: cs.height, left: cs.left, right: cs.right, top: cs.top, bottom: cs.bottom };
     };
     return {
       // The mechanism that produced the phantom letter: any shadow/outline
-      // around the box has vertical edges hugging the glyphs.
+      // around the box has vertical edges hugging the glyphs. Ask for the
+      // *style*, not the width: with `outline-style: none` the computed width is
+      // "0px" in some Chromium versions and the specified "medium"/"3px" in
+      // others, so a width test says nothing about whether a ring is painted.
       boxShadow: getComputedStyle(el).boxShadow,
-      outlineWidth: getComputedStyle(el).outlineWidth,
-      width: box.width,
+      outlineStyle: getComputedStyle(el).outlineStyle,
       before: read("::before"),
       after: read("::after"),
     };
   });
 
   expect(marks.boxShadow, "a ring around the glyph box reads as a glyph").toBe("none");
-  expect(marks.outlineWidth === "0px" || marks.outlineWidth === "medium").toBeTruthy();
+  expect(marks.outlineStyle, "an outline ring reads as a glyph the same way").toBe("none");
   // What's left is two horizontal rules, above and below the run. A rule can't
   // be mistaken for a letter — that's why the indicator is these two edges.
   for (const rule of [marks.before, marks.after]) {
