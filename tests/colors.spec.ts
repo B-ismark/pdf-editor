@@ -10,7 +10,7 @@ import {
   TYPESET_STRADDLE,
   fixtures,
 } from "./fixtures";
-import { expectClean, open, pageTexts, watch } from "./helpers";
+import { dragOnPage, expectClean, open, pageTexts, pickTool, watch } from "./helpers";
 
 /**
  * Editing text must not cost the page its background, or the text its colour.
@@ -210,6 +210,72 @@ test("scrolling a document nobody edits samples nothing", async ({ page }) => {
     (window as unknown as { __reads: () => number }).__reads(),
   );
   expect(afterSelect).toBeGreaterThan(0);
+  expectClean(w);
+});
+
+test("an edit on a redacted page keeps its colours too", async ({ page }) => {
+  // The redaction path rasterises the page itself and offers *that* raster to
+  // the sampler, and it now does so only when the page has an edited fragment —
+  // nothing reads the sample otherwise, and it costs a full-page `getImageData`
+  // plus the per-fragment tallies (63ms median, 146ms worst on a 4.6M px canvas)
+  // per page. This is the case that gate could break: an edited fragment on a
+  // rasterised page, which must still come out on its own panel in its own
+  // colour rather than as a white hole.
+  const w = watch(page);
+  const { typeset } = await fixtures();
+  await open(page, typeset);
+
+  await editText(page, TYPESET_PANELS.darkText.text, "EDITED-DARK");
+  await editText(page, TYPESET_PANELS.lightText.text, "EDITED-LIGHT");
+
+  // A real redaction (not a whiteout), which is what forces the whole page
+  // through the raster path. It has to land on bare paper: the drag only starts
+  // when the press lands on the overlay itself, and a press on a text fragment
+  // is a text selection instead. The fixture's topmost ink is a baseline at PDF
+  // y=480 on a 520-tall page, so the strip above it is the one band that is
+  // empty at any scale — and it is on the left, clear of the zoom pill.
+  await pickTool(page, "Redact");
+  // Editing scrolled the page to reach the second panel, and `dragOnPage` works
+  // from the page's own top edge — which by now is above the window, so the
+  // press would land on the app bar. Back to the top first.
+  await page.evaluate(() => {
+    document.querySelector(".viewer__scroll")?.scrollTo({ top: 0 });
+  });
+  await page.waitForTimeout(300);
+  await dragOnPage(page, { x: 30, y: 6 }, { x: 200, y: 28 });
+  await expect(page.locator(".redaction")).toHaveCount(1);
+
+  const { path, bytes } = await exportTo(page);
+  // Proof the export really took the raster path: a rasterised page has no text
+  // layer left at all. Without this the test can pass on the vector path, where
+  // the colours come from somewhere else entirely.
+  expect((await pageTexts(bytes, [1]))[0].trim(), "the page was not rasterised").toBe("");
+  await open(page, path);
+  // A redacted page ships as a JPEG: the canvas exists and is blank until the
+  // image decodes, so wait for the page to carry ink before measuring.
+  await page.waitForFunction(
+    () => {
+      const c = document.querySelector<HTMLCanvasElement>(".page__canvas");
+      if (!c || c.width < 2) return false;
+      const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+      // Every 40th pixel is plenty: the fixture's panels are hundreds of pixels
+      // across, and a blank canvas has nothing to find at any stride.
+      for (let i = 0; i < d.length; i += 160) {
+        if (Math.max(255 - d[i], 255 - d[i + 1], 255 - d[i + 2]) > 40) return true;
+      }
+      return false;
+    },
+    null,
+    { timeout: 30_000 },
+  );
+
+  const after = {
+    dark: await panelPixels(page, TYPESET_PANELS.darkText),
+    light: await panelPixels(page, TYPESET_PANELS.lightText),
+  };
+  expect(after.dark.white, "the cover punched a white hole through the panel").toBe(0);
+  expect(after.dark.fill).toBeGreaterThan(after.dark.total * 0.5);
+  expect(after.light.dark, "the edit was redrawn in black on a dark panel").toBe(0);
   expectClean(w);
 });
 

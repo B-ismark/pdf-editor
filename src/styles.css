@@ -1130,7 +1130,12 @@ body {
   outline: none;
   cursor: text;
   transform-origin: left top;
-  padding: 0 1px;
+  /* No horizontal padding, for the same reason `.fragment` has none: the wrapper
+     sits at `box.x * scale` and the exporter draws this text at exactly `box.x`,
+     so an inset here renders every text box a pixel right of the file it is
+     previewing. (Vertical padding must stay zero for the baseline probe — see
+     `textBaseline.ts`.) */
+  padding: 0;
   border-radius: 2px;
   min-width: 8px;
   min-height: 1em;

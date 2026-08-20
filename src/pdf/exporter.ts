@@ -635,8 +635,14 @@ async function rasterisePage(
   // about to be drawn on, and it's a better one than `readPageColors` would
   // rasterise for itself. A no-op if the page was already sampled on screen,
   // which keeps the on-screen and exported covers identical.
-  offerPageCanvas(loaded.bytes, pageData, canvas);
-  const pageColors = peekPageColors(loaded.bytes, pageIndex);
+  //
+  // Only when this page actually has an edited fragment. Nothing else reads the
+  // sample, and it costs a full-page `getImageData` plus the per-fragment
+  // tallies (63ms median, 146ms worst on a 4.6M px canvas) — which on a
+  // redacted-but-unedited document is the whole bill for data no one reads.
+  const pageEdited = pageData.fragments.some((f) => isFragmentModified(f, edits[f.id]));
+  if (pageEdited) offerPageCanvas(loaded.bytes, pageData, canvas);
+  const pageColors = pageEdited ? peekPageColors(loaded.bytes, pageIndex) : NO_COLORS;
 
   const drawText = (
     text: string,

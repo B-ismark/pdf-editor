@@ -10,6 +10,10 @@ interface Props {
   /** True when the selected redaction is a whiteout cover (not a real redaction). */
   redactionCover?: boolean;
   annotation: Annotation | null;
+  /** True when the *actual* selection is a stamp. Stamps have no controls here
+   * (they're edited on the canvas), but "nothing selected" is a lie when the
+   * user just clicked their own signature — so the panel says which it is. */
+  stampSelected?: boolean;
   /** Current URL of the selected link (when selection.kind === "link"). */
   linkUrl?: string | null;
   onChangeStyle: (patch: Partial<TextStyle>) => void;
@@ -54,6 +58,7 @@ export function PropertiesPanel({
   redactionColor,
   redactionCover,
   annotation,
+  stampSelected,
   linkUrl,
   onChangeStyle,
   onChangeRedactionColor,
@@ -78,7 +83,9 @@ export function PropertiesPanel({
           ? "Text"
           : selection?.kind === "annotation"
             ? (annotation ? ANNOT_LABEL[annotation.kind] : "Annotation")
-            : "Properties";
+            : stampSelected
+              ? "Image"
+              : "Properties";
 
   return (
     <div className="props">
@@ -95,10 +102,17 @@ export function PropertiesPanel({
           selected the panel showed the document actions instead, so the one place
           that explained how to get properties only appeared once you no longer
           needed it. */}
-      {!selection && (
+      {!selection && !stampSelected && (
         <p className="props__empty body-medium">
           Nothing selected. Click any text, note, shape, redaction or link on the
           page and its settings appear here.
+        </p>
+      )}
+
+      {!selection && stampSelected && (
+        <p className="props__empty body-medium">
+          This image is edited on the page: drag to move it, use the corner
+          handle to resize, and the badge to delete.
         </p>
       )}
 

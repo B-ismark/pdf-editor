@@ -195,10 +195,24 @@ export function readPageColors(bytes: ArrayBuffer, pageData: PageData): Promise<
   if (!p) {
     p = renderPageToCanvas(bytes, pageData.pageIndex, SAMPLE_SCALE)
       .then((canvas) => {
-        const found = sampleColors(canvas, pageData, SAMPLE_SCALE) ?? NO_COLORS;
         // Hand the backing store back; this raster is never shown.
-        canvas.width = 0;
-        canvas.height = 0;
+        const release = () => {
+          canvas.width = 0;
+          canvas.height = 0;
+        };
+        // Someone published while this render was in flight — in practice
+        // `offerPageCanvas`, from the raster on screen. That reading is the one
+        // the user can *see*, so it wins: overwriting it with a sample of a
+        // different raster is exactly how the exported colours come to disagree
+        // with the previewed ones, which this module exists to prevent. Bailing
+        // here also skips the tally, which is the expensive half.
+        const already = d.ready.get(pageData.pageIndex);
+        if (already) {
+          release();
+          return already;
+        }
+        const found = sampleColors(canvas, pageData, SAMPLE_SCALE) ?? NO_COLORS;
+        release();
         return publish(bytes, pageData.pageIndex, found);
       })
       .catch(() => NO_COLORS)

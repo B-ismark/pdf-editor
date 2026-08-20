@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import { fixtures } from "./fixtures";
-import { expectClean, open, watch } from "./helpers";
+import { expectClean, open, pickTool, watch } from "./helpers";
 
 /**
  * The editable-text overlay against the glyphs underneath it.
@@ -41,6 +41,43 @@ test("the overlay's text starts exactly where the exporter draws it", async ({ p
   expect(m.padRight).toBe("0px");
   // Zero *vertical* padding is a separate invariant the baseline probe depends
   // on (see textBaseline.ts); assert it here too, since it's one declaration.
+  expect(m.padTop).toBe("0px");
+  expect(m.padBottom).toBe("0px");
+  expectClean(w);
+});
+
+test("a text box's own text starts where the exporter draws it too", async ({ page }) => {
+  const w = watch(page);
+  await open(page, (await fixtures()).sample);
+
+  // Same defect, the other text overlay: `.textbox` sits inside a wrapper placed
+  // at `box.x * scale`, and the exporter draws the string at exactly `box.x`.
+  await pickTool(page, "Add text");
+  const box = (await page.locator(".page").first().boundingBox())!;
+  await page.mouse.click(box.x + 90, box.y + 260);
+  await page.keyboard.type("Placed");
+  await page.waitForTimeout(200);
+
+  const m = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>(".textbox")!;
+    const wrap = el.closest(".tb-wrap") as HTMLElement;
+    const r = document.createRange();
+    r.selectNodeContents(el);
+    const cs = getComputedStyle(el);
+    return {
+      // Measured against the *wrapper*, which is the element carrying the
+      // exporter's x — so this catches an inset anywhere in the chain.
+      inset: r.getBoundingClientRect().left - wrap.getBoundingClientRect().left,
+      padLeft: cs.paddingLeft,
+      padRight: cs.paddingRight,
+      padTop: cs.paddingTop,
+      padBottom: cs.paddingBottom,
+    };
+  });
+
+  expect(m.inset, "the text box's text is inset from the x it exports at").toBeLessThan(0.01);
+  expect(m.padLeft).toBe("0px");
+  expect(m.padRight).toBe("0px");
   expect(m.padTop).toBe("0px");
   expect(m.padBottom).toBe("0px");
   expectClean(w);
