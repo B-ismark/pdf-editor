@@ -61,6 +61,37 @@ test.describe("app bar", () => {
     });
   }
 
+  // ...and on a desktop the opposite failure: a 44px-tall, 130px-wide filled pill
+  // in a 52px bar, beside a bare glyph for the menu that holds every document
+  // action there is. The primary action outgrew its slot and the way into
+  // everything else was the quietest thing in the row.
+  test("the primary action fits the bar, and the menu reads as a control", async ({ page }) => {
+    await open(page, (await fixtures()).sample);
+    const m = await page.evaluate(() => {
+      const bar = document.querySelector<HTMLElement>(".appbar")!;
+      const dl = document.querySelector<HTMLElement>(".appbar__download")!;
+      const more = document.querySelector<HTMLElement>(".appbar__more")!;
+      const cs = getComputedStyle(more);
+      return {
+        bar: bar.getBoundingClientRect().height,
+        download: dl.getBoundingClientRect().height,
+        more: more.getBoundingClientRect(),
+        moreBg: cs.backgroundColor,
+        barBg: getComputedStyle(bar).backgroundColor,
+      };
+    });
+    expect(m.download, "the primary action fills the bar it sits in").toBeLessThanOrEqual(
+      m.bar - 10,
+    );
+    // WCAG 2.5.8 wants 24×24; this UI's own floor is higher than that anyway.
+    expect(m.download).toBeGreaterThanOrEqual(32);
+    expect(m.more.width, "the menu control is below the touch minimum").toBeGreaterThanOrEqual(44);
+    expect(m.moreBg, "the overflow menu has no container to read as a control").not.toBe(
+      "rgba(0, 0, 0, 0)",
+    );
+    expect(m.moreBg, "the menu's container is invisible against the bar").not.toBe(m.barBg);
+  });
+
   test("the page-rail toggle says what it will do", async ({ page }) => {
     await open(page, (await fixtures()).sample);
     // Named by outcome, not "Toggle page thumbnails" — and the name changes with

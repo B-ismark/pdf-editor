@@ -24,8 +24,11 @@
  * the real element.
  *
  * Callers must not put vertical padding or a border on the measured element:
- * the probe measures from the box's top edge, and both `.fragment` and
- * `.textbox` are deliberately `padding: 0 1px`.
+ * the probe measures from the box's top edge. `.textbox` carries `padding: 0
+ * 1px` — horizontal only, which the probe doesn't care about. `.fragment` has no
+ * padding at all: its `left` is the exact x the exporter draws at, so even a
+ * horizontal inset there renders the preview a pixel off the file (see
+ * `tests/fragment.spec.ts`).
  */
 
 /** Ascenders, descenders and a cap, so the probe line is a full-height one. */

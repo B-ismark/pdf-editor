@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { clampCentre } from "../floating";
 
 interface TipState {
   text: string;
@@ -84,12 +85,7 @@ export function TooltipHost() {
   // never shows.
   useLayoutEffect(() => {
     if (!tip || !box.current) return;
-    const half = box.current.offsetWidth / 2;
-    const margin = 8;
-    const lo = half + margin;
-    const hi = window.innerWidth - half - margin;
-    // A bubble wider than the window can't satisfy both edges; prefer the left.
-    const wanted = Math.round(hi < lo ? lo : Math.min(Math.max(tip.x, lo), hi));
+    const wanted = Math.round(clampCentre(tip.x, box.current.offsetWidth));
     setX(wanted === tip.x ? null : wanted);
   }, [tip]);
 

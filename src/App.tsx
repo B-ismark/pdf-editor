@@ -32,6 +32,7 @@ import {
   OVERLAY_LIST,
   addOverlay,
   applyOverlayDeltas,
+  reorderAnnotations,
   findOverlay,
   overlayExists,
   overlaysInSet,
@@ -272,6 +273,11 @@ export function App() {
   const [findQuery, setFindQuery] = useState("");
   const [findActive, setFindActive] = useState(0);
   const [navOpen, setNavOpen] = useState(false);
+  // The draw sub-toolbar is a disclosure, not a fixture: it opens with the Draw
+  // tool, collapses to its handle once a sub-tool is picked, and the dock's Draw
+  // button toggles it. 60px of chrome across the bottom of the page has to be
+  // dismissible without leaving the tool.
+  const [drawbarOpen, setDrawbarOpen] = useState(true);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [multi, setMulti] = useState<string[]>([]);
   // Adaptive Workspace: the right Inspector collapses to an edge tab (desktop)
@@ -1416,6 +1422,38 @@ export function App() {
     [doc],
   );
 
+  /** Shift the whole multi-selection by one delta, as a single undo step. */
+  const moveMulti = useCallback(
+    (dx: number, dy: number, key: string) => {
+      if (!dx && !dy) return;
+      const deltas = new Map(multi.map((id) => [id, { dx, dy }] as const));
+      doc.set((d) => applyOverlayDeltas(d, deltas), key);
+    },
+    [multi, doc],
+  );
+
+  /** Restack the selected annotation(s) within the annotation layer. Strokes
+   * were unreachable once anything landed on top of them — a highlight drawn
+   * after a pen line buries it, and there was no way back. */
+  const arrangeSelection = useCallback(
+    (to: "front" | "back") => {
+      const ids = new Set(
+        multi.length > 0 ? multi : selection?.kind === "annotation" ? [selection.id] : [],
+      );
+      if (ids.size === 0) return;
+      doc.set((d) => reorderAnnotations(d, ids, to));
+    },
+    [multi, selection, doc],
+  );
+
+  /** True when the current selection has something the arrange controls can
+   * act on — the multibar covers every overlay kind, and only annotations are
+   * stacked (see `reorderAnnotations`). */
+  const canArrange =
+    multi.length > 0
+      ? annotations.some((a) => multiIds.has(a.id))
+      : selection?.kind === "annotation" && selectedAnnotation?.kind !== "note";
+
   type AlignOp = "left" | "center-h" | "right" | "top" | "middle" | "bottom";
   const alignMulti = useCallback(
     (op: AlignOp) => {
@@ -1597,6 +1635,20 @@ export function App() {
           deleteMulti();
           return;
         }
+        // Nudge the group, same steps as a single object. Held keys coalesce
+        // into one undo entry via the shared key.
+        const step = e.shiftKey ? 10 : 1;
+        const move =
+          e.key === "ArrowLeft" ? ([-step, 0] as const)
+          : e.key === "ArrowRight" ? ([step, 0] as const)
+          : e.key === "ArrowUp" ? ([0, step] as const)
+          : e.key === "ArrowDown" ? ([0, -step] as const)
+          : null;
+        if (move && !mod) {
+          e.preventDefault();
+          moveMulti(move[0], move[1], "nudge-multi");
+          return;
+        }
       }
       // Escape clears the current selection (and closes the mobile sheet /
       // desktop panel, which is driven by selection). Modals stop Escape from
@@ -1676,6 +1728,14 @@ export function App() {
         }
       }
 
+      // Restack the selection. `[`/`]` are the shortcut every editor uses for
+      // this and collide with nothing here (the tool keys are letters).
+      if ((e.key === "]" || e.key === "[") && !mod && canArrange && !isTypingTarget()) {
+        e.preventDefault();
+        arrangeSelection(e.key === "]" ? "front" : "back");
+        return;
+      }
+
       // Single-key tool shortcuts — only when not typing and no modal is open.
       if (
         !mod &&
@@ -1691,6 +1751,9 @@ export function App() {
             setSelection(null);
             setSigOpen(true);
           } else {
+            // Reaching Draw by shortcut is the same arrival as clicking it:
+            // the sub-toolbar comes up (see `pickTool`).
+            if (t === "draw") setDrawbarOpen(true);
             setTool(t);
             if (t !== "select") setSelection(null);
           }
@@ -1718,6 +1781,9 @@ export function App() {
     multi,
     clearMulti,
     deleteMulti,
+    moveMulti,
+    arrangeSelection,
+    canArrange,
   ]);
 
   const runExport = useCallback(async () => {
@@ -1793,6 +1859,7 @@ export function App() {
     setFindOpen(false);
     setFindQuery("");
     setNavOpen(false);
+    setDrawbarOpen(true);
     setInspectorOpen(true);
     setSheetOpen(false);
     setStatus("idle");
@@ -1812,6 +1879,10 @@ export function App() {
       setSigOpen(true);
       return;
     }
+    // Draw is a disclosure: pressing it while already drawing folds the
+    // sub-toolbar away and pressing it again brings it back. Arriving from
+    // another tool always opens it — that's the point of choosing Draw.
+    if (t === "draw") setDrawbarOpen(tool === "draw" ? (v) => !v : true);
     setTool(t);
     if (t !== "select") setSelection(null);
   };
@@ -1888,7 +1959,7 @@ export function App() {
             <span>{status === "exporting" ? "Exporting…" : "Download"}</span>
           </button>
           <div className="menu">
-            <button ref={menuBtnRef} className="icon-btn" onClick={() => setMenuOpen((v) => !v)} aria-label="More actions" aria-haspopup="menu" aria-expanded={menuOpen} data-tip="More actions">
+            <button ref={menuBtnRef} className="icon-btn appbar__more" onClick={() => setMenuOpen((v) => !v)} aria-label="More actions" aria-haspopup="menu" aria-expanded={menuOpen} data-tip="More actions">
               <Icon name="more_vert" size={18} />
             </button>
             {menuOpen && (
@@ -2029,6 +2100,7 @@ export function App() {
       onChangeRedactionColor={onChangeRedactionColor}
       onChangeLinkUrl={onChangeLinkUrl}
       onChangeAnnotation={onChangeAnnotation}
+      onArrange={arrangeSelection}
       onDelete={onDelete}
       onReset={onResetStyle}
       onClose={() => (compact ? setSheetOpen(false) : setSelection(null))}
@@ -2206,6 +2278,7 @@ export function App() {
                 onAddLink={onAddLink}
                 onChangeFormValue={onChangeFormValue}
                 onMarquee={onMarquee}
+                onMoveMulti={moveMulti}
                 onAddAnnotation={onAddAnnotation}
                 onPlaceStamp={onPlaceStamp}
               />
@@ -2250,8 +2323,12 @@ export function App() {
                     onClick={() => pickTool(t.key)}
                     aria-pressed={tool === t.key}
                     aria-label={t.label}
-                    aria-expanded={t.opens === "toolbar" ? tool === t.key : undefined}
-                    aria-controls={t.opens === "toolbar" ? "drawbar" : undefined}
+                    // `aria-expanded` is the disclosure's state, not the
+                    // tool's: the bar collapses while Draw stays active, and
+                    // saying "expanded" then would be a lie. `aria-controls`
+                    // only while the element it names is mounted.
+                    aria-expanded={t.opens === "toolbar" ? tool === t.key && drawbarOpen : undefined}
+                    aria-controls={t.opens === "toolbar" && tool === t.key ? "drawbar" : undefined}
                     aria-haspopup={t.opens === "dialog" ? "dialog" : undefined}
                     data-tip={`${t.label} · ${TOOL_SHORTCUT[t.key]}`}
                   >
@@ -2293,6 +2370,9 @@ export function App() {
               <button className="icon-btn icon-btn--sm" onClick={() => distributeMulti("h")} disabled={multi.length < 3} aria-label="Distribute horizontally" data-tip="Distribute horizontally"><Icon name="distribute_h" size={18} /></button>
               <button className="icon-btn icon-btn--sm" onClick={() => distributeMulti("v")} disabled={multi.length < 3} aria-label="Distribute vertically" data-tip="Distribute vertically"><Icon name="distribute_v" size={18} /></button>
               <span className="multibar__sep" />
+              <button className="icon-btn icon-btn--sm" onClick={() => arrangeSelection("front")} disabled={!canArrange} aria-label="Bring to front" data-tip="Bring to front · ]"><Icon name="bring_front" size={18} /></button>
+              <button className="icon-btn icon-btn--sm" onClick={() => arrangeSelection("back")} disabled={!canArrange} aria-label="Send to back" data-tip="Send to back · ["><Icon name="send_back" size={18} /></button>
+              <span className="multibar__sep" />
               <button className="icon-btn icon-btn--sm" onClick={duplicateMulti} aria-label="Duplicate" data-tip="Duplicate"><Icon name="duplicate" size={18} /></button>
               <button className="icon-btn icon-btn--sm" onClick={deleteMulti} aria-label="Delete" data-tip="Delete"><Icon name="delete" size={18} /></button>
               <button className="icon-btn icon-btn--sm" onClick={clearMulti} aria-label="Clear selection" data-tip="Clear"><Icon name="close" size={18} /></button>
@@ -2305,6 +2385,8 @@ export function App() {
               setDrawTool={setDrawTool}
               drawStyle={drawStyle}
               setDrawStyle={setDrawStyle}
+              open={drawbarOpen}
+              setOpen={setDrawbarOpen}
             />
           )}
 

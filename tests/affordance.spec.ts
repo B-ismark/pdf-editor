@@ -85,12 +85,16 @@ test("a tool that opens something says so, and says which kind", async ({ page }
 
   const tool = (label: string) => page.locator(`.tooldock__btn[aria-label="${label}"]`);
 
-  // Draw discloses a toolbar it owns — a disclosure, not a popup.
+  // Draw discloses a toolbar it owns — a disclosure, not a popup. The state is
+  // always declared; the *reference* only exists while the thing it names does,
+  // the same rule the page-rail toggle follows (an `aria-controls` pointing at
+  // an unmounted id is a dangling reference).
   await expect(tool("Draw")).toHaveClass(/tooldock__btn--opens/);
-  await expect(tool("Draw")).toHaveAttribute("aria-controls", "drawbar");
   await expect(tool("Draw")).toHaveAttribute("aria-expanded", "false");
+  await expect(tool("Draw")).not.toHaveAttribute("aria-controls", "drawbar");
   await tool("Draw").click();
   await expect(tool("Draw")).toHaveAttribute("aria-expanded", "true");
+  await expect(tool("Draw")).toHaveAttribute("aria-controls", "drawbar");
   await expect(page.locator("#drawbar")).toBeVisible();
 
   // Sign opens a dialog — a different relationship, a different attribute.

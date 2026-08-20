@@ -9,6 +9,7 @@ import {
   AlignVerticalJustifyStart,
   ArrowUpRight,
   BadgeCheck,
+  BringToFront,
   Check,
   ChevronDown,
   ChevronLeft,
@@ -48,6 +49,7 @@ import {
   Save,
   ScanText,
   Search,
+  SendToBack,
   Shrink,
   Signature,
   SlidersHorizontal,
@@ -208,6 +210,10 @@ const MAP: Record<string, LucideIcon> = {
   align_bottom: AlignVerticalJustifyEnd,
   distribute_h: AlignHorizontalDistributeCenter,
   distribute_v: AlignVerticalDistributeCenter,
+
+  // ---- stacking order (annotation layer) ----
+  bring_front: BringToFront,
+  send_back: SendToBack,
 };
 
 /** Icons that read best filled (e.g. the redaction "black box").

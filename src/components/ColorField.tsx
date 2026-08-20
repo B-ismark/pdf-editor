@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { acquireEscapeLayer } from "../hooks/useModal";
+import { placeAnchored, type AnchorRect } from "../floating";
 
 interface Props {
   value: string;
@@ -16,6 +17,7 @@ const PRESETS = [
 ];
 
 const isHex = (s: string) => /^#[0-9a-fA-F]{6}$/.test(s);
+/** Width the popover is laid out at; the height is measured, not assumed. */
 const POP_W = 196;
 
 /** A custom colour control: a swatch that opens a preset palette + hex input
@@ -23,6 +25,10 @@ const POP_W = 196;
  * clipping by scrolling parents). */
 export function ColorField({ value, onChange, small }: Props) {
   const [open, setOpen] = useState(false);
+  /** The swatch's rect, captured when the popover opens. */
+  const [anchor, setAnchor] = useState<AnchorRect | null>(null);
+  /** The toolbar the swatch sits in, which the popover must not cover. */
+  const [clear, setClear] = useState<AnchorRect | null>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   const [hex, setHex] = useState(value);
   const swatchRef = useRef<HTMLButtonElement>(null);
@@ -30,13 +36,41 @@ export function ColorField({ value, onChange, small }: Props) {
 
   useEffect(() => setHex(value), [value]);
 
+  /** The rect of the toolbar this swatch lives in, if any — the popover has to
+   * clear the whole bar, not just the swatch inside it.
+   *
+   * A *toolbar* only. Clearing a container taller than the popover moves it far
+   * from the swatch that opened it rather than off it: with `.panel` in this
+   * list, a swatch at y=723 in the phone's properties sheet threw the palette to
+   * y=205, most of a screen away from the control it belongs to. */
+  const barRect = (): AnchorRect | null => {
+    const bar = swatchRef.current?.closest('[role="toolbar"], .drawbar');
+    if (!bar) return null;
+    const r = bar.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+  };
+
   const openPop = () => {
     const r = swatchRef.current!.getBoundingClientRect();
-    const left = Math.min(Math.max(8, r.right - POP_W), window.innerWidth - POP_W - 8);
-    const top = Math.min(r.bottom + 6, window.innerHeight - 200);
-    setPos({ left, top });
+    const a = { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    setAnchor(a);
+    setClear(barRect());
+    // A first guess from the width alone (the height isn't known until it's in
+    // the document); corrected below, before paint.
+    setPos(placeAnchored(a, POP_W, 0, { clear: barRect() }));
     setOpen(true);
   };
+
+  // Position against the *measured* popover. The height used to be a hardcoded
+  // 200 with no flip, which put the palette on top of the draw toolbar the
+  // swatch lives in and the tool dock below it — see `placeAnchored`. Measured
+  // after layout and before paint, so the correction never shows.
+  useLayoutEffect(() => {
+    if (!open || !anchor || !popRef.current) return;
+    const el = popRef.current;
+    const next = placeAnchored(anchor, el.offsetWidth, el.offsetHeight, { clear });
+    setPos((prev) => (prev && prev.left === next.left && prev.top === next.top ? prev : next));
+  }, [open, anchor, clear]);
 
   useEffect(() => {
     if (!open) return;

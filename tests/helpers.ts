@@ -69,6 +69,33 @@ export async function pickTool(page: Page, label: string): Promise<void> {
   await page.locator(`.tooldock__btn[aria-label="${label}"]`).click();
 }
 
+/**
+ * Choose one of the Draw sub-tools.
+ *
+ * The sub-toolbar is a disclosure, not a fixture: it opens with the Draw tool
+ * and folds to its handle as soon as a sub-tool is picked, so "open it if it
+ * isn't open" is part of reaching one. Clicking the dock's Draw button when it
+ * is already active *toggles* the strip — which is why this checks first rather
+ * than clicking through.
+ */
+export async function pickSubTool(page: Page, label: string): Promise<void> {
+  const draw = page.locator('.tooldock__btn[aria-label="Draw"]');
+  if ((await draw.getAttribute("aria-pressed")) !== "true") await draw.click();
+  if ((await page.locator(".drawbar--closed").count()) > 0) {
+    await page.locator(".drawbar__handle").click();
+  }
+  await page.locator(`#drawbar .icon-btn[aria-label="${label}"]`).click();
+}
+
+/** Re-open the draw sub-toolbar, which folds to its handle once a sub-tool is
+ * picked — anything reaching for the colour swatch or the width slider has to
+ * put it back up first. */
+export async function openDrawbar(page: Page): Promise<void> {
+  if ((await page.locator(".drawbar--closed").count()) > 0) {
+    await page.locator(".drawbar__handle").click();
+  }
+}
+
 /** Drag a rectangle on the first page's overlay, in overlay-relative pixels. */
 export async function dragOnPage(
   page: Page,

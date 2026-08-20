@@ -25,7 +25,8 @@ import { AnnotationLayer } from "./AnnotationLayer";
 import { NoteItem } from "./NoteItem";
 import { StampItem } from "./StampItem";
 import { AnnotationFrame } from "./AnnotationFrame";
-import { dragState } from "../hooks/useDrag";
+import { dragState, startPointerDrag } from "../hooks/useDrag";
+import { isMarkTool } from "./DrawToolbar";
 import { useGuides } from "../hooks/useSnap";
 import { annotationBox, intersects, linkBox, redactionBox, stampBox, textBoxBox, type Box } from "../pdf/bbox";
 import type { LinkAnnot, PageNumberOptions, Stamp, WatermarkOptions } from "../pdf/types";
@@ -35,6 +36,10 @@ import { FormFieldLayer } from "./FormFieldLayer";
 
 /** Annotation spec minus the fields the App assigns (id, pageIndex). */
 export type AnnotSpec = Omit<Annotation, "id" | "pageIndex">;
+
+/** What a selection can point at — used to turn a multi-selection member back
+ * into a single selection when its highlight is clicked rather than dragged. */
+type SelKind = NonNullable<Selection>["kind"];
 
 interface Props {
   bytes: ArrayBuffer;
@@ -85,6 +90,9 @@ interface Props {
   onChangeFormValue: (name: string, value: string | boolean) => void;
   /** Report the ids enclosed by a marquee drag on this page. */
   onMarquee: (ids: string[], additive: boolean) => void;
+  /** Shift every object in the multi-selection by (dx, dy) in PDF units. The
+   * key coalesces a whole drag into one undo step. */
+  onMoveMulti: (dx: number, dy: number, key: string) => void;
   onAddAnnotation: (pageIndex: number, spec: AnnotSpec) => void;
   onPlaceStamp: (pageIndex: number, xLeft: number, yTop: number) => void;
 }
@@ -107,7 +115,7 @@ function PageViewInner(props: Props) {
     bytes, page, scale, tool, drawTool, drawStyle, edits, textBoxes, redactions,
     annotations, stamps, links, formValues, pageNumbers, watermark, multiIds, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, onSelect, onEditText, onFinishEdit,
     onChangeFragmentText, onChangeTextBoxText, onChangeTextBox, onChangeRedaction, onChangeLink,
-    onChangeNoteText, onMoveAnnotation, onChangeStamp, onDeleteStamp, onAddTextBox, onAddRedaction, onAddLink, onChangeFormValue, onMarquee, onAddAnnotation,
+    onChangeNoteText, onMoveAnnotation, onChangeStamp, onDeleteStamp, onAddTextBox, onAddRedaction, onAddLink, onChangeFormValue, onMarquee, onMoveMulti, onAddAnnotation,
     onPlaceStamp,
   } = props;
 
@@ -116,6 +124,12 @@ function PageViewInner(props: Props) {
   const [error, setError] = useState<string | null>(null);
   const [painted, setPainted] = useState(false);
   const [g, setG] = useState<Gesture | null>(null);
+  // Where a mark would land if you tapped now. A tick is the one tool here
+  // placed by a tap rather than a drag, so nothing on the page showed its size
+  // or position until it already existed; this shows both before you commit.
+  // Hover only — a finger has no hover, and the drawbar's hint carries it there.
+  const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null);
+  const groupGesture = useRef(0);
   // Only pages within a band around the viewport are rasterised and get their
   // overlay mounted; the wrapper below always keeps its full size so scroll
   // position, page anchors, and the scrollbar are unaffected.
@@ -236,8 +250,16 @@ function PageViewInner(props: Props) {
     setG({ mode, x0: x, y0: y, x1: x, y1: y, pts: [{ x, y }] });
   };
 
+  const markTool = tool === "draw" && isMarkTool(drawTool) && !placing;
+
   const onMove = (ev: React.PointerEvent) => {
-    if (!g) return;
+    if (!g) {
+      if (markTool && ev.pointerType !== "touch") {
+        const { x, y } = local(ev.clientX, ev.clientY);
+        setGhost({ x, y });
+      }
+      return;
+    }
     const { x, y } = local(ev.clientX, ev.clientY);
     setG({ ...g, x1: x, y1: y, pts: g.mode === "pen" ? [...g.pts, { x, y }] : g.pts });
   };
@@ -307,6 +329,36 @@ function PageViewInner(props: Props) {
     }
   };
 
+  // A ghost outlives its reason otherwise: switch tools with the pointer parked
+  // over a page and it would sit there until the next move event.
+  useEffect(() => {
+    if (!markTool) setGhost(null);
+  }, [markTool]);
+
+  /** Drag every object in the multi-selection together. The highlights render
+   * above the objects, so this catches a drag that starts on any member — and
+   * `startPointerDrag` reports the delta from the start, which has to be fed in
+   * as increments because each commit applies to the state it finds. */
+  const beginGroupDrag = (ev: React.PointerEvent, id: string, kind: SelKind) => {
+    const key = `move-multi-${++groupGesture.current}`;
+    let lastX = 0;
+    let lastY = 0;
+    let moved = false;
+    startPointerDrag(ev, {
+      onMove: (dx, dy) => {
+        if (Math.hypot(dx, dy) > 3) moved = true;
+        onMoveMulti((dx - lastX) / scale, -(dy - lastY) / scale, key);
+        lastX = dx;
+        lastY = dy;
+      },
+      // A press that didn't travel is a click on the object underneath, which
+      // in a group means "just this one" — the highlight must not swallow it.
+      onEnd: () => {
+        if (!moved) onSelect({ kind, id } as NonNullable<Selection>);
+      },
+    });
+  };
+
   const cursor = placing
     ? "copy"
     : tool === "text"
@@ -341,6 +393,7 @@ function PageViewInner(props: Props) {
             dragState.active = false;
             setG(null);
           }}
+          onPointerLeave={() => setGhost(null)}
         >
           {findMatches && findMatches.length > 0 && (
             <div className="findlayer" aria-hidden="true">
@@ -427,6 +480,20 @@ function PageViewInner(props: Props) {
               />
             );
           })}
+
+          {/* Stroke-shaped hit targets, above the editable text — see
+              `AnnotationLayer`'s `variant`. Nothing here paints, so stacking
+              order is entirely decided by the layer above. */}
+          <AnnotationLayer
+            variant="hits"
+            annotations={nonNote}
+            scale={scale}
+            pageHeight={H}
+            selectedId={selection?.kind === "annotation" ? selection.id : null}
+            interactive={tool === "select"}
+            onSelect={(id) => onSelect({ kind: "annotation", id })}
+            onMove={onMoveAnnotation}
+          />
 
           {notes.map((n) => (
             <NoteItem
@@ -520,18 +587,23 @@ function PageViewInner(props: Props) {
             onChange={onChangeFormValue}
           />
 
-          {/* Multi-selection highlights (marquee result). */}
+          {/* Multi-selection highlights (marquee result) — and the group's drag
+              surface. They sit above the objects they outline, so a drag that
+              starts on any member is a drag of the whole group; align and
+              distribute were the only things a group could do before, and
+              "move these five together" is the obvious one. */}
           {multiIds.size > 0 &&
             [
-              ...textBoxes.filter((b) => multiIds.has(b.id)).map((b) => ({ id: b.id, box: textBoxBox(b) })),
-              ...redactions.filter((r) => multiIds.has(r.id)).map((r) => ({ id: r.id, box: redactionBox(r) })),
-              ...annotations.filter((a) => multiIds.has(a.id)).map((a) => ({ id: a.id, box: annotationBox(a) })),
-              ...stamps.filter((s) => multiIds.has(s.id)).map((s) => ({ id: s.id, box: stampBox(s) })),
-              ...links.filter((l) => multiIds.has(l.id)).map((l) => ({ id: l.id, box: linkBox(l) })),
-            ].map(({ id, box }) => (
+              ...textBoxes.filter((b) => multiIds.has(b.id)).map((b) => ({ id: b.id, kind: "textbox" as SelKind, box: textBoxBox(b) })),
+              ...redactions.filter((r) => multiIds.has(r.id)).map((r) => ({ id: r.id, kind: "redaction" as SelKind, box: redactionBox(r) })),
+              ...annotations.filter((a) => multiIds.has(a.id)).map((a) => ({ id: a.id, kind: "annotation" as SelKind, box: annotationBox(a) })),
+              ...stamps.filter((s) => multiIds.has(s.id)).map((s) => ({ id: s.id, kind: "stamp" as SelKind, box: stampBox(s) })),
+              ...links.filter((l) => multiIds.has(l.id)).map((l) => ({ id: l.id, kind: "link" as SelKind, box: linkBox(l) })),
+            ].map(({ id, kind, box }) => (
               <div
                 key={`multi-${id}`}
                 className="multisel"
+                onPointerDown={(ev) => beginGroupDrag(ev, id, kind)}
                 style={{
                   left: box.l * scale,
                   top: (H - box.t) * scale,
@@ -552,6 +624,18 @@ function PageViewInner(props: Props) {
 
           {/* Live draw preview */}
           {g && <DrawPreview g={g} color={drawStyle.color} width={drawStyle.width} scale={scale} />}
+
+          {/* Where a tap would drop a mark, at the size it would be. */}
+          {markTool && ghost && !g && (
+            <MarkGhost
+              kind={drawTool === "cross" ? "cross" : "check"}
+              x={ghost.x}
+              y={ghost.y}
+              size={DEFAULT_MARK_SIZE * scale}
+              color={drawStyle.color}
+              width={drawStyle.width * scale}
+            />
+          )}
         </div>
       )}
     </div>
@@ -607,6 +691,52 @@ function FinishPreview({
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * The mark a tap would place: same glyph, same default size, at the cursor.
+ *
+ * Drawn from `MARK_PATHS` like the drag preview, the SVG overlay, the pdf-lib
+ * export and the redaction raster — one definition of the glyph, five call
+ * sites mapping it into their own space. A hand-drawn tick here would be a
+ * preview that lies about the mark you get.
+ */
+function MarkGhost({
+  kind,
+  x,
+  y,
+  size,
+  color,
+  width,
+}: {
+  kind: "check" | "cross";
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  width: number;
+}) {
+  const left = x - size / 2;
+  const top = y - size / 2;
+  return (
+    // Deliberately not `annot-svg`: that class means "the annotation layer", and
+    // the specs count its shapes. A preview that answered those counts would
+    // make every mark assertion off by the ghost.
+    <svg className="markghost" width="100%" height="100%" aria-hidden="true">
+      <rect x={left} y={top} width={size} height={size} className="markghost__box" />
+      {MARK_PATHS[kind].map((line, i) => (
+        <polyline
+          key={i}
+          points={line.map(([ux, uy]) => `${left + ux * size},${top + (1 - uy) * size}`).join(" ")}
+          fill="none"
+          stroke={color}
+          strokeWidth={Math.max(width, size * 0.12)}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ))}
+    </svg>
   );
 }
 

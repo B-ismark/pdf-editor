@@ -16,6 +16,8 @@ interface Props {
   onChangeRedactionColor: (color: string) => void;
   onChangeLinkUrl?: (url: string) => void;
   onChangeAnnotation: (patch: { color?: string; strokeWidth?: number }) => void;
+  /** Restack the selected annotation within the annotation layer. */
+  onArrange?: (to: "front" | "back") => void;
   onDelete: () => void;
   /** Reset the selected text's style back to the default. */
   onReset?: () => void;
@@ -29,6 +31,10 @@ const ANNOT_LABEL: Record<string, string> = {
   rect: "Rectangle",
   line: "Line",
   arrow: "Arrow",
+  // Named, not left to the generic fallback: "Annotation" told a user who just
+  // placed a tick nothing about what they had selected.
+  check: "Tick",
+  cross: "Cross",
   note: "Sticky note",
 };
 
@@ -53,6 +59,7 @@ export function PropertiesPanel({
   onChangeRedactionColor,
   onChangeLinkUrl,
   onChangeAnnotation,
+  onArrange,
   onDelete,
   onReset,
   onClose,
@@ -168,6 +175,35 @@ export function PropertiesPanel({
           )}
           {annotation.kind === "note" && (
             <p className="props__empty body-small">Edit the note text directly on the page.</p>
+          )}
+          {/* Stacking order. Drawings paint in the order they were made, so
+              anything drawn later buries what's under it — a highlight over a
+              pen line used to be permanent. Not offered for a sticky note: a
+              note is an HTML element above the whole shape layer (and, since
+              `annotationPaintOrder`, above it in the file too), so "bring to
+              front" would be a control with nothing to do. */}
+          {onArrange && annotation.kind !== "note" && (
+            <div className="field field--row">
+              <span className="field__label label-medium">Order</span>
+              <div className="props__arrange">
+                <button
+                  className="icon-btn icon-btn--sm"
+                  onClick={() => onArrange("front")}
+                  aria-label="Bring to front"
+                  data-tip="Bring to front · ]"
+                >
+                  <Icon name="bring_front" size={18} />
+                </button>
+                <button
+                  className="icon-btn icon-btn--sm"
+                  onClick={() => onArrange("back")}
+                  aria-label="Send to back"
+                  data-tip="Send to back · ["
+                >
+                  <Icon name="send_back" size={18} />
+                </button>
+              </div>
+            </div>
           )}
           <button className="btn btn--danger" onClick={onDelete}>
             <Icon name="delete" size={16} /> Delete
