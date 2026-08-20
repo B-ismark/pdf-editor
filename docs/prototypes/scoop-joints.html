@@ -1,0 +1,1702 @@
+<title>Scoop Joints</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&display=swap">
+
+<style>
+/* ═══════════════════════════════════════════════════════════════════════
+   TOKENS
+   Two sets, deliberately kept apart:
+   --pg-*  page chrome (this document)
+   the rest are lifted verbatim from src/theme.css so every specimen below
+   renders in the app's real colours and the CSS shown is copy-pasteable.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  /* page chrome — neutrals biased toward the app's violet, not pure grey */
+  --pg-ground: #faf8fc;
+  --pg-slab: #efeaf4;
+  --pg-ink: #1a1720;
+  --pg-ink-soft: #5d5670;
+  --pg-rule: #ded7e6;
+  --pg-accent: #6750a4;
+  --pg-accent-soft: #ede7f6;
+  --pg-caution: #b3261e;
+  --pg-caution-soft: #f9dedc;
+  --pg-code: #f3eff8;
+
+  /* ── app tokens (src/theme.css, light) ── */
+  --primary: #6750a4;
+  --on-primary: #ffffff;
+  --primary-container: #eaddff;
+  --on-primary-container: #21005d;
+  --secondary-container: #e8def8;
+  --on-secondary-container: #1d192b;
+  --error: #b3261e;
+  --surface: #fef7ff;
+  --on-surface: #1d1b20;
+  --on-surface-variant: #49454f;
+  --outline: #79747e;
+  --outline-variant: #cac4d0;
+  --surface-container-lowest: #ffffff;
+  --surface-container-low: #f7f2fa;
+  --surface-container: #f3edf7;
+  --surface-container-high: #ece6f0;
+  --surface-container-highest: #e6e0e9;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 28px;
+  --radius-full: 9999px;
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-spring: cubic-bezier(0.2, 0.9, 0.2, 1.15);
+  --dur-short4: 200ms;
+  --dur-med2: 300ms;
+  --dur-med4: 400ms;
+
+  --shadow-1: 0 1px 2px rgba(0,0,0,.12), 0 1px 3px rgba(0,0,0,.08);
+  --shadow-2: 0 2px 6px rgba(0,0,0,.15), 0 1px 2px rgba(0,0,0,.1);
+  --shadow-3: 0 6px 16px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.12);
+
+  /* ── the joint itself ── */
+  --joint-neck: 34px;   /* stem width */
+  --joint-fillet: 12px; /* concave corner radius */
+  --joint-rise: 14px;   /* dock lift above the panel */
+
+  color-scheme: light;
+}
+
+/* dark — system default (no stamp), losing only to an explicit light choice */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pg-ground: #100e14;
+    --pg-slab: #191622;
+    --pg-ink: #e9e5ef;
+    --pg-ink-soft: #a49cb6;
+    --pg-rule: #2c2735;
+    --pg-accent: #d0bcff;
+    --pg-accent-soft: #2a2338;
+    --pg-caution: #f2b8b5;
+    --pg-caution-soft: #3a1f1d;
+    --pg-code: #1c1926;
+
+    --primary: #d0bcff;
+    --on-primary: #381e72;
+    --primary-container: #4f378b;
+    --on-primary-container: #eaddff;
+    --secondary-container: #4a4458;
+    --on-secondary-container: #e8def8;
+    --error: #f2b8b5;
+    --surface: #141218;
+    --on-surface: #e6e0e9;
+    --on-surface-variant: #cac4d0;
+    --outline: #938f99;
+    --outline-variant: #49454f;
+    --surface-container-lowest: #0f0d13;
+    --surface-container-low: #1d1b20;
+    --surface-container: #211f26;
+    --surface-container-high: #2b2930;
+    --surface-container-highest: #36343b;
+
+    --shadow-1: 0 1px 2px rgba(0,0,0,.4), 0 1px 3px rgba(0,0,0,.3);
+    --shadow-2: 0 2px 6px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
+    --shadow-3: 0 6px 16px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.4);
+
+    color-scheme: dark;
+  }
+}
+
+/* dark — explicit choice, so the in-page toggle wins over a light OS */
+:root[data-theme="dark"] {
+  --pg-ground: #100e14;
+  --pg-slab: #191622;
+  --pg-ink: #e9e5ef;
+  --pg-ink-soft: #a49cb6;
+  --pg-rule: #2c2735;
+  --pg-accent: #d0bcff;
+  --pg-accent-soft: #2a2338;
+  --pg-caution: #f2b8b5;
+  --pg-caution-soft: #3a1f1d;
+  --pg-code: #1c1926;
+
+  --primary: #d0bcff;
+  --on-primary: #381e72;
+  --primary-container: #4f378b;
+  --on-primary-container: #eaddff;
+  --secondary-container: #4a4458;
+  --on-secondary-container: #e8def8;
+  --error: #f2b8b5;
+  --surface: #141218;
+  --on-surface: #e6e0e9;
+  --on-surface-variant: #cac4d0;
+  --outline: #938f99;
+  --outline-variant: #49454f;
+  --surface-container-lowest: #0f0d13;
+  --surface-container-low: #1d1b20;
+  --surface-container: #211f26;
+  --surface-container-high: #2b2930;
+  --surface-container-highest: #36343b;
+
+  --shadow-1: 0 1px 2px rgba(0,0,0,.4), 0 1px 3px rgba(0,0,0,.3);
+  --shadow-2: 0 2px 6px rgba(0,0,0,.5), 0 1px 2px rgba(0,0,0,.4);
+  --shadow-3: 0 6px 16px rgba(0,0,0,.55), 0 2px 6px rgba(0,0,0,.4);
+
+  color-scheme: dark;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PAGE
+   ═══════════════════════════════════════════════════════════════════════ */
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--pg-ground);
+  color: var(--pg-ink);
+  font: 400 16px/1.6 "IBM Plex Sans", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px 120px; }
+.col { max-width: 68ch; }
+
+h1, h2, h3 {
+  font-family: "Bricolage Grotesque", system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
+  margin: 0;
+}
+h1 { font-size: clamp(2.6rem, 6vw, 4.1rem); line-height: 0.98; }
+h2 { font-size: clamp(1.55rem, 3vw, 2.1rem); line-height: 1.1; }
+h3 { font-size: 1.08rem; font-weight: 600; letter-spacing: -0.01em; }
+p { margin: 0; }
+strong { font-weight: 600; }
+code, .mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.855em;
+}
+code {
+  background: var(--pg-code);
+  padding: 0.1em 0.4em;
+  border-radius: 4px;
+}
+
+.eyebrow {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--pg-accent);
+}
+
+/* ── header ── */
+.head {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 76px 0 54px;
+}
+.head__lede {
+  font-size: 1.16rem;
+  line-height: 1.55;
+  color: var(--pg-ink-soft);
+  max-width: 60ch;
+}
+.head__lede em { color: var(--pg-ink); font-style: normal; font-weight: 500; }
+
+/* ── control bar ── */
+.controls {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 0;
+  margin-bottom: 8px;
+  background: color-mix(in srgb, var(--pg-ground) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--pg-rule);
+}
+.ctl {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 13px;
+  border: 1px solid var(--pg-rule);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--pg-ink-soft);
+  font: 500 0.79rem/1 "IBM Plex Mono", monospace;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background var(--dur-short4) var(--ease-standard),
+              color var(--dur-short4) var(--ease-standard),
+              border-color var(--dur-short4) var(--ease-standard);
+}
+.ctl:hover { color: var(--pg-ink); border-color: var(--pg-ink-soft); }
+.ctl[aria-pressed="true"] {
+  background: var(--pg-accent-soft);
+  border-color: transparent;
+  color: var(--pg-accent);
+}
+.ctl__dot {
+  width: 7px; height: 7px; border-radius: 999px;
+  background: currentColor; opacity: 0.4;
+}
+.ctl[aria-pressed="true"] .ctl__dot { opacity: 1; }
+.ctl-note {
+  font: 400 0.73rem/1.3 "IBM Plex Mono", monospace;
+  color: var(--pg-ink-soft);
+  margin-left: auto;
+  max-width: 34ch;
+}
+
+:focus-visible { outline: 2px solid var(--pg-accent); outline-offset: 2px; }
+
+/* ── sections ── */
+section { padding-top: 72px; }
+.sec__head { display: flex; flex-direction: column; gap: 12px; margin-bottom: 30px; }
+.sec__head p { color: var(--pg-ink-soft); max-width: 66ch; }
+
+/* ── bench: the recessed slab specimens sit on ── */
+.bench {
+  position: relative;
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at center, color-mix(in srgb, var(--pg-ink) 9%, transparent) 1px, transparent 1.2px)
+    0 0 / 22px 22px,
+    var(--pg-slab);
+  border: 1px solid var(--pg-rule);
+  padding: 40px 32px;
+  overflow-x: auto;
+}
+.bench--tall { padding: 52px 32px; }
+.bench__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 44px;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: min-content;
+}
+.bench__cap {
+  display: block;
+  margin-top: 20px;
+  font: 400 0.78rem/1.5 "IBM Plex Mono", monospace;
+  color: var(--pg-ink-soft);
+  text-align: center;
+}
+.bench__cap b { color: var(--pg-ink); font-weight: 500; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   THE JOINT
+   A dock of pills floating above a panel, joined by a neck whose base
+   flares into two concave fillets. Three parts, one shared background.
+   ═══════════════════════════════════════════════════════════════════════ */
+.mock {
+  position: relative;
+  padding-top: calc(44px + var(--joint-rise));
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--on-surface);
+  flex: none;
+}
+
+/* the row of pills */
+.mock__dock {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+  z-index: 2;
+}
+.mock__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 44px;
+  padding: 0 16px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--surface-container-high);
+  color: var(--on-surface-variant);
+  font: 500 0.875rem/1.43 system-ui, sans-serif;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--shadow-1);
+  transition: background var(--dur-med2) var(--ease-standard),
+              color var(--dur-med2) var(--ease-standard);
+}
+.mock__tab:hover { background: var(--surface-container-highest); color: var(--on-surface); }
+.mock__tab[aria-selected="true"] {
+  background: var(--surface-container-low);
+  color: var(--primary);
+  box-shadow: var(--shadow-2);
+}
+.mock__tab svg { flex: none; }
+
+/* the neck + fillets, translated to sit under the active pill */
+.mock__joint {
+  position: absolute;
+  left: 0;
+  height: var(--joint-rise);
+  width: calc(var(--joint-neck) + var(--joint-fillet) * 2);
+  top: 44px;
+  transform: translateX(var(--joint-x, 0px));
+  z-index: 1;
+  pointer-events: none;
+}
+.mock--anim .mock__joint,
+.mock__joint.mock--anim {
+  transition: transform var(--dur-med4) var(--motion-expressive);
+}
+
+.mock__neck {
+  position: absolute;
+  left: var(--joint-fillet);
+  top: -8px;              /* tucks under the pill's rounded bottom */
+  width: var(--joint-neck);
+  bottom: 0;
+  background: var(--surface-container-low);
+  border-radius: 10px 10px 0 0;
+}
+.mock__fillet {
+  position: absolute;
+  bottom: 0;
+  width: var(--joint-fillet);
+  height: var(--joint-fillet);
+  background: var(--surface-container-low);
+}
+.mock__fillet--l { left: 0; border-top-left-radius: var(--joint-fillet); }
+.mock__fillet--r { right: 0; border-top-right-radius: var(--joint-fillet); }
+
+/* Path 1 — corner-shape. Real box geometry, so border and box-shadow
+   follow the concave curve. Chromium 139+ only. */
+@supports (corner-shape: scoop) {
+  html:not([data-joint="mask"]) .mock__fillet { corner-shape: scoop; }
+}
+/* Path 2 — radial-gradient mask. Works everywhere, masks the paint only:
+   any border or shadow on the fillet is clipped away with it. */
+@supports not (corner-shape: scoop) {
+  .mock__fillet--l { mask: radial-gradient(circle var(--joint-fillet) at 0 0, #0000 99%, #000 100%); }
+  .mock__fillet--r { mask: radial-gradient(circle var(--joint-fillet) at 100% 0, #0000 99%, #000 100%); }
+}
+html[data-joint="mask"] .mock__fillet--l { mask: radial-gradient(circle var(--joint-fillet) at 0 0, #0000 99%, #000 100%); }
+html[data-joint="mask"] .mock__fillet--r { mask: radial-gradient(circle var(--joint-fillet) at 100% 0, #0000 99%, #000 100%); }
+
+/* the panel — the real Inspector at its real width */
+.mock__panel {
+  width: var(--mock-w, 320px);
+  background: var(--surface-container-low);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 14px 0 18px;
+  box-shadow: var(--shadow-1);
+  transition: width var(--dur-med4) var(--ease-emphasized-decelerate);
+}
+
+/* ── Inspector body: the real doclist ── */
+.doclist { display: flex; flex-direction: column; gap: 2px; padding: 0 8px; }
+.doclist__label {
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font: 500 0.75rem/1.33 system-ui, sans-serif;
+  margin: 12px 4px 2px;
+}
+.doclist__label:first-child { margin-top: 2px; }
+.docbtn {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  height: 40px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--on-surface);
+  font: 400 0.875rem/1.43 system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.docbtn:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
+.docbtn svg { flex: none; color: var(--on-surface-variant); }
+
+/* ── properties tab body ── */
+.props { display: flex; flex-direction: column; gap: 14px; padding: 6px 16px 0; }
+.props__row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.props__k { font: 400 0.8125rem/1.4 system-ui, sans-serif; color: var(--on-surface-variant); }
+.props__v {
+  font: 500 0.8125rem/1.4 system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  color: var(--on-surface);
+  background: var(--surface-container-high);
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+}
+.props__swatch {
+  width: 26px; height: 26px; border-radius: var(--radius-sm);
+  border: 1px solid var(--outline-variant);
+}
+.props__empty {
+  padding: 22px 16px 8px;
+  font: 400 0.8125rem/1.5 system-ui, sans-serif;
+  color: var(--on-surface-variant);
+  text-align: center;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ANATOMY DIAGRAM
+   ═══════════════════════════════════════════════════════════════════════ */
+.anat { display: flex; flex-wrap: wrap; gap: 40px; align-items: flex-start; justify-content: center; }
+.anat__stage {
+  position: relative;
+  --joint-neck: 62px;
+  --joint-fillet: 26px;
+  --joint-rise: 30px;
+}
+.anat__stage .mock__panel { width: 300px; height: 132px; padding: 0; }
+.anat__stage .mock__tab { height: 52px; font-size: 0.95rem; }
+.anat__stage { padding-top: calc(52px + var(--joint-rise)); }
+.anat__stage .mock__joint { top: 52px; }
+
+.dials { display: flex; flex-direction: column; gap: 18px; min-width: 268px; }
+.dial { display: flex; flex-direction: column; gap: 6px; }
+.dial__top {
+  display: flex; justify-content: space-between; align-items: baseline;
+  font: 500 0.78rem/1 "IBM Plex Mono", monospace;
+  color: var(--pg-ink);
+}
+.dial__top span:last-child { color: var(--pg-accent); font-variant-numeric: tabular-nums; }
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 4px; border-radius: 999px;
+  background: var(--pg-rule); cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; border-radius: 999px;
+  background: var(--pg-accent); border: none; cursor: pointer;
+}
+input[type="range"]::-moz-range-thumb {
+  width: 16px; height: 16px; border-radius: 999px;
+  background: var(--pg-accent); border: none; cursor: pointer;
+}
+
+pre {
+  margin: 0;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: var(--pg-code);
+  border: 1px solid var(--pg-rule);
+  overflow-x: auto;
+  font: 400 0.79rem/1.65 "IBM Plex Mono", monospace;
+  color: var(--pg-ink);
+  tab-size: 2;
+}
+pre .c { color: var(--pg-ink-soft); }
+pre .p { color: var(--pg-accent); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ALTERNATE B — grown tool dock
+   ═══════════════════════════════════════════════════════════════════════ */
+.tooldock {
+  display: inline-flex;
+  gap: 2px;
+  padding: 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-container-low);
+  box-shadow: var(--shadow-2);
+  position: relative;
+  z-index: 2;
+}
+.tooldock__btn {
+  width: 44px; height: 44px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: none; border-radius: var(--radius-full);
+  background: transparent; color: var(--on-surface-variant);
+  cursor: pointer;
+  transition: background var(--dur-short4) var(--ease-standard), color var(--dur-short4) var(--ease-standard);
+}
+.tooldock__btn:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
+.tooldock__btn[aria-pressed="true"] { background: var(--secondary-container); color: var(--on-secondary-container); }
+
+/* Reuses A's joint verbatim — same three parts, same @supports rules, only
+   the variables differ. Six anchor positions instead of two. */
+.grown {
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  --joint-neck: 44px;
+  --joint-fillet: 12px;
+  --joint-rise: 12px;
+}
+.grown .mock__joint { top: 56px; }
+.grown__body {
+  margin-top: var(--joint-rise);
+  padding: 16px 18px;
+  border-radius: var(--radius-xl);
+  background: var(--surface-container-low);
+  box-shadow: var(--shadow-2);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.grown__body[hidden] { display: none; }
+
+.swatchrow { display: flex; gap: 6px; }
+.swatch {
+  width: 26px; height: 26px; border-radius: 999px;
+  border: 2px solid transparent; cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0,0,0,.12);
+}
+.swatch[aria-pressed="true"] { border-color: var(--primary); }
+.stroke {
+  width: 96px; height: 4px; border-radius: 999px;
+  background: linear-gradient(90deg, var(--outline) 60%, var(--outline-variant) 60%);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ALTERNATE C — anchored popover with a scoop tail
+   ═══════════════════════════════════════════════════════════════════════ */
+.anchorbench {
+  position: relative;
+  width: 100%;
+  max-width: 620px;
+  height: 232px;
+  border-radius: var(--radius-md);
+  background: var(--surface-container-lowest);
+  border: 1px solid var(--outline-variant);
+  overflow: hidden;
+  margin: 0 auto;
+}
+.anchorbench__bar {
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 52px;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--outline-variant);
+  background: var(--surface-container-low);
+}
+/* Same joint again — third reuse, different surface colour and a neck that
+   spans the gap to the bar instead of lifting off a dock. */
+.pop {
+  position: absolute;
+  top: 62px;
+  width: 190px;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-container-high);
+  box-shadow: var(--shadow-3);
+  font: 400 0.8125rem/1.5 system-ui, sans-serif;
+  color: var(--on-surface);
+  --joint-neck: 26px;
+  --joint-fillet: 10px;
+  --joint-rise: 10px;
+  transition: left var(--dur-med2) var(--motion-expressive);
+}
+.pop .mock__joint { top: calc(var(--joint-rise) * -1); }
+.pop .mock__neck { top: 0; background: var(--surface-container-high); }
+.pop .mock__fillet { background: var(--surface-container-high); }
+.pop__grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-top: 10px; }
+.pop__chip { aspect-ratio: 1; border-radius: 6px; border: 1px solid rgba(128,128,128,.25); }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ALTERNATE D — squircle plates
+   ═══════════════════════════════════════════════════════════════════════ */
+.plates { display: flex; gap: 34px; flex-wrap: wrap; justify-content: center; }
+.plate {
+  width: 132px; height: 132px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  border-radius: 34px;
+  font: 500 0.8rem/1 "IBM Plex Mono", monospace;
+}
+.plate--sq { corner-shape: squircle; }
+.plate--sc { corner-shape: scoop; background: var(--secondary-container); color: var(--on-secondary-container); }
+.plate--bv { corner-shape: bevel; background: var(--surface-container-high); color: var(--on-surface); }
+.plate--nt { corner-shape: notch; background: var(--surface-container-high); color: var(--on-surface); }
+.plate-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+.plate-wrap span {
+  font: 400 0.75rem/1 "IBM Plex Mono", monospace;
+  color: var(--pg-ink-soft);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ALTERNATE E — perforated seam
+   ═══════════════════════════════════════════════════════════════════════ */
+.seampanel {
+  width: 320px;
+  background: var(--surface-container-low);
+  border-radius: var(--radius-lg);
+  padding: 14px 0 16px;
+  box-shadow: var(--shadow-1);
+  font-family: system-ui, sans-serif;
+  color: var(--on-surface);
+  flex: none;
+}
+/* Punched holes, not a dashed border. The first attempt drew a 1px rule and
+   knocked 3.5px holes out of it — at that ratio the surviving segments read
+   as dashes, which is the thing this is trying not to be. Bigger holes on a
+   wider pitch, each with a ring and a recessed centre, read as material
+   removed. Below ~7px they collapse back into dashes; that is the floor. */
+.seam {
+  height: 14px;
+  margin: 10px 14px;
+  background: radial-gradient(circle 5px at 9px 50%,
+      var(--surface-container-highest) 0 62%,
+      var(--outline-variant) 66% 84%,
+      transparent 88%) 0 0 / 18px 100% repeat-x;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   M3 EXPRESSIVE — shape as state, springs as motion
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  /* Underdamped spring, written as linear(). A cubic-bezier can overshoot
+     once and stop; a spring overshoots and settles. This is the difference
+     between "springy approximation" and the real motion scheme. */
+  --motion-expressive: linear(
+    0, 0.009 1.3%, 0.037 2.7%, 0.153 5.8%, 0.484 12%, 0.71 16.3%,
+    0.869 20.7%, 0.98 25.2%, 1.048 30%, 1.077 35.2%, 1.075 42%,
+    1.036 54%, 1.008 68%, 0.999 82%, 1
+  );
+  --motion-standard: linear(
+    0, 0.017 2%, 0.128 6.4%, 0.463 15%, 0.71 22%, 0.87 29%,
+    0.954 36%, 0.99 45%, 1
+  );
+}
+
+.morphset { display: flex; flex-direction: column; align-items: center; gap: 0; }
+.morphset__tabs { display: flex; gap: 8px; z-index: 2; position: relative; }
+.morphtab {
+  height: 46px;
+  padding: 0 20px;
+  border: none;
+  background: var(--surface-container-high);
+  color: var(--on-surface-variant);
+  font: 500 0.875rem/1 system-ui, sans-serif;
+  cursor: pointer;
+  /* shape IS the state: focused corners round up, unfocused round down */
+  border-radius: 10px;
+  transition: border-radius var(--dur-med4) var(--motion-expressive),
+              background var(--dur-med2) var(--ease-standard),
+              color var(--dur-med2) var(--ease-standard);
+}
+.morphtab[aria-selected="true"] {
+  border-radius: 23px;
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+@supports (corner-shape: squircle) {
+  html:not([data-joint="mask"]) .morphtab { corner-shape: squircle; }
+}
+.morphset__panel {
+  width: 300px;
+  margin-top: 12px;
+  padding: 16px;
+  border-radius: 24px;
+  background: var(--surface-container-low);
+  box-shadow: var(--shadow-1);
+  font: 400 0.8125rem/1.5 system-ui, sans-serif;
+  color: var(--on-surface-variant);
+}
+@supports (corner-shape: squircle) {
+  html:not([data-joint="mask"]) .morphset__panel { corner-shape: squircle; }
+}
+
+/* motion comparison track */
+.track {
+  position: relative;
+  height: 44px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--pg-ink) 6%, transparent);
+  overflow: hidden;
+}
+.track__dot {
+  position: absolute;
+  top: 8px; left: 8px;
+  width: 28px; height: 28px;
+  border-radius: 999px;
+  background: var(--pg-accent);
+}
+.track--bez .track__dot { transition: transform 600ms var(--ease-spring); }
+.track--exp .track__dot { transition: transform 600ms var(--motion-expressive); }
+.track--std .track__dot { transition: transform 600ms var(--motion-standard); }
+.track.is-out .track__dot { transform: translateX(var(--track-x, 240px)); }
+.trackset { display: flex; flex-direction: column; gap: 14px; width: 100%; max-width: 420px; }
+.trackset__label {
+  font: 500 0.74rem/1 "IBM Plex Mono", monospace;
+  color: var(--pg-ink-soft);
+  display: flex; justify-content: space-between;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   REJECTION
+   ═══════════════════════════════════════════════════════════════════════ */
+.reject {
+  border-left: 3px solid var(--pg-caution);
+  background: var(--pg-caution-soft);
+  border-radius: 0 12px 12px 0;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 68ch;
+}
+.reject h3 { color: var(--pg-caution); }
+.paper {
+  width: 148px; height: 196px;
+  background: #ffffff;
+  box-shadow: var(--shadow-2);
+  display: flex; flex-direction: column; gap: 7px;
+  padding: 20px 16px;
+}
+.paper i { display: block; height: 5px; border-radius: 2px; background: #d8d4dd; }
+.paper i:nth-child(3) { width: 62%; }
+.paper i:nth-child(6) { width: 44%; }
+.paper--scooped { border-radius: 22px; corner-shape: scoop; }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   OVERHAUL TABLE
+   ═══════════════════════════════════════════════════════════════════════ */
+.tablewrap { overflow-x: auto; border: 1px solid var(--pg-rule); border-radius: 12px; }
+table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 0.875rem; }
+th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--pg-rule); vertical-align: top; }
+th {
+  font: 500 0.72rem/1.3 "IBM Plex Mono", monospace;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--pg-ink-soft);
+  background: color-mix(in srgb, var(--pg-slab) 60%, transparent);
+}
+tr:last-child td { border-bottom: none; }
+td b { font-weight: 600; }
+.tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font: 500 0.7rem/1.6 "IBM Plex Mono", monospace;
+  white-space: nowrap;
+}
+.tag--go { background: var(--pg-accent-soft); color: var(--pg-accent); }
+.tag--care { background: color-mix(in srgb, var(--pg-caution) 14%, transparent); color: var(--pg-caution); }
+
+.steps { display: flex; flex-direction: column; gap: 2px; counter-reset: s; margin-top: 8px; }
+.step {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 16px;
+  padding: 16px 0;
+  border-top: 1px solid var(--pg-rule);
+  align-items: baseline;
+}
+.step::before {
+  counter-increment: s;
+  content: counter(s, decimal-leading-zero);
+  font: 500 0.78rem/1.6 "IBM Plex Mono", monospace;
+  color: var(--pg-accent);
+}
+.step h3 { margin-bottom: 4px; }
+.step p { color: var(--pg-ink-soft); font-size: 0.925rem; }
+
+.foot {
+  margin-top: 84px;
+  padding-top: 26px;
+  border-top: 1px solid var(--pg-rule);
+  font: 400 0.82rem/1.6 "IBM Plex Mono", monospace;
+  color: var(--pg-ink-soft);
+  max-width: 68ch;
+}
+
+.stack { display: flex; flex-direction: column; gap: 18px; }
+.stack--lg { gap: 30px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+html[data-motion="off"] * { transition-duration: 0.01ms !important; }
+</style>
+
+<div class="wrap">
+
+  <header class="head">
+    <span class="eyebrow">pdf-editor · visual language · prototype</span>
+    <h1>Scoop joints</h1>
+    <p class="head__lede">
+      A concave fillet where a floating control meets the surface it opened, so the panel
+      visibly <em>belongs to</em> the tab that summoned it. Everything below runs in the app's own
+      <code>theme.css</code> tokens at true size — the Inspector panels are 320&nbsp;px because
+      that is what <code>.inspector</code> is at ≥840&nbsp;px.
+    </p>
+  </header>
+
+  <div class="controls">
+    <button class="ctl" id="c-theme" aria-pressed="false"><span class="ctl__dot"></span>dark</button>
+    <button class="ctl" id="c-joint" aria-pressed="false"><span class="ctl__dot"></span>safari fallback</button>
+    <button class="ctl" id="c-motion" aria-pressed="false"><span class="ctl__dot"></span>reduced motion</button>
+    <button class="ctl" id="c-width" aria-pressed="false"><span class="ctl__dot"></span>narrow (288px)</button>
+    <span class="ctl-note" id="support-note"></span>
+  </div>
+
+  <!-- ══════════════════ 1. ANATOMY ══════════════════ -->
+  <section id="anatomy">
+    <div class="sec__head col">
+      <span class="eyebrow">01 — the shape</span>
+      <h2>Three parts, one background</h2>
+      <p>
+        The neck is a plain rounded rectangle. The quirk is entirely in the two boxes flanking its
+        base: each is <code>fillet × fillet</code>, painted in the panel's own colour, with a single
+        concave corner. Drag the dials — every specimen further down reads the same three variables.
+      </p>
+    </div>
+
+    <div class="bench bench--tall">
+      <div class="anat">
+        <div class="mock anat__stage mock--anim" id="anat">
+          <div class="mock__dock">
+            <button class="mock__tab" aria-selected="false">Document</button>
+            <button class="mock__tab" aria-selected="true">Properties</button>
+          </div>
+          <div class="mock__joint">
+            <span class="mock__neck"></span>
+            <span class="mock__fillet mock__fillet--l"></span>
+            <span class="mock__fillet mock__fillet--r"></span>
+          </div>
+          <div class="mock__panel"></div>
+        </div>
+
+        <div class="dials">
+          <label class="dial">
+            <span class="dial__top"><span>--joint-neck</span><span id="v-neck">62px</span></span>
+            <input type="range" id="d-neck" min="20" max="120" value="62">
+          </label>
+          <label class="dial">
+            <span class="dial__top"><span>--joint-fillet</span><span id="v-fillet">26px</span></span>
+            <input type="range" id="d-fillet" min="0" max="40" value="26">
+          </label>
+          <label class="dial">
+            <span class="dial__top"><span>--joint-rise</span><span id="v-rise">30px</span></span>
+            <input type="range" id="d-rise" min="4" max="52" value="30">
+          </label>
+          <pre id="css-out"></pre>
+        </div>
+      </div>
+      <span class="bench__cap">
+        <b>Anatomy.</b> Neck 62px / fillet 26px / rise 30px — exaggerated so the curve reads.
+        Shipping values are roughly a third of that.
+      </span>
+    </div>
+
+    <div class="stack col" style="margin-top:34px">
+      <p>
+        The two ways to cut that corner are not equivalent, and the difference decides how much of a
+        fallback you owe Safari:
+      </p>
+      <pre><span class="c">/* Path 1 — real box geometry. Border, outline and box-shadow
+   all follow the concave curve. Chromium 139+ only. */</span>
+.joint__fillet--l {
+  <span class="p">border-top-left-radius</span>: var(--joint-fillet);
+  <span class="p">corner-shape</span>: scoop;
+}
+
+<span class="c">/* Path 2 — masks the paint only. Any shadow on the fillet is
+   clipped away with it, so the panel's elevation stops at the neck. */</span>
+.joint__fillet--l {
+  <span class="p">mask</span>: radial-gradient(circle var(--joint-fillet) at 0 0,
+                              #0000 99%, #000 100%);
+}</pre>
+      <p>
+        Toggle <strong>safari fallback</strong> above and watch the specimens. On a flat panel the two
+        are indistinguishable. The moment the panel carries elevation, path&nbsp;2 loses the shadow
+        across the joint — which is exactly where the eye is looking.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══════════════════ 2. THE INSPECTOR ══════════════════ -->
+  <section id="inspector">
+    <div class="sec__head col">
+      <span class="eyebrow">02 — the ask</span>
+      <h2>The Inspector, jointed</h2>
+      <p>
+        Click between the tabs. The neck travels on <code>--ease-spring</code>, the panel content
+        crossfades, and the shape does the job the underline indicator is currently doing on its own:
+        it says <em>this surface is what that tab opened</em>. Both tabs stay visible and reachable
+        while you read a fragment's properties — the invariant the two-tab rewrite was for.
+      </p>
+    </div>
+
+    <div class="bench bench--tall">
+      <div class="bench__row">
+        <div class="mock mock--anim" id="insp">
+          <div class="mock__dock" role="tablist" aria-label="Panel">
+            <button class="mock__tab" role="tab" aria-selected="true" data-panel="document">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v5h5"/></svg>
+              Document
+            </button>
+            <button class="mock__tab" role="tab" aria-selected="false" data-panel="properties">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6"/></svg>
+              Properties
+            </button>
+          </div>
+          <div class="mock__joint" aria-hidden="true">
+            <span class="mock__neck"></span>
+            <span class="mock__fillet mock__fillet--l"></span>
+            <span class="mock__fillet mock__fillet--r"></span>
+          </div>
+          <div class="mock__panel">
+            <div id="panel-document">
+              <div class="doclist">
+                <div class="doclist__label">Organise</div>
+                <button class="docbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Organise pages</button>
+                <button class="docbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/></svg>Add image</button>
+                <div class="doclist__label">Text</div>
+                <button class="docbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 8h8M7 12h6M7 16h4"/></svg>Recognise text (OCR)</button>
+                <button class="docbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>Copy all text</button>
+                <button class="docbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M8 11l4 4 4-4M4 21h16"/></svg>Export text (.txt)</button>
+                <div class="doclist__label">Finish</div>
+                <button class="docbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M8 16h2M14 16h2"/><rect x="6" y="6" width="12" height="6" rx="1"/></svg>Page numbers</button>
+                <button class="docbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="m7 15 4-6 3 4 3-3"/></svg>Watermark</button>
+                <button class="docbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="14" height="12" rx="2"/><path d="M21 8v10a2 2 0 0 1-2 2H8"/></svg>Export as images</button>
+                <button class="docbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3H5v4M15 3h4v4M9 21H5v-4M15 21h4v-4M9 9h6v6H9z"/></svg>Compress PDF</button>
+                <button class="docbtn"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="6"/><path d="m8.5 14-1.5 7 5-3 5 3-1.5-7"/></svg>Sign with certificate</button>
+              </div>
+            </div>
+            <div id="panel-properties" hidden>
+              <div class="props">
+                <div class="props__row"><span class="props__k">Text</span><span class="props__v">Q2 Hiring Review</span></div>
+                <div class="props__row"><span class="props__k">Typeface</span><span class="props__v">Helvetica&nbsp;Bold</span></div>
+                <div class="props__row"><span class="props__k">Size</span><span class="props__v">16.0 pt</span></div>
+                <div class="props__row"><span class="props__k">Colour</span><span class="props__swatch" style="background:#1d1b20"></span></div>
+                <div class="props__row"><span class="props__k">Fill</span><span class="props__swatch" style="background:#ffffff"></span></div>
+                <div class="props__row"><span class="props__k">Baseline</span><span class="props__v">y 604.8</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <span class="bench__cap">
+        <b>Prototype A.</b> Real tokens, real doclist, real 320px. Neck tracks the active tab through a
+        <code>ResizeObserver</code> — flip <b>narrow (288px)</b> above to watch it re-solve.
+      </span>
+    </div>
+
+    <div class="stack col" style="margin-top:34px">
+      <h3>What this actually fixes</h3>
+      <p>
+        The underline indicator is correct and unmemorable. The joint is the same information given
+        <em>geometrically</em>: you cannot look at the panel without seeing which tab owns it, and the
+        pills read as floating <em>above</em> the surface rather than being a strip carved out of its top.
+        The collapsed edge tab keeps working unchanged — it is outside the dock.
+      </p>
+      <h3>What it costs</h3>
+      <p>
+        The neck's position is a measurement, not a layout. It needs a <code>ResizeObserver</code> on the
+        dock plus a recalculation on tab change, on font-size change, and on panel resize — three inputs,
+        each of which silently misaligns the neck by a few pixels if you miss it, and a misaligned neck
+        reads as a rendering bug rather than a style.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══════════════════ 3. ALTERNATES ══════════════════ -->
+  <section id="alternates">
+    <div class="sec__head col">
+      <span class="eyebrow">03 — four more</span>
+      <h2>Same grammar, other jobs</h2>
+      <p>
+        A joint that only ever appears in one place is a decoration. These are the other four surfaces
+        where the same shape language answers a problem the app already has, ordered by how much they
+        cost to ship.
+      </p>
+    </div>
+
+    <div class="stack stack--lg">
+
+      <!-- B -->
+      <div>
+        <div class="bench">
+          <div class="bench__row">
+            <div class="grown mock--anim" id="grown">
+              <div class="tooldock" role="toolbar" aria-label="Tools">
+                <button class="tooldock__btn" aria-pressed="false" data-tool="select" title="Select"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 3 7.07 16.97 2.51-7.39 7.39-2.51z"/></svg></button>
+                <button class="tooldock__btn" aria-pressed="false" data-tool="text" title="Add text"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7V5h16v2M12 5v14M9 19h6"/></svg></button>
+                <button class="tooldock__btn" aria-pressed="true" data-tool="draw" title="Draw"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19l7-7 3 3-7 7-3-3z"/><path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="M2 2l7.586 7.586"/><circle cx="11" cy="11" r="2"/></svg></button>
+                <button class="tooldock__btn" aria-pressed="false" data-tool="sign" title="Sign"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17c3 0 4-9 7-9s2 9 5 9c2 0 3-2 3-2"/><path d="M3 21h18"/></svg></button>
+                <button class="tooldock__btn" aria-pressed="false" data-tool="redact" title="Redact"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="8" rx="1" fill="currentColor"/></svg></button>
+                <button class="tooldock__btn" aria-pressed="false" data-tool="link" title="Link"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.5.5l3-3a5 5 0 0 0-7-7l-1.7 1.7"/><path d="M14 11a5 5 0 0 0-7.5-.5l-3 3a5 5 0 0 0 7 7l1.7-1.7"/></svg></button>
+              </div>
+              <div class="mock__joint" id="grown-joint" aria-hidden="true">
+                <span class="mock__neck"></span>
+                <span class="mock__fillet mock__fillet--l"></span>
+                <span class="mock__fillet mock__fillet--r"></span>
+              </div>
+              <div class="grown__body" id="grown-body">
+                <div class="swatchrow">
+                  <button class="swatch" aria-pressed="true" style="background:#1d1b20"></button>
+                  <button class="swatch" aria-pressed="false" style="background:#b3261e"></button>
+                  <button class="swatch" aria-pressed="false" style="background:#1e6b3a"></button>
+                  <button class="swatch" aria-pressed="false" style="background:#1a4fa0"></button>
+                  <button class="swatch" aria-pressed="false" style="background:#e8b400"></button>
+                </div>
+                <span class="stroke"></span>
+              </div>
+            </div>
+          </div>
+          <span class="bench__cap"><b>Prototype B — the grown tool dock.</b> Click Draw, Sign or Redact. The options bar
+          emerges from the tool that owns it instead of floating free below.</span>
+        </div>
+        <div class="stack col" style="margin-top:22px">
+          <h3>B — the drawbar grows out of its tool</h3>
+          <p>
+            Today the drawbar is a separate floating surface: it appears when a drawing tool is active but
+            has nothing tying it to <em>which</em> tool. Joining it to the pressed button is Material's FAB-menu
+            move, and it answers a real question — "these colours belong to Draw, not to Redact." The neck
+            here travels between six positions instead of two, which makes the tracking problem six times
+            more visible. It also inherits the existing horizontal-scroll behaviour of <code>.drawbar</code>,
+            and a neck pointing at a button that has scrolled out of view is the failure mode to design for.
+          </p>
+        </div>
+      </div>
+
+      <!-- C -->
+      <div>
+        <div class="bench">
+          <div class="anchorbench" id="anchorbench">
+            <div class="anchorbench__bar" id="anchorbar"></div>
+            <div class="pop" id="pop">
+              <span class="mock__joint mock--anim" id="poptail" aria-hidden="true">
+                <span class="mock__neck"></span>
+                <span class="mock__fillet mock__fillet--l"></span>
+                <span class="mock__fillet mock__fillet--r"></span>
+              </span>
+              <strong style="font-size:.8125rem">Highlight colour</strong>
+              <div class="pop__grid">
+                <span class="pop__chip" style="background:#ffe082"></span>
+                <span class="pop__chip" style="background:#a5d6a7"></span>
+                <span class="pop__chip" style="background:#90caf9"></span>
+                <span class="pop__chip" style="background:#f48fb1"></span>
+                <span class="pop__chip" style="background:#ce93d8"></span>
+              </div>
+            </div>
+          </div>
+          <span class="bench__cap"><b>Prototype C — clamp versus anchor.</b> Click any button in the bar, including the
+          ones at the far edges. The panel clamps inside the frame; the tail stays on the button.</span>
+        </div>
+        <div class="stack col" style="margin-top:22px">
+          <h3>C — the pointer that survives being clamped</h3>
+          <p>
+            This is the one worth prototyping before anything else, because it is where the pattern usually
+            breaks. <code>TooltipHost</code> already needed a layout-effect clamp or edge controls drew tooltips
+            half off-screen; <code>ColorField</code> already had to portal to <code>document.body</code> because a
+            transformed ancestor captured its <code>position: fixed</code>. Add a tail and you get a
+            <em>second</em> constraint on the same element: clamp the panel, but keep the pointer on the anchor.
+            Solve it once, in one component, and everything else in the app inherits it — <code>ColorField</code>,
+            <code>TooltipHost</code>, the overflow menu, the Inspector dock.
+          </p>
+        </div>
+      </div>
+
+      <!-- D -->
+      <div>
+        <div class="bench">
+          <div class="plates">
+            <div class="plate-wrap"><div class="plate">round</div><span>border-radius only</span></div>
+            <div class="plate-wrap"><div class="plate plate--sq">squircle</div><span>corner-shape: squircle</span></div>
+            <div class="plate-wrap"><div class="plate plate--sc">scoop</div><span>corner-shape: scoop</span></div>
+            <div class="plate-wrap"><div class="plate plate--bv">bevel</div><span>corner-shape: bevel</span></div>
+            <div class="plate-wrap"><div class="plate plate--nt">notch</div><span>corner-shape: notch</span></div>
+          </div>
+          <span class="bench__cap"><b>Prototype D — the corner scale.</b> All five carry the same
+          <code>border-radius: 34px</code>. On Safari and Firefox today, all five render as the first one.</span>
+        </div>
+        <div class="stack col" style="margin-top:22px">
+          <h3>D — squircle everything, and nothing else</h3>
+          <p>
+            The cheapest quirk on this page: one declaration in <code>theme.css</code>, no JS, no measurement,
+            no accessibility surface, and a graceful nothing-happens on Safari. It shifts the whole app's
+            feel a few degrees toward hand-drawn without a single component changing shape structurally.
+            If the appetite for an overhaul turns out to be smaller than the ambition, this is the version
+            that ships in an afternoon.
+          </p>
+        </div>
+      </div>
+
+      <!-- E -->
+      <div>
+        <div class="bench">
+          <div class="bench__row">
+            <div class="seampanel">
+              <div class="doclist">
+                <div class="doclist__label">Organise</div>
+                <button class="docbtn">Organise pages</button>
+                <button class="docbtn">Add image</button>
+              </div>
+              <div class="seam"></div>
+              <div class="doclist">
+                <div class="doclist__label">Text</div>
+                <button class="docbtn">Recognise text (OCR)</button>
+                <button class="docbtn">Copy all text</button>
+              </div>
+              <div class="seam"></div>
+              <div class="doclist">
+                <div class="doclist__label">Finish</div>
+                <button class="docbtn">Page numbers</button>
+                <button class="docbtn">Compress PDF</button>
+              </div>
+            </div>
+          </div>
+          <span class="bench__cap"><b>Prototype E — the perforated seam.</b> Punched holes standing in for the
+          plain 1px rule between <code>DOC_GROUPS</code>.</span>
+        </div>
+        <div class="stack col" style="margin-top:22px">
+          <h3>E — a tear-off seam between groups</h3>
+          <p>
+            A punched perforation is a document-shop idiom rather than a generic
+            software one — it belongs to this app in a way a gradient never would. It also encodes something
+            true: those three groups are a real taxonomy in <code>DOC_GROUPS</code>, not a visual rhythm. The
+            risk is legibility at small sizes, and it is not theoretical: the first build of this specimen
+            punched 3.5px holes out of a 1px rule and read as an ordinary dashed border — the idiom
+            evaporates and you are left with a divider that merely looks slightly wrong. It needs a hole
+            diameter floor of roughly 7px, which in turn sets a minimum height for the seam.
+          </p>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ══════════════════ 4. M3 EXPRESSIVE ══════════════════ -->
+  <section id="m3">
+    <div class="sec__head col">
+      <span class="eyebrow">04 — the spec you already adopted</span>
+      <h2>Half of this is catching up, not inventing</h2>
+      <p>
+        <code>theme.css</code> opens with "Material 3 Expressive design tokens." But the file predates
+        what Expressive actually shipped: five new components, a 35-shape library with morphing
+        transitions, and — the big one — <strong>physics-based springs replacing duration-plus-easing as
+        the primary motion model</strong>. The app has the colour roles and the shape scale. It does not
+        have the motion system or the morph.
+      </p>
+    </div>
+
+    <div class="bench bench--tall">
+      <div class="bench__row" style="gap:56px">
+        <div class="morphset">
+          <div class="morphset__tabs" role="tablist" aria-label="Shape as state">
+            <button class="morphtab" role="tab" aria-selected="true">Document</button>
+            <button class="morphtab" role="tab" aria-selected="false">Properties</button>
+          </div>
+          <div class="morphset__panel" id="morph-panel">
+            Corners are the state indicator. The focused tab rounds up, the unfocused one rounds
+            down — no underline, no neck, no measurement.
+          </div>
+        </div>
+
+        <div class="trackset">
+          <div>
+            <div class="trackset__label"><span>--ease-spring (today)</span><span>cubic-bezier</span></div>
+            <div class="track track--bez" data-track><span class="track__dot"></span></div>
+          </div>
+          <div>
+            <div class="trackset__label"><span>expressive scheme</span><span>linear() spring</span></div>
+            <div class="track track--exp" data-track><span class="track__dot"></span></div>
+          </div>
+          <div>
+            <div class="trackset__label"><span>standard scheme</span><span>linear() spring</span></div>
+            <div class="track track--std" data-track><span class="track__dot"></span></div>
+          </div>
+          <button class="ctl" id="run-tracks" style="align-self:flex-start"><span class="ctl__dot"></span>run</button>
+        </div>
+      </div>
+      <span class="bench__cap">
+        <b>Prototype F — shape as state, and the motion behind it.</b> Left: M3's documented submenu
+        behaviour. Right: the same 600ms travel through three curves. Watch the settle, not the launch.
+      </span>
+    </div>
+
+    <div class="stack col" style="margin-top:34px">
+      <h3>F — the morph that needs no measurement</h3>
+      <p>
+        Material's own guidance for menus is that <em>the focused submenu's corners become more rounded
+        while the unfocused one becomes less rounded</em>. That is the same information the scoop joint
+        carries — "this one is active, and this surface is its" — delivered entirely through a property
+        that needs no anchor tracking, no <code>ResizeObserver</code>, and no second rendering path.
+        It is strictly cheaper than Prototype A and strictly more on-spec. Prototype A is more
+        distinctive; F is more defensible. They also compose: a jointed dock whose active pill rounds up.
+      </p>
+      <h3>The motion problem is the real gap</h3>
+      <p>
+        <code>--ease-spring</code> is commented in the source as a "springy overshoot approximation," and
+        that is exactly what it is — a cubic-bezier can overshoot once and stop. A spring overshoots and
+        <em>settles</em>, and the settle is the part that reads as physical. CSS <code>linear()</code>
+        expresses that properly, works in every current browser, and is a drop-in replacement for the
+        easing token. Expressive also defines two schemes — standard and expressive — so components can
+        opt into visible bounce rather than every transition inheriting it. Today the app has one token
+        doing both jobs.
+      </p>
+      <h3>The component mapping</h3>
+      <p>
+        Expressive's five new components map onto surfaces this app already has, which makes the
+        overhaul a rename-and-adopt exercise rather than a redesign: the tool dock is a
+        <strong>button group</strong>, the drawbar is a <strong>floating toolbar</strong> (explicitly
+        preferred over a bottom app bar), Prototype B is a <strong>FAB menu</strong>, and the
+        Download button with its <code>⋯</code> sibling is a <strong>split button</strong>. Adopting the
+        vocabulary is free; adopting the motion scheme is a token swap; adopting the morph is Prototype F.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══════════════════ 5. REJECTED ══════════════════ -->
+  <section id="rejected">
+    <div class="sec__head col">
+      <span class="eyebrow">05 — the boundary</span>
+      <h2>Where it stops</h2>
+    </div>
+    <div class="bench">
+      <div class="bench__row" style="gap:56px;align-items:center">
+        <div class="plate-wrap"><div class="paper"><i></i><i></i><i></i><i></i><i></i><i></i></div><span>page frame — correct</span></div>
+        <div class="plate-wrap"><div class="paper paper--scooped"><i></i><i></i><i></i><i></i><i></i><i></i></div><span>page frame — scooped</span></div>
+      </div>
+      <span class="bench__cap">The document is not a surface in your design system.</span>
+    </div>
+    <div class="reject" style="margin-top:30px">
+      <h3>Never on the page frame, the thumbnails, or anything that renders PDF content</h3>
+      <p>
+        The user is looking at their file. Every pixel inside <code>.page</code> is a promise about what
+        will come out of <code>exporter.ts</code>, and a scooped corner on paper breaks that promise
+        twice: it implies a shape the exported PDF does not have, and it makes the app's chrome and the
+        user's content share a visual language when the entire point is that they are different things.
+        The same rule already governs the colour sampler — it declines rather than guessing. Chrome can
+        be quirky. Content is reportage.
+      </p>
+    </div>
+  </section>
+
+  <!-- ══════════════════ 6. OVERHAUL ══════════════════ -->
+  <section id="overhaul">
+    <div class="sec__head col">
+      <span class="eyebrow">06 — the real scope</span>
+      <h2>What a platform-wide pass costs</h2>
+      <p>
+        This is not a stylesheet change. Three of the five prototypes need runtime measurement, which
+        means new state, new dependencies on existing memos, and new specs. Here is the honest accounting.
+      </p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Surface</th><th>Change</th><th>Needs measurement</th><th>Verdict</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>theme.css</b></td>
+            <td>Add <code>--joint-neck / --joint-fillet / --joint-rise</code> and a <code>--corner-*</code> set beside the existing shape scale</td>
+            <td>No</td>
+            <td><span class="tag tag--go">ship first</span></td>
+          </tr>
+          <tr>
+            <td><b>Icon buttons, cards, dialogs</b></td>
+            <td><code>corner-shape: squircle</code> on the existing radii</td>
+            <td>No</td>
+            <td><span class="tag tag--go">ship first</span></td>
+          </tr>
+          <tr>
+            <td><b>doclist groups</b></td>
+            <td>Scalloped seam replaces the 1px rule</td>
+            <td>No</td>
+            <td><span class="tag tag--go">low risk</span></td>
+          </tr>
+          <tr>
+            <td><b>Inspector</b></td>
+            <td>Tab dock lifts off the panel; neck tracks the active tab</td>
+            <td>Yes — dock resize, tab change, font scaling</td>
+            <td><span class="tag tag--care">needs a spec</span></td>
+          </tr>
+          <tr>
+            <td><b>TooltipHost / ColorField / overflow menu</b></td>
+            <td>Scoop tail, clamped independently of the panel</td>
+            <td>Yes — anchor rect vs clamped panel rect</td>
+            <td><span class="tag tag--care">needs a spec</span></td>
+          </tr>
+          <tr>
+            <td><b>Tool dock → drawbar</b></td>
+            <td>Options bar grows from the pressed tool</td>
+            <td>Yes — plus horizontal scroll position</td>
+            <td><span class="tag tag--care">last</span></td>
+          </tr>
+          <tr>
+            <td><b>App bar</b></td>
+            <td>Nothing. The row already fails to fit itself at 360px</td>
+            <td>—</td>
+            <td><span class="tag tag--care">do not touch</span></td>
+          </tr>
+          <tr>
+            <td><b>PageView / Thumbnail</b></td>
+            <td>Nothing. Content is not chrome</td>
+            <td>—</td>
+            <td><span class="tag tag--care">excluded</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="stack col" style="margin-top:44px">
+      <h2 style="font-size:1.3rem">Five things that will bite</h2>
+      <div class="steps">
+        <div class="step">
+          <div>
+            <h3>Safari and Firefox get the fallback, and the fallback is the majority path</h3>
+            <p>
+              <code>corner-shape</code> is Chromium 139+ only, around 67% of users, with no public timeline
+              from Mozilla or Apple. Two rendering paths means two things to keep in sync, and the mask path
+              cannot carry the panel's shadow across the joint. Decide up front whether the joint is
+              load-bearing information or enhancement — if the underline indicator comes out, it is
+              load-bearing, and then the fallback has to say the same thing some other way.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>The 360px budget is already spent</h3>
+            <p>
+              <code>shell.spec.ts</code> fails if the app bar cannot fit itself at 360px, and
+              <code>.appbar__download</code> only survives because it carries <code>flex: none</code>. A lifted
+              dock adds <code>--joint-rise</code> of vertical chrome to whatever it sits on. On the phone
+              layout the Inspector is a bottom sheet, not a column, so the joint would have to point
+              <em>down</em> from the sheet's top edge or not exist there at all — and "not exist there" means
+              the pattern is desktop-only, which is a different design decision than it first appears.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>Measurement means new dependency bugs, in a codebase that has had them</h3>
+            <p>
+              <code>runOcr</code> was <code>[pdf]</code> and captured a stale <code>autosaveOn</code>;
+              <code>PageView</code> is memo'd, so its props have to be referentially stable. A neck position
+              derived from a ref plus a resize observer plus the active tab is exactly that class of value.
+              Every prototype marked "needs measurement" above is an invitation to the same bug.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>The joint asserts a relationship, so it has to be a real one</h3>
+            <p>
+              The Inspector's tabs already carry <code>role="tablist"</code>, <code>aria-controls</code> and
+              roving <code>tabIndex</code> — good, keep all of it. The neck and fillets are decorative and get
+              <code>aria-hidden</code>. But a shape that promises an association to sighted users while the
+              markup says otherwise is worse than the underline it replaced, and the drawbar has no such
+              markup today.
+            </p>
+          </div>
+        </div>
+        <div class="step">
+          <div>
+            <h3>One shape, one meaning — the icon rule again</h3>
+            <p>
+              <code>icons.spec.ts</code> exists because <code>RotateCw</code> once meant rotate a page, restore
+              a session, save one, and reset a style. A scoop joint that means "this panel belongs to that
+              control" in the Inspector and also just decorates a card is the same failure with geometry
+              instead of glyphs. It needs the same discipline and, ideally, the same kind of spec.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack col" style="margin-top:44px">
+      <h2 style="font-size:1.3rem">Recommended order</h2>
+      <p>
+        Ship the token set and <code>corner-shape: squircle</code> first — it is one afternoon, it is
+        reversible, and it tells you whether the softer geometry actually suits a document tool before
+        anyone writes a <code>ResizeObserver</code>. Then build the anchored-tail component once, for
+        <code>TooltipHost</code> and <code>ColorField</code>, because it is the hard part and everything else
+        reuses it. The Inspector dock lands third, on top of a solved anchor. The drawbar is last, and only
+        if the first three have not already spent the appetite.
+      </p>
+    </div>
+  </section>
+
+  <p class="foot">
+    Prototype only — nothing in <code>src/</code> was changed. Specimens use the app's real
+    <code>theme.css</code> tokens, the real <code>docActions</code> list, and the real 288/320px Inspector
+    widths, so what renders here is what would render there.
+  </p>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+
+  /* ── controls ─────────────────────────────────────────────── */
+  function toggle(btn, on, apply) {
+    btn.setAttribute("aria-pressed", String(on));
+    apply(on);
+  }
+
+  var themeBtn = document.getElementById("c-theme");
+  themeBtn.addEventListener("click", function () {
+    var on = themeBtn.getAttribute("aria-pressed") !== "true";
+    toggle(themeBtn, on, function (v) {
+      root.setAttribute("data-theme", v ? "dark" : "light");
+    });
+  });
+
+  var jointBtn = document.getElementById("c-joint");
+  jointBtn.addEventListener("click", function () {
+    var on = jointBtn.getAttribute("aria-pressed") !== "true";
+    toggle(jointBtn, on, function (v) {
+      root.setAttribute("data-joint", v ? "mask" : "native");
+    });
+  });
+
+  var motionBtn = document.getElementById("c-motion");
+  motionBtn.addEventListener("click", function () {
+    var on = motionBtn.getAttribute("aria-pressed") !== "true";
+    toggle(motionBtn, on, function (v) {
+      root.setAttribute("data-motion", v ? "off" : "on");
+    });
+  });
+
+  var widthBtn = document.getElementById("c-width");
+  widthBtn.addEventListener("click", function () {
+    var on = widthBtn.getAttribute("aria-pressed") !== "true";
+    toggle(widthBtn, on, function (v) {
+      document.getElementById("insp").style.setProperty("--mock-w", v ? "288px" : "320px");
+      requestAnimationFrame(function () { setTimeout(place, 420); });
+    });
+  });
+
+  /* support note */
+  var supported = window.CSS && CSS.supports && CSS.supports("corner-shape", "scoop");
+  document.getElementById("support-note").textContent = supported
+    ? "corner-shape: supported here — specimens use real box geometry"
+    : "corner-shape: unsupported here — every specimen is already on the mask fallback";
+
+  /* ── 01 anatomy dials ─────────────────────────────────────── */
+  var anat = document.getElementById("anat");
+  var dials = [
+    { id: "d-neck", v: "v-neck", prop: "--joint-neck" },
+    { id: "d-fillet", v: "v-fillet", prop: "--joint-fillet" },
+    { id: "d-rise", v: "v-rise", prop: "--joint-rise" }
+  ];
+  var out = document.getElementById("css-out");
+
+  function renderCss() {
+    var n = document.getElementById("d-neck").value;
+    var f = document.getElementById("d-fillet").value;
+    var r = document.getElementById("d-rise").value;
+    out.innerHTML =
+      '<span class="c">/* theme.css */</span>\n' +
+      "--joint-neck: <span class=\"p\">" + n + "px</span>;\n" +
+      "--joint-fillet: <span class=\"p\">" + f + "px</span>;\n" +
+      "--joint-rise: <span class=\"p\">" + r + "px</span>;";
+  }
+
+  dials.forEach(function (d) {
+    var el = document.getElementById(d.id);
+    el.addEventListener("input", function () {
+      anat.style.setProperty(d.prop, el.value + "px");
+      document.getElementById(d.v).textContent = el.value + "px";
+      if (d.prop === "--joint-rise") {
+        anat.style.paddingTop = "calc(52px + " + el.value + "px)";
+      }
+      renderCss();
+      placeAnat();
+    });
+  });
+  renderCss();
+
+  /* ── neck tracking ────────────────────────────────────────── */
+  function centreJoint(mockEl, activeEl) {
+    var joint = mockEl.querySelector(".mock__joint");
+    if (!joint || !activeEl) return;
+    var m = mockEl.getBoundingClientRect();
+    var a = activeEl.getBoundingClientRect();
+    var w = joint.offsetWidth;
+    var x = (a.left - m.left) + a.width / 2 - w / 2;
+    joint.style.setProperty("--joint-x", Math.round(x) + "px");
+  }
+
+  var insp = document.getElementById("insp");
+
+  function place() {
+    centreJoint(insp, insp.querySelector('[aria-selected="true"]'));
+  }
+  function placeAnat() {
+    centreJoint(anat, anat.querySelector('[aria-selected="true"]'));
+  }
+
+  insp.querySelectorAll(".mock__tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      insp.querySelectorAll(".mock__tab").forEach(function (t) {
+        t.setAttribute("aria-selected", String(t === tab));
+      });
+      var want = tab.dataset.panel;
+      document.getElementById("panel-document").hidden = want !== "document";
+      document.getElementById("panel-properties").hidden = want !== "properties";
+      place();
+    });
+  });
+
+  anat.querySelectorAll(".mock__tab").forEach(function (tab) {
+    tab.addEventListener("click", function () {
+      anat.querySelectorAll(".mock__tab").forEach(function (t) {
+        t.setAttribute("aria-selected", String(t === tab));
+      });
+      placeAnat();
+    });
+  });
+
+  if (window.ResizeObserver) {
+    var ro = new ResizeObserver(function () { place(); placeAnat(); });
+    ro.observe(insp);
+    ro.observe(anat);
+  }
+  window.addEventListener("resize", function () { place(); placeAnat(); });
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(function () { place(); placeAnat(); });
+  }
+  place();
+  placeAnat();
+
+  /* ── B: grown tool dock ───────────────────────────────────── */
+  var grown = document.getElementById("grown");
+  var grownBody = document.getElementById("grown-body");
+  var GROWN_TOOLS = { draw: 1, sign: 1, redact: 1 };
+
+  function placeGrown() {
+    var on = grown.querySelector('.tooldock__btn[aria-pressed="true"]');
+    if (!on || grownBody.hidden) return;
+    centreJoint(grown, on);
+  }
+
+  grown.querySelectorAll(".tooldock__btn").forEach(function (btn) {
+    btn.addEventListener("click", function () {
+      grown.querySelectorAll(".tooldock__btn").forEach(function (b) {
+        b.setAttribute("aria-pressed", String(b === btn));
+      });
+      var has = !!GROWN_TOOLS[btn.dataset.tool];
+      grownBody.hidden = !has;
+      if (has) requestAnimationFrame(placeGrown);
+    });
+  });
+  grown.querySelectorAll(".swatch").forEach(function (s) {
+    s.addEventListener("click", function () {
+      grown.querySelectorAll(".swatch").forEach(function (o) {
+        o.setAttribute("aria-pressed", String(o === s));
+      });
+    });
+  });
+  requestAnimationFrame(placeGrown);
+  window.addEventListener("resize", placeGrown);
+
+  /* ── F: shape as state ────────────────────────────────────── */
+  var morphTabs = document.querySelectorAll(".morphtab");
+  var morphPanel = document.getElementById("morph-panel");
+  var MORPH_COPY = {
+    0: "Corners are the state indicator. The focused tab rounds up, the unfocused one rounds down \u2014 no underline, no neck, no measurement.",
+    1: "Nothing was measured to draw this. The whole state change is one transitioned property, which is why it needs no ResizeObserver and no fallback path."
+  };
+  morphTabs.forEach(function (tab, i) {
+    tab.addEventListener("click", function () {
+      morphTabs.forEach(function (t) { t.setAttribute("aria-selected", String(t === tab)); });
+      if (morphPanel) morphPanel.textContent = MORPH_COPY[i];
+    });
+  });
+
+  /* ── F: motion comparison ─────────────────────────────────── */
+  var tracks = document.querySelectorAll("[data-track]");
+  function sizeTracks() {
+    tracks.forEach(function (t) {
+      t.style.setProperty("--track-x", Math.max(40, t.clientWidth - 44) + "px");
+    });
+  }
+  sizeTracks();
+  window.addEventListener("resize", sizeTracks);
+
+  var runBtn = document.getElementById("run-tracks");
+  if (runBtn) {
+    runBtn.addEventListener("click", function () {
+      sizeTracks();
+      var out = tracks[0] && tracks[0].classList.contains("is-out");
+      tracks.forEach(function (t) { t.classList.toggle("is-out", !out); });
+    });
+  }
+
+  /* ── C: clamp vs anchor ───────────────────────────────────── */
+  var bar = document.getElementById("anchorbar");
+  var pop = document.getElementById("pop");
+  var tail = document.getElementById("poptail");
+  var BAR = ["Select", "Text", "Draw", "Sign", "Redact", "Whiteout", "Link"];
+
+  BAR.forEach(function (label, i) {
+    var b = document.createElement("button");
+    b.className = "tooldock__btn";
+    b.type = "button";
+    b.textContent = label.slice(0, 2);
+    b.style.font = "500 .72rem/1 'IBM Plex Mono', monospace";
+    b.setAttribute("aria-label", label);
+    b.setAttribute("aria-pressed", String(i === 3));
+    bar.appendChild(b);
+  });
+
+  var frame = document.getElementById("anchorbench");
+  var PAD = 8;
+
+  function placePop(anchor) {
+    var f = frame.getBoundingClientRect();
+    var a = anchor.getBoundingClientRect();
+    var w = pop.offsetWidth;
+    var centre = (a.left - f.left) + a.width / 2;
+
+    /* 1. the panel wants to be centred on the anchor … */
+    var left = centre - w / 2;
+    /* 2. … but the frame wins */
+    left = Math.max(PAD, Math.min(left, f.width - w - PAD));
+    pop.style.left = Math.round(left) + "px";
+
+    /* 3. the tail stays on the anchor regardless, clamped inside
+          the panel's own rounded corners */
+    var tw = tail.offsetWidth || 46;
+    var tx = centre - left - tw / 2;
+    tx = Math.max(6, Math.min(tx, w - tw - 6));
+    tail.style.setProperty("--joint-x", Math.round(tx) + "px");
+  }
+
+  bar.querySelectorAll("button").forEach(function (b) {
+    b.addEventListener("click", function () {
+      bar.querySelectorAll("button").forEach(function (o) {
+        o.setAttribute("aria-pressed", String(o === b));
+      });
+      placePop(b);
+    });
+  });
+  requestAnimationFrame(function () {
+    placePop(bar.querySelector('[aria-pressed="true"]') || bar.querySelector("button"));
+  });
+  window.addEventListener("resize", function () {
+    placePop(bar.querySelector('[aria-pressed="true"]') || bar.querySelector("button"));
+  });
+})();
+</script>
