@@ -15,14 +15,17 @@ const SUBTOOLS: { key: AnnotationTool; icon: string; label: string }[] = [
   { key: "rect", icon: "rectangle", label: "Rectangle" },
   { key: "line", icon: "line_tool", label: "Line" },
   { key: "arrow", icon: "arrow_tool", label: "Arrow" },
+  { key: "check", icon: "check_tool", label: "Tick" },
+  { key: "cross", icon: "cross_tool", label: "Cross" },
   { key: "note", icon: "sticky_note", label: "Note" },
 ];
 
 /** Contextual floating toolbar shown while the Draw tool is active. */
 export function DrawToolbar({ drawTool, setDrawTool, drawStyle, setDrawStyle }: Props) {
   const showWidth = drawTool !== "highlight" && drawTool !== "note";
+  const isMark = drawTool === "check" || drawTool === "cross";
   return (
-    <div className="drawbar" role="toolbar" aria-label="Draw options">
+    <div className="drawbar" id="drawbar" role="toolbar" aria-label="Draw options">
       <div className="drawbar__tools">
         {SUBTOOLS.map((t) => (
           <button
@@ -39,6 +42,10 @@ export function DrawToolbar({ drawTool, setDrawTool, drawStyle, setDrawStyle }: 
       </div>
       <span className="drawbar__sep" />
       <ColorField small value={drawStyle.color} onChange={(c) => setDrawStyle({ ...drawStyle, color: c })} />
+      {/* Marks are placed by tapping, everything else by dragging, and nothing
+          on screen said so — so the one tool people reach for to fill a form
+          was the one whose gesture they had to guess. */}
+      {isMark && <span className="drawbar__hint label-medium">Tap a box · drag to size</span>}
       {showWidth && (
         <label className="drawbar__width" data-tip="Stroke width">
           <input

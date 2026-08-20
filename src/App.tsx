@@ -131,6 +131,12 @@ interface DocAction {
   label: string;
   icon: string;
   keywords?: string;
+  /** Set when running this opens something rather than doing it. Declared on
+   * the action so every surface that lists it — the Inspector, the ⋯ menu, the
+   * command palette — marks it the same way; the alternative is three call
+   * sites deciding independently, which is how the menu and the panel drifted
+   * apart the first time. */
+  opens?: "dialog";
   run: () => void;
 }
 
@@ -147,11 +153,11 @@ const PANEL_TABS: { key: PanelTab; label: string; icon: string }[] = [
   { key: "properties", label: "Properties", icon: "sliders" },
 ];
 
-const TOOLS: { key: NavKey; label: string; icon: string }[] = [
+const TOOLS: { key: NavKey; label: string; icon: string; opens?: "toolbar" | "dialog" }[] = [
   { key: "select", label: "Select", icon: "select_tool" },
   { key: "text", label: "Add text", icon: "text_tool" },
-  { key: "draw", label: "Draw", icon: "draw_tool" },
-  { key: "sign", label: "Sign", icon: "sign_tool" },
+  { key: "draw", label: "Draw", icon: "draw_tool", opens: "toolbar" },
+  { key: "sign", label: "Sign", icon: "sign_tool", opens: "dialog" },
   { key: "redact", label: "Redact", icon: "redact_tool" },
   { key: "whiteout", label: "Whiteout", icon: "whiteout_tool" },
   { key: "link", label: "Link", icon: "link_tool" },
@@ -829,16 +835,16 @@ export function App() {
   // add an action once and every surface picks it up.
   const docActions = useMemo<DocAction[]>(
     () => [
-      { id: "organize", group: "organise", label: "Organise pages", icon: "organize", keywords: "reorder rotate merge split extract", run: () => { setSelection(null); setOrganizeOpen(true); } },
-      { id: "image", group: "organise", label: "Add image", icon: "image", keywords: "picture photo stamp", run: () => imageInputRef.current?.click() },
+      { id: "organize", group: "organise", label: "Organise pages", icon: "organize", keywords: "reorder rotate merge split extract", opens: "dialog", run: () => { setSelection(null); setOrganizeOpen(true); } },
+      { id: "image", group: "organise", label: "Add image", icon: "image", keywords: "picture photo stamp", opens: "dialog", run: () => imageInputRef.current?.click() },
       { id: "ocr", group: "text", label: "Recognise text (OCR)", icon: "scan_text", keywords: "scan searchable image ocr", run: runOcr },
       { id: "copytext", group: "text", label: "Copy all text", icon: "content_copy", keywords: "clipboard", run: copyAllText },
       { id: "exporttext", group: "text", label: "Export text (.txt)", icon: "text_download", keywords: "save txt plain", run: exportTextFile },
-      { id: "numbers", group: "finish", label: "Page numbers", icon: "page_numbers", keywords: "pagination folio", run: () => { setSelection(null); setFinishTab("numbers"); } },
-      { id: "watermark", group: "finish", label: "Watermark", icon: "watermark", keywords: "draft stamp", run: () => { setSelection(null); setFinishTab("watermark"); } },
+      { id: "numbers", group: "finish", label: "Page numbers", icon: "page_numbers", keywords: "pagination folio", opens: "dialog", run: () => { setSelection(null); setFinishTab("numbers"); } },
+      { id: "watermark", group: "finish", label: "Watermark", icon: "watermark", keywords: "draft stamp", opens: "dialog", run: () => { setSelection(null); setFinishTab("watermark"); } },
       { id: "eximg", group: "finish", label: "Export as images", icon: "images", keywords: "png zip export", run: exportImages },
-      { id: "compress", group: "finish", label: "Compress PDF", icon: "compress", keywords: "shrink reduce size optimise", run: openCompress },
-      { id: "sign-cert", group: "finish", label: "Sign with certificate", icon: "certificate", keywords: "digital signature pades certificate p12 sign", run: () => { setSelection(null); setSignCertOpen(true); } },
+      { id: "compress", group: "finish", label: "Compress PDF", icon: "compress", keywords: "shrink reduce size optimise", opens: "dialog", run: openCompress },
+      { id: "sign-cert", group: "finish", label: "Sign with certificate", icon: "certificate", keywords: "digital signature pades certificate p12 sign", opens: "dialog", run: () => { setSelection(null); setSignCertOpen(true); } },
     ],
     [runOcr, copyAllText, exportTextFile, exportImages, openCompress],
   );
@@ -1913,9 +1919,12 @@ export function App() {
                               key={a.id}
                               className="menu__item"
                               role="menuitem"
+                              aria-haspopup={a.opens ? "dialog" : undefined}
                               onClick={() => { setMenuOpen(false); a.run(); }}
                             >
-                              <Icon name={a.icon} size={18} /> {a.label}
+                              <Icon name={a.icon} size={18} />
+                              <span className="menu__itemlabel">{a.label}</span>
+                              {a.opens && <Icon name="opens_dialog" size={16} className="opens-mark" />}
                             </button>
                           ))}
                       </div>
@@ -2038,8 +2047,15 @@ export function App() {
             {docActions
               .filter((a) => a.group === grp.key)
               .map((a) => (
-                <button key={a.id} className="doclist__item" onClick={a.run}>
-                  <Icon name={a.icon} size={18} /> {a.label}
+                <button
+                  key={a.id}
+                  className="doclist__item"
+                  aria-haspopup={a.opens ? "dialog" : undefined}
+                  onClick={a.run}
+                >
+                  <Icon name={a.icon} size={18} />
+                  <span className="doclist__itemlabel">{a.label}</span>
+                  {a.opens && <Icon name="opens_dialog" size={16} className="opens-mark" />}
                 </button>
               ))}
           </Fragment>
@@ -2223,11 +2239,20 @@ export function App() {
                 <span key={t.key} style={{ display: "contents" }}>
                   {i === 1 && <span className="tooldock__sep" />}
                   {t.key === "sign" && <span className="tooldock__sep" />}
+                  {/* A tool that opens something says so twice: the corner
+                      notch is the visual tell, and `aria-expanded` /
+                      `aria-haspopup` is the same fact for anyone who can't see
+                      it. Draw discloses a toolbar it controls; Sign opens a
+                      dialog — different relationships, so different attributes
+                      rather than one approximate `haspopup` on both. */}
                   <button
-                    className={`tooldock__btn${tool === t.key ? " tooldock__btn--on" : ""}`}
+                    className={`tooldock__btn${tool === t.key ? " tooldock__btn--on" : ""}${t.opens ? " tooldock__btn--opens" : ""}`}
                     onClick={() => pickTool(t.key)}
                     aria-pressed={tool === t.key}
                     aria-label={t.label}
+                    aria-expanded={t.opens === "toolbar" ? tool === t.key : undefined}
+                    aria-controls={t.opens === "toolbar" ? "drawbar" : undefined}
+                    aria-haspopup={t.opens === "dialog" ? "dialog" : undefined}
                     data-tip={`${t.label} · ${TOOL_SHORTCUT[t.key]}`}
                   >
                     <Icon name={t.icon} size={20} />
@@ -2530,7 +2555,7 @@ export function App() {
               { id: "undo", label: "Undo", hint: "Ctrl+Z", icon: "undo", disabled: !doc.canUndo, run: undo },
               { id: "redo", label: "Redo", hint: "Ctrl+Shift+Z", icon: "redo", disabled: !doc.canRedo, run: redo },
               // Document/finishing actions come from the shared source of truth.
-              ...docActions.map((a) => ({ id: a.id, label: a.label, icon: a.icon, keywords: a.keywords, run: a.run })),
+              ...docActions.map((a) => ({ id: a.id, label: a.label, icon: a.icon, keywords: a.keywords, opens: a.opens, run: a.run })),
               { id: "dim", label: dimPages ? "Undim pages" : "Dim pages", icon: "contrast", run: () => setDimPages((v) => !v) },
               { id: "theme", label: `Theme: ${themeLabel}`, icon: themeIcon, keywords: "dark light system", run: theme.cycle },
               { id: "download", label: "Download PDF", hint: "", icon: "download", run: download },

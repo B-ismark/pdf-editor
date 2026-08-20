@@ -144,6 +144,8 @@ export type AnnotationTool =
   | "rect"
   | "line"
   | "arrow"
+  | "check"
+  | "cross"
   | "note";
 
 /** Style used when drawing new annotations. */
@@ -164,9 +166,27 @@ interface AnnotBase {
 export type Annotation =
   | (AnnotBase & { kind: "highlight"; x: number; y: number; width: number; height: number; color: string; rotation?: number })
   | (AnnotBase & { kind: "rect"; x: number; y: number; width: number; height: number; color: string; strokeWidth: number; rotation?: number })
+  // Tick and cross for filling in forms. Box-shaped like `rect` so they inherit
+  // the same selection frame, marquee hit-testing and rotation handling; the
+  // glyph inside the box comes from `marks.ts`.
+  | (AnnotBase & { kind: "check" | "cross"; x: number; y: number; width: number; height: number; color: string; strokeWidth: number; rotation?: number })
   | (AnnotBase & { kind: "line" | "arrow"; x1: number; y1: number; x2: number; y2: number; color: string; strokeWidth: number })
   | (AnnotBase & { kind: "pen"; pts: { x: number; y: number }[]; color: string; strokeWidth: number })
   | (AnnotBase & { kind: "note"; x: number; y: number; text: string; color: string });
+
+/** The annotation kinds that are an axis-aligned (optionally rotated) box.
+ * Grouped because four separate call sites — the selection frame, the bounding
+ * box, the SVG layer's rotation transform and the raster exporter's canvas
+ * rotation — all need exactly this set, and enumerating it inline in each is
+ * how a newly added box kind silently loses its resize handles. */
+export type BoxAnnotation = Extract<
+  Annotation,
+  { kind: "rect" | "highlight" | "check" | "cross" }
+>;
+
+export function isBoxAnnotation(a: Annotation): a is BoxAnnotation {
+  return a.kind === "rect" || a.kind === "highlight" || a.kind === "check" || a.kind === "cross";
+}
 
 /** A placed image (signature or picture). Rect is bottom-left in PDF units. */
 export interface Stamp {

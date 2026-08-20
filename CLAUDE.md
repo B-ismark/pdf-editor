@@ -77,7 +77,21 @@ type-checking can't see, and each exists because it broke once:
   row is one line, the Inspector names both of its jobs and keeps them reachable,
   a tooltip on an edge control stays on screen, and counts read as English;
 - `icons.spec.ts` — every `name=` in `src/` is mapped (an unmapped one renders a
-  blank square, silently) and every mapped name is used.
+  blank square, silently) and every mapped name is used;
+- `marks.spec.ts` — a tick is placed by a *tap* (a checkbox is smaller than the
+  drag threshold), a drag sizes it instead, both cross strokes are drawn, a mark
+  gets the same resize frame as any other box, the glyph reaches the exported
+  bytes rather than living only in the overlay, a *rotated* mark exports at the
+  angle the overlay drew, and a mark survives its page being rasterised for
+  redaction;
+- `affordance.spec.ts` — the Inspector, the ⋯ menu and the command palette mark
+  the *same* set of actions as opening something, an action that acts
+  immediately carries no mark, and a tool that opens something declares which
+  kind (`aria-expanded` for a disclosure, `aria-haspopup` for a dialog);
+- `shape.spec.ts` — the selected tab's joint is masked rather than
+  `corner-shape`d (so it renders off Chromium), the fillets are painted in the
+  panel's colour and not the strip's, shape follows the selection, and no
+  chrome geometry reaches `.page` / `.page__canvas` / the thumbnails.
 
 If you add a feature that touches privacy, the export bytes, or per-page
 rendering, add a spec for it — that's where this project's real invariants live.
@@ -319,6 +333,71 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   phone) got a tooltip drawn half outside the window. Same class of bug as the
   overflow menu having no `max-height`, which left its last two items unreachable
   on an 820px window.
+- **Shape carries state, so it has to render everywhere.** `corner-shape`
+  (`squircle`, `scoop`, `notch`, …) is Chromium-only and is *silently* ignored
+  elsewhere — no error, no fallback, just the plain radius. That makes it safe
+  for softening a shape the app already has and unsafe for anything that means
+  something. The split is enforced by `shape.spec.ts` and is the reason the two
+  look different in the source: the squircle pass is one `@supports` block of
+  pure enhancement, while the Inspector's joint — the concave fillets that tie
+  the selected tab to the panel, which is the only thing saying *which tab this
+  panel belongs to* — is drawn with a `radial-gradient` mask instead. Masking
+  the paint rather than the box costs nothing there because the fillets carry no
+  border and no shadow; on a surface with elevation it would clip the shadow at
+  the joint, which is the one thing the mask path can't do.
+  **The joint hangs off the tab button itself** (`::before` / `::after`), not off
+  a measured position, so there is no `ResizeObserver`, nothing to recompute on a
+  font-size change, and nothing to fall out of sync. If you ever move it to a
+  dock that floats free of its anchor, that stops being true and you inherit the
+  whole stale-dependency problem the `PageView` memo note describes.
+  The tab strip is deliberately a shade *different* from the panel
+  (`--surface-container` against `--surface-container-low`) — the joint is
+  invisible if they match, and the fillets must stay the panel's colour.
+  This replaced the underline indicator; the old note about a filled pill
+  reading as a toggle still holds, which is why the selected tab is a *joined
+  tab* rather than a floating pill.
+- **`corner-shape` never touches the document.** Not `.page`, not
+  `.page__canvas`, not `.page__overlay`, not the thumbnails. Every pixel inside a
+  page is a claim about what `exporter.ts` will write, and a corner the exported
+  PDF does not have is a lie told in the one place this app can't afford one.
+  Chrome can be soft; the document is reportage.
+- **Motion is springs now, not one bezier.** `--ease-spring` used to be a
+  cubic-bezier commented as a "springy overshoot approximation", and a bezier
+  can't be anything else — it overshoots once and stops, where a spring
+  overshoots and *settles*, and the settle is the part that reads as physical.
+  It is a `linear()` spring now, and there are two schemes because a bounce that
+  suits a tab pill is wrong on a dialog: `--ease-spring` rings visibly,
+  `--ease-settle` arrives without ringing. Both work in every current browser.
+- **"This opens something" is declared on the data, not the call site.** An
+  action that opens a dialog carries `opens: "dialog"` on `docActions`; a tool
+  that opens a toolbar or dialog carries `opens` on `TOOLS`. Three surfaces
+  render the same doc actions — the Inspector, the ⋯ menu, the command palette —
+  and deciding per call site is exactly how they drifted apart last time.
+  The visible mark is decorative in both cases; the fact reaches assistive tech
+  through `aria-haspopup="dialog"` or, for the drawbar, `aria-expanded` +
+  `aria-controls="drawbar"` (a disclosure the tool owns, not a popup). Don't put
+  a mark on an action that runs immediately — it promises a dialog that never
+  arrives, which is worse than no mark.
+- **Tick and cross are placed by a tap, and their geometry lives in one place.**
+  Every other draw sub-tool needs a drag, but a form checkbox is smaller than
+  `MIN_DRAG`, so requiring a drag would make a thirty-field form thirty drags: a
+  click drops a `DEFAULT_MARK_SIZE` mark, a drag sizes it. The glyphs are drawn
+  three times over — the SVG overlay, the pdf-lib vector export, and the canvas
+  that rasterises a redacted page — so they are defined once as unit polylines
+  in `pdf/marks.ts` and each path maps the same numbers into its own space. A
+  second copy is a preview that lies about the file. Both kinds are
+  box-shaped, which is what earns them the existing selection frame, marquee
+  hit-testing and rotation for free; the set of box kinds is `isBoxAnnotation`
+  in `pdf/types.ts`, and a new box kind that isn't added there renders fine and
+  silently loses its resize handles.
+  **Rotation is applied in the pdf-lib path and *not* in the raster path.**
+  `rect` and `highlight` hand their angle to a pdf-lib primitive; a polyline has
+  none, so `markPolylines` takes the rotation and turns the points itself. The
+  redaction canvas, by contrast, is already translated and rotated about the box
+  centre before the branch runs — the same setup every box kind shares — so
+  passing the angle there too rotates it twice. Shipping without the pdf-lib
+  half was invisible in every existing test: the overlay tilted the tick and the
+  file carried a level one.
 - **No native UI.** Use the in-house `ConfirmDialog` (not `confirm()`),
   `ColorField` (not `<input type=color>`), and `TooltipHost` + `data-tip=`
   (not `title=`). `ColorField`'s popover is **portaled to `document.body`** —
@@ -330,6 +409,15 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   the render path free of pdf-lib** — e.g. `isFragmentModified` lives in the
   pure `pdf/style.ts`, not `exporter.ts`. If you add code the initial render
   needs, don't import it from a pdf-lib module.
+- **Two traps when writing a spec against a shape or a raster.**
+  `getBoundingClientRect()` on a *rotated* SVG element returns the rotated
+  bounding box of the element's bounding box, not a tight fit of the path — for
+  a diagonal glyph that reports a shape half again too tall, so comparing it
+  against a pixel measurement of the exported file makes a correct exporter look
+  broken. Rotate the element's own `points` instead. And a redacted page ships
+  as a JPEG: the canvas exists and is *blank* until the image decodes, so
+  `open()` returning is not enough to measure on — wait for the page to actually
+  carry ink first.
 - **Touch = select-first.** `hooks/useDrag.ts` exports `tapSelect` and
   `startElementGesture`: on touch, an *unselected* element only selects on a
   clean tap and lets the page pan under a drag; once selected it drags. Reuse

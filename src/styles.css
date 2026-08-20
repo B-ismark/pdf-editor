@@ -610,6 +610,39 @@ body {
 .tooldock__btn:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
 .tooldock__btn--on { background: var(--secondary-container); color: var(--on-secondary-container); }
 
+/* ============ Corner style ============
+   One declaration, applied to the app's chrome and to nothing that renders the
+   user's document. A squircle's curvature is continuous where a plain radius
+   changes abruptly at the tangent, which is why it reads as softer at the same
+   nominal radius — but the difference is a few pixels, and on Safari and
+   Firefox `corner-shape` is ignored entirely and every surface below falls back
+   to the rounded corner it already had. That is the whole reason it is safe to
+   apply this broadly: nothing depends on it.
+
+   Deliberately excluded: `.page`, `.thumb`, and every overlay drawn on top of
+   them. Every pixel inside a page is a claim about what `exporter.ts` will
+   write, and a corner the exported PDF does not have is a lie told in the one
+   place this app cannot afford to tell one. Chrome can be soft; the document is
+   reportage. */
+@supports (corner-shape: squircle) {
+  .btn,
+  .icon-btn,
+  .chip,
+  .dialog,
+  .menu,
+  .cmdk,
+  .cmdk__item,
+  .tooldock,
+  .drawbar,
+  .doclist__item,
+  .menu__item,
+  .inspector__tab,
+  .field,
+  .snackbar {
+    corner-shape: var(--corner-soft);
+  }
+}
+
 /* ============ Adaptive Inspector (desktop right column) ============ */
 .inspector {
   position: relative;
@@ -621,7 +654,13 @@ body {
   animation: panel-in var(--dur-med2) var(--ease-emphasized-decelerate);
 }
 /* The tab bar. The collapse control used to float `position: absolute` over the
-   panel's own heading, overlapping it; it's a row member now. */
+   panel's own heading, overlapping it; it's a row member now.
+
+   The strip is a shade darker than the panel it sits on, so the selected tab —
+   which is painted in the *panel's* colour and joined to it — reads as part of
+   the surface below rather than as a highlighted button. That join is the whole
+   point: this panel used to swap its contents with nothing to say which of the
+   two tabs it belonged to. */
 .inspector__tabs {
   position: sticky;
   top: 0;
@@ -629,11 +668,10 @@ body {
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 4px 0 8px;
-  background: var(--surface-container-low);
-  border-bottom: 1px solid var(--outline-variant);
+  padding: 6px 8px 0 12px;
+  background: var(--surface-container);
 }
-.inspector__tablist { display: flex; gap: 2px; flex: 1; min-width: 0; }
+.inspector__tablist { display: flex; gap: 6px; flex: 1; min-width: 0; }
 .inspector__tabbtn {
   position: relative;
   display: flex;
@@ -650,23 +688,59 @@ body {
   font: inherit;
   cursor: pointer;
   white-space: nowrap;
+  /* Shape is the state. An unselected tab is a small rounded rectangle; the
+     selected one grows into a tab joined to the panel below. Material's own
+     menu guidance does the same thing — focused corners round up, unfocused
+     round down — and unlike an underline it survives being looked at
+     peripherally. */
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  transition:
+    border-radius var(--dur-med4) var(--ease-spring),
+    background var(--dur-med2) var(--ease-settle),
+    color var(--dur-med2) var(--ease-settle);
 }
 .inspector__tabbtn:hover { color: var(--on-surface); }
-/* An underline indicator, M3's tab convention — a filled pill would read as a
-   toggle button and put two competing "selected" languages (pill, underline) in
-   one panel. */
-.inspector__tabbtn::after {
+.inspector__tabbtn:hover:not(.inspector__tabbtn--on) {
+  background: color-mix(in srgb, var(--on-surface) 6%, transparent);
+}
+.inspector__tabbtn--on {
+  color: var(--primary);
+  background: var(--surface-container-low);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  /* The fillets are wider than the gap between tabs, so they reach a few pixels
+     under the neighbour — which paints later in DOM order and, once hovered,
+     covered the joint with its own background. Lifting the selected tab keeps
+     its joint on top whichever side it is on. */
+  z-index: 1;
+}
+/* The joint. Two concave fillets flanking the selected tab's foot, painted in
+   the panel's colour, so the tab and the panel read as one piece of material.
+   They hang off the *button*, which is what makes this cost nothing: the mark
+   is anchored to its own anchor, so there is no rect to measure, no
+   ResizeObserver, and nothing to fall out of sync when the panel resizes or
+   the user scales their fonts.
+
+   Masked rather than `corner-shape: scoop` on purpose — see `--joint-fillet`
+   in theme.css. The mask renders in every browser and these fillets carry no
+   border or shadow for it to clip. */
+.inspector__tabbtn--on::before,
+.inspector__tabbtn--on::after {
   content: "";
   position: absolute;
-  left: 8px;
-  right: 8px;
   bottom: 0;
-  height: 3px;
-  border-radius: 3px 3px 0 0;
-  background: transparent;
+  width: var(--joint-fillet);
+  height: var(--joint-fillet);
+  background: var(--surface-container-low);
+  pointer-events: none;
 }
-.inspector__tabbtn--on { color: var(--primary); }
-.inspector__tabbtn--on::after { background: var(--primary); }
+.inspector__tabbtn--on::before {
+  left: calc(var(--joint-fillet) * -1);
+  mask: radial-gradient(circle var(--joint-fillet) at 0 0, #0000 99%, #000 100%);
+}
+.inspector__tabbtn--on::after {
+  right: calc(var(--joint-fillet) * -1);
+  mask: radial-gradient(circle var(--joint-fillet) at 100% 0, #0000 99%, #000 100%);
+}
 .inspector .props { padding-top: 12px; }
 .inspector .props::before { display: none; }
 .inspector .props__header .icon-btn { display: none; }
@@ -764,6 +838,37 @@ body {
 .menu__item { white-space: nowrap; }
 .menu__item:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
 .menu__divider { height: 1px; background: var(--outline-variant); margin: 6px 4px; }
+/* ---- "This opens something" ----
+   A trailing chevron on list rows, a corner notch on the icon-only tool
+   buttons. Both are decorative: the same fact reaches assistive tech through
+   `aria-haspopup` / `aria-expanded` on the control itself, so neither marker
+   is ever the only signal. Which rows get one is declared on `docActions`
+   and `TOOLS`, not decided per call site — the Inspector and the ⋯ menu show
+   the same commands and had already drifted apart once. */
+.opens-mark { margin-left: auto; opacity: 0.5; flex: none; }
+.doclist__item:hover .opens-mark,
+.menu__item:hover .opens-mark { opacity: 0.9; }
+.doclist__itemlabel { min-width: 0; }
+
+/* A 44px icon button has no room for a second glyph, so the marker is a
+   triangle in the bottom-right corner — the long-standing convention for
+   "there is more behind this control". */
+.tooldock__btn--opens::after {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-bottom: 5px solid currentColor;
+  opacity: 0.7;
+  pointer-events: none;
+  transition: opacity var(--dur-short4) var(--ease-settle);
+}
+.tooldock__btn--opens:hover::after { opacity: 0.9; }
+.tooldock__btn--opens[aria-pressed="true"]::after { opacity: 1; }
+
 .menu__check { margin-left: auto; color: var(--primary); }
 .menu__value { margin-left: auto; color: var(--on-surface-variant); }
 .menu__label {
@@ -1414,6 +1519,22 @@ body {
 
 .drawbar__tools { display: flex; gap: 2px; flex: none; }
 .drawbar__sep { width: 1px; height: 28px; background: var(--outline-variant); margin: 0 2px; flex: none; }
+.drawbar__hint {
+  flex: none;
+  color: var(--on-surface-variant);
+  white-space: nowrap;
+  padding: 0 4px;
+}
+/* Not on a phone. The drawbar scrolls horizontally there, and this line took
+   its scroll width from 425px to 692px on a 390px screen — which pushes the
+   colour swatch and the stroke slider off the end, so the hint would be buying
+   discoverability for one gesture by hiding two controls. It is also the
+   audience that needs it least: the hint exists because the other sub-tools all
+   want a drag and someone on a mouse will try to drag. Tapping is already what
+   a touch user does first. */
+@media (max-width: 599px) {
+  .drawbar__hint { display: none; }
+}
 .drawbar__width { display: flex; align-items: center; flex: none; }
 .icon-btn--on { background: var(--secondary-container); color: var(--on-secondary-container); }
 .swatch--sm { width: 40px; height: 40px; flex: none; }

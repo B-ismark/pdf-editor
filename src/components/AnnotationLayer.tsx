@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { startElementGesture, startPointerDrag } from "../hooks/useDrag";
-import type { Annotation } from "../pdf/types";
+import { isBoxAnnotation, type Annotation } from "../pdf/types";
+import { markPolylines, markStroke } from "../pdf/marks";
 
 interface Props {
   annotations: Annotation[];
@@ -30,7 +31,7 @@ export function translateAnnotation(a: Annotation, dx: number, dy: number): Anno
 function bbox(a: Annotation, scale: number, H: number) {
   const toX = (x: number) => x * scale;
   const toY = (y: number) => (H - y) * scale;
-  if (a.kind === "highlight" || a.kind === "rect") {
+  if (isBoxAnnotation(a)) {
     return { x: toX(a.x), y: toY(a.y + a.height), w: a.width * scale, h: a.height * scale };
   }
   if (a.kind === "line" || a.kind === "arrow") {
@@ -112,7 +113,7 @@ export function AnnotationLayer({
         const els: React.ReactNode[] = [];
         // Box kinds carry an optional rotation about their centre.
         let groupTransform: string | undefined;
-        if (a.kind === "highlight" || a.kind === "rect") {
+        if (isBoxAnnotation(a)) {
           const rot = a.rotation ?? 0;
           if (rot) {
             const cx = toX(a.x + a.width / 2);
@@ -155,6 +156,20 @@ export function AnnotationLayer({
               );
             }
           }
+        } else if (a.kind === "check" || a.kind === "cross") {
+          // One glyph definition, three draw paths — see pdf/marks.ts.
+          const sw = markStroke(a.strokeWidth, a) * scale;
+          markPolylines(a.kind, a).forEach((line, i) => {
+            const pts = line.map((p) => `${toX(p.x)},${toY(p.y)}`).join(" ");
+            els.push(
+              <polyline key={`v${i}`} points={pts} fill="none" stroke={a.color} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: "none" }} />,
+            );
+          });
+          // The whole box is grabbable, not just the strokes: a tick is mostly
+          // empty space and chasing a 2pt diagonal with a finger is hopeless.
+          els.push(
+            <rect key="h" x={toX(a.x)} y={toY(a.y + a.height)} width={a.width * scale} height={a.height * scale} fill="transparent" {...fillHit(a)} />,
+          );
         } else if (a.kind === "pen") {
           const pts = a.pts.map((p) => `${toX(p.x)},${toY(p.y)}`).join(" ");
           els.push(

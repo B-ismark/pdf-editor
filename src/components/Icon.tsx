@@ -52,6 +52,8 @@ import {
   Signature,
   SlidersHorizontal,
   Slash,
+  SquareCheckBig,
+  SquareX,
   Square,
   SquarePen,
   Stamp,
@@ -119,6 +121,13 @@ const MAP: Record<string, LucideIcon> = {
   /** A diagonal stroke. `Minus` is the decrement/zoom-out glyph, not a shape. */
   line_tool: Slash,
   arrow_tool: ArrowUpRight,
+  // Form-filling marks. Deliberately *not* `Check`/`X` — those already mean
+  // "confirmed" and "close this", and a tool that stamps a tick into a
+  // checkbox is a third meaning. The boxed glyphs say which one it is.
+  check_tool: SquareCheckBig,
+  cross_tool: SquareX,
+  // The trailing mark on a row that opens a dialog rather than acting at once.
+  opens_dialog: ChevronRight,
   sticky_note: StickyNote,
 
   // ---- history & editing ----
@@ -225,6 +234,11 @@ export const SHARED_GLYPHS: Record<string, string> = {
   // Same rectangle, and the fill is the difference — which is the real semantics,
   // not a workaround. `FILLED` is what keeps them apart on screen.
   rectangle: "redact_tool",
+  // "Go forward into something" is one meaning wearing two names: the panel's
+  // collapse control points you out of it, a row that opens a dialog points you
+  // into one. Same chevron, deliberately — the alternative is inventing a
+  // second forward arrow, which is worse than sharing this one.
+  opens_dialog: "chevron_right",
 };
 
 /** The map itself, for the integrity spec — names *and* the glyph each resolves to. */
