@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fixtures } from "./fixtures";
-import { expectClean, open, pickTool, watch } from "./helpers";
+import { expectClean, open, pickSubTool, pickTool, watch } from "./helpers";
 
 /**
  * Tick and cross marks — the tools for filling in a form.
@@ -139,10 +139,7 @@ async function blankSpot(page: Page): Promise<{ x: number; y: number }> {
 }
 
 /** Pick one of the Draw sub-tools from the contextual toolbar. */
-async function pickMark(page: Page, label: string): Promise<void> {
-  await pickTool(page, "Draw");
-  await page.locator(`#drawbar .icon-btn[aria-label="${label}"]`).click();
-}
+const pickMark = pickSubTool;
 
 test("a tick is placed by a tap, not a drag, and reaches the exported page", async ({ page }) => {
   const w = watch(page);
@@ -317,6 +314,42 @@ test("a rotated mark exports at the angle the overlay drew", async ({ page }) =>
   // is. Asserting width first would have made this spec hang on a hair.
   expect(Math.abs(got!.h - want.h) / want.h, "exported height matches the overlay").toBeLessThan(0.12);
   expect(Math.abs(got!.w - want.w) / want.w, "exported width matches the overlay").toBeLessThan(0.12);
+  expectClean(w);
+});
+
+test("a mark tool says how it is placed, and shows where", async ({ page }) => {
+  const w = watch(page);
+  await open(page, (await fixtures()).sample);
+  await pickMark(page, "Tick");
+
+  // The hint is the only thing that can tell you a tick is *tapped* — every
+  // other sub-tool here is dragged. It shipped covered by the status snackbar,
+  // which shares this band, so "is it in the DOM" is not the assertion: what
+  // matters is whether anything is painted over it.
+  const hint = page.locator(".drawbar__hint");
+  await expect(hint).toBeVisible();
+  const occluded = await hint.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    const top = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return el.contains(top) ? null : (top as HTMLElement | null)?.className ?? "unknown";
+  });
+  expect(occluded, "something is painted over the mark hint").toBeNull();
+
+  // And the ghost shows the size the tap commits to, before it commits.
+  const box = (await page.locator(".page").first().boundingBox())!;
+  const spot = await blankSpot(page);
+  await page.mouse.move(box.x + spot.x, box.y + spot.y);
+  const ghost = page.locator(".markghost");
+  await expect(ghost).toHaveCount(1);
+  // It must never take the tap it is advertising.
+  await expect(ghost).toHaveCSS("pointer-events", "none");
+  // Drawn from the same unit polylines as every other path — one for a tick, so
+  // the preview is the same glyph the file will get, not a hand-drawn stand-in.
+  await expect(ghost.locator("polyline")).toHaveCount(1);
+
+  // Leaving the tool takes it with them.
+  await pickTool(page, "Select");
+  await expect(page.locator(".markghost")).toHaveCount(0);
   expectClean(w);
 });
 

@@ -73,8 +73,9 @@ type-checking can't see, and each exists because it broke once:
 - `find.spec.ts` — the active match is on screen and clear of the find bar;
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
 - `shell.spec.ts` — the app bar fits its own controls at 360/390/430px with the
-  primary action at full size, the overflow menu ends inside the window and every
-  row is one line, the Inspector names both of its jobs and keeps them reachable,
+  primary action at full size and, on a pointer, sized to the bar it sits in with
+  the ⋯ menu carrying a visible container, the overflow menu ends inside the
+  window and every row is one line, the Inspector names both of its jobs and keeps them reachable,
   a tooltip on an edge control stays on screen, and counts read as English;
 - `icons.spec.ts` — every `name=` in `src/` is mapped (an unmapped one renders a
   blank square, silently) and every mapped name is used;
@@ -82,8 +83,9 @@ type-checking can't see, and each exists because it broke once:
   drag threshold), a drag sizes it instead, both cross strokes are drawn, a mark
   gets the same resize frame as any other box, the glyph reaches the exported
   bytes rather than living only in the overlay, a *rotated* mark exports at the
-  angle the overlay drew, and a mark survives its page being rasterised for
-  redaction;
+  angle the overlay drew, a mark survives its page being rasterised for
+  redaction, and the tool's gesture hint is un-occluded while a ghost of the mark
+  follows the cursor;
 - `affordance.spec.ts` — the Inspector, the ⋯ menu and the command palette mark
   the *same* set of actions as opening something, an action that acts
   immediately carries no mark, and a tool that opens something declares which
@@ -91,7 +93,19 @@ type-checking can't see, and each exists because it broke once:
 - `shape.spec.ts` — the selected tab's joint is masked rather than
   `corner-shape`d (so it renders off Chromium), the fillets are painted in the
   panel's colour and not the strip's, shape follows the selection, and no
-  chrome geometry reaches `.page` / `.page__canvas` / the thumbnails.
+  chrome geometry reaches `.page` / `.page__canvas` / the thumbnails;
+- `fragment.spec.ts` — an edit's overlay text starts at exactly the x the
+  exporter draws it at (no horizontal padding), and a selected fragment is marked
+  by rules above and below rather than a ring whose vertical edge reads as a
+  letter;
+- `chrome.spec.ts` — the draw sub-toolbar opens with its tool, folds away when a
+  sub-tool is picked and comes back from its handle; the colour popover stays on
+  screen and covers neither the toolbar it lives in nor the tool dock, at three
+  widths; and the status snackbar clears both;
+- `overlays.spec.ts` — a marquee'd group moves as one (one undo step) and
+  survives the drag, a plain click on a member selects just that one, arrows
+  nudge the group, and a buried stroke can be raised — in the overlay's paint
+  order *and* in the exported file's.
 
 If you add a feature that touches privacy, the export bytes, or per-page
 rendering, add a spec for it — that's where this project's real invariants live.
@@ -175,6 +189,20 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   the probe is only valid for the line-height the element actually gets (hence
   `FRAGMENT_LINE_HEIGHT` / `TEXTBOX_LINE_HEIGHT` being passed in), and the
   measured element must keep zero *vertical* padding.
+- **An edit's overlay carries no horizontal inset, and its selection mark has no
+  vertical edges.** Two ways the overlay stopped matching the page underneath it,
+  both of them chrome hugging glyphs. `.fragment` had `padding: 0 1px`, and since
+  `left` is the exact x the exporter draws at, the replacement text rendered a
+  pixel right of both the original glyphs and the file — every click nudged the
+  line sideways. And `.fragment__cover--sel` was a 1.5px ring around the cover;
+  the cover hugs the run (it has to, it hides exactly what it replaces), so the
+  ring's *vertical* edge landed in the gap before the next word and read as a
+  letter — selecting "Most of" rendered "Most ofl", which is what it was reported
+  as. The mark is two horizontal rules above and below the run instead: a rule
+  can't be mistaken for a glyph, which is the whole reason it isn't a box.
+  `tests/fragment.spec.ts` pins both. (The cover's own size and colour are
+  untouched by all of this — they are a claim about the exported file.)
+
 - **An edit's colours are sampled, not constants.** Two of them: the cover that
   hides the original glyphs was hardcoded white (a hole through any coloured
   pill, cell, or banner) and the replacement was drawn hardcoded black (white
@@ -318,6 +346,18 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   row overflowed regardless. Anything new in that row has to displace something
   (preferences belong in the ⋯ menu), and `shell.spec.ts` fails at 360px if the
   row can't fit itself.
+- **The app bar's two ends are sized against each other.** Download was 130×44
+  in a 52px row — 85% of the bar's height and wider than everything else in it —
+  next to a bare 48px glyph for the ⋯ menu that holds every document action there
+  is: the loudest control in the row beside the quietest, which is how "where is
+  everything else?" happens. Download is a 38px compact pill on a pointer and
+  stays 44px icon-only on a phone (the touch floor is not negotiable), and the ⋯
+  gets a container. That container is painted on the button's *content* box
+  (`padding: 4px` + `background-clip: content-box`), so the chip is 40px inside a
+  48px hit area. Don't reach for an absolutely-positioned `::before` — a
+  positioned pseudo-element paints *above* the icon, which shipped once as an
+  empty grey disc. `tests/shell.spec.ts` covers both ends.
+
 - **The Inspector has two named tabs, not one surface with two moods.** It used to
   swap between the document actions and the selection's properties with nothing to
   say it had, so clicking the page made Compress/Watermark/OCR vanish with no way
@@ -333,6 +373,16 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   phone) got a tooltip drawn half outside the window. Same class of bug as the
   overflow menu having no `max-height`, which left its last two items unreachable
   on an 820px window.
+  The maths is `src/floating.ts` now, shared by the tooltip and `ColorField`,
+  because the popover had its own version of it and got it wrong: `top =
+  min(anchor.bottom + 6, innerHeight - 200)` — a hardcoded height and no flip —
+  put the palette over 11,760px² of the draw toolbar it belongs to and up to
+  10,976px² of the tool dock below, i.e. the two controls you reach for next, and
+  on a 390×844 phone its bottom edge landed 3.5px from the screen. `placeAnchored`
+  measures the surface, flips it above when it doesn't fit below, and takes a
+  `clear` rect — the *toolbar the anchor sits in*, since clearing the 40px swatch
+  still leaves you inside the 60px bar around it. `tests/chrome.spec.ts` asserts
+  zero overlap with either bar at three widths.
 - **Shape carries state, so it has to render everywhere.** `corner-shape`
   (`squircle`, `scoop`, `notch`, …) is Chromium-only and is *silently* ignored
   elsewhere — no error, no fallback, just the plain radius. That makes it safe
@@ -378,6 +428,45 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   `aria-controls="drawbar"` (a disclosure the tool owns, not a popup). Don't put
   a mark on an action that runs immediately — it promises a dialog that never
   arrives, which is worse than no mark.
+- **The draw sub-toolbar is a disclosure, and the annotation layer is two halves.**
+  Two things about the Draw tool that aren't in the types. First: 60px of chrome
+  across the bottom of the page had nothing left to say once you'd picked what to
+  draw with, and no way to dismiss it without leaving the tool — so picking a
+  sub-tool collapses it to a handle naming that sub-tool, the dock's Draw button
+  toggles it, and `aria-expanded` tracks *the disclosure* rather than the tool.
+  `aria-controls` is only set while `#drawbar` is mounted, the same rule the page
+  rail follows. Second: `AnnotationLayer` renders twice per page, `variant="shapes"`
+  under the text overlay and `variant="hits"` above it. The invisible text overlay
+  took every click, so a pen line across a paragraph could not be selected,
+  recoloured, moved or restacked — and a stroke over text is the only kind anyone
+  draws. Only *stroke*-shaped hit targets move above: they're the width of the ink
+  the user drew, so a click on one means that ink, whereas a box target is mostly
+  empty space and a highlight over a paragraph would blanket the text and make the
+  document uneditable underneath. Both halves read the same array in the same
+  order, so nothing about stacking changes. If you add a kind, put its *visible*
+  parts in `shapes` and give it a hit target in exactly one half.
+
+- **Stacking order is the annotations array, in both directions.**
+  `AnnotationLayer` maps the array to SVG in order and `exporter.ts` walks it with
+  `for (const a of annots)`, so one array decides the preview *and* the file and
+  they can't disagree — which is what makes `reorderAnnotations` (`overlays.ts`)
+  the whole of bring-to-front. Deliberately annotations only: the exporter's layers
+  are fixed (edits → text boxes → annotations → stamps → whiteout covers), so
+  there is no order in which a stroke sits above a signature, and offering the
+  control per-kind would promise one. Surfaced in the Properties tab, the
+  multi-select bar, and `]` / `[`.
+
+- **A multi-selection is dragged by its own highlights.** `.multisel` used to be
+  inert decoration, so a group could be aligned and distributed but not *moved* —
+  dragging a member selected it instead and dropped the selection. The highlights
+  render above the objects they outline, which makes them the natural drag surface
+  for the whole group: one `startPointerDrag`, incremental deltas through
+  `applyOverlayDeltas` under one coalescing key (one undo step for the gesture).
+  Because they cover their objects they must also hand a *click* back through as
+  "select just this one", or a group becomes a trap. Note the marquee is
+  mouse-only by design (a touch drag pans the page), so this is a pointer-only
+  path today.
+
 - **Tick and cross are placed by a tap, and their geometry lives in one place.**
   Every other draw sub-tool needs a drag, but a form checkbox is smaller than
   `MIN_DRAG`, so requiring a drag would make a thirty-field form thirty drags: a
@@ -398,6 +487,17 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   passing the angle there too rotates it twice. Shipping without the pdf-lib
   half was invisible in every existing test: the overlay tilted the tick and the
   file carried a level one.
+  **What a mark can't show you, the UI has to say.** The gesture hint is the only
+  thing that distinguishes a tapped tool from seven dragged ones, and it shipped
+  *covered by the status snackbar* — which sat at `bottom: 88px` against a toolbar
+  at `bottom: 76px`, so the explanation was hidden at exactly the moment a new
+  document opened. The snackbar clears the whole bottom cluster now (dock 16+56,
+  drawbar 76+60), the hint travels onto the collapsed handle (where it finally
+  fits on a phone), and a ghost mark of `DEFAULT_MARK_SIZE` follows the cursor so
+  the size a tap commits to is visible before it is committed. The ghost is drawn
+  from `MARK_PATHS` like every other path — and its `<svg>` is deliberately *not*
+  `.annot-svg`, because that class means "the annotation layer" and the specs
+  count its shapes.
 - **No native UI.** Use the in-house `ConfirmDialog` (not `confirm()`),
   `ColorField` (not `<input type=color>`), and `TooltipHost` + `data-tip=`
   (not `title=`). `ColorField`'s popover is **portaled to `document.body`** —

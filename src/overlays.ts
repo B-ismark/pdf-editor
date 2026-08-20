@@ -130,6 +130,30 @@ export function applyOverlayDeltas(
   return next;
 }
 
+/**
+ * Move the given annotations to the front or the back of the annotation layer,
+ * keeping their order relative to each other.
+ *
+ * Array order *is* paint order: `AnnotationLayer` maps the array to SVG in
+ * order and `exporter.ts` walks it with `for (const a of annots)`, so one array
+ * decides both the preview and the file and they cannot disagree.
+ *
+ * Deliberately annotations only. The exporter's layers are fixed — edits, then
+ * text boxes, then annotations, then stamps, then whiteout covers — so there is
+ * no order in which a stroke can be put above a signature, and offering the
+ * control per-kind would promise one.
+ */
+export function reorderAnnotations(
+  d: DocState,
+  ids: Set<string>,
+  to: "front" | "back",
+): DocState {
+  const moving = d.annotations.filter((a) => ids.has(a.id));
+  if (moving.length === 0 || moving.length === d.annotations.length) return d;
+  const rest = d.annotations.filter((a) => !ids.has(a.id));
+  return { ...d, annotations: to === "front" ? [...rest, ...moving] : [...moving, ...rest] };
+}
+
 /** All overlays currently in the id set, tagged with kind + bounding box. */
 export function overlaysInSet(
   d: DocState,

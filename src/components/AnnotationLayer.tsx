@@ -12,6 +12,25 @@ interface Props {
   onSelect: (id: string) => void;
   /** Replace an annotation's geometry (used while dragging to move it). */
   onMove: (annot: Annotation, key: string) => void;
+  /**
+   * Which half of the layer to render.
+   *
+   * `shapes` is everything visible, plus the *box*-shaped hit targets, and sits
+   * under the text overlay as it always has. `hits` is the transparent
+   * stroke-shaped targets only, and PageView renders it *above* the editable
+   * text: a pen line drawn across a paragraph was otherwise unselectable, since
+   * the (invisible) text overlay above it took every click — which makes a
+   * stroke over text impossible to recolour, move or restack, i.e. exactly the
+   * strokes anyone would want to.
+   *
+   * The split is by hit *size*, and the reason is which click is more likely a
+   * mistake. A stroke target is the width of the ink the user drew, so a click
+   * on it means that ink. A box target is mostly empty space — a highlight over
+   * a paragraph would blanket the text and make the document uneditable
+   * underneath, so those stay below. Both halves read the same array in the same
+   * order, so stacking order is unaffected.
+   */
+  variant?: "shapes" | "hits";
 }
 
 /** Shift an annotation by a delta in PDF units (origin bottom-left). */
@@ -59,7 +78,9 @@ export function AnnotationLayer({
   interactive,
   onSelect,
   onMove,
+  variant = "shapes",
 }: Props) {
+  const shapes = variant === "shapes";
   const toX = (x: number) => x * scale;
   const toY = (y: number) => (H - y) * scale;
   const gestureRef = useRef(0);
@@ -106,7 +127,13 @@ export function AnnotationLayer({
       : { style: { pointerEvents: "none" as const } };
 
   return (
-    <svg className="annot-svg" width="100%" height="100%" style={{ pointerEvents: "none" }}>
+    <svg
+      className={`annot-svg${shapes ? "" : " annot-svg--hits"}`}
+      width="100%"
+      height="100%"
+      style={{ pointerEvents: "none" }}
+      aria-hidden={shapes ? undefined : true}
+    >
       {annotations.map((a) => {
         const stroke = "strokeWidth" in a ? a.strokeWidth * scale : 1;
         const key = a.id;
@@ -122,11 +149,13 @@ export function AnnotationLayer({
           }
         }
         if (a.kind === "highlight") {
+          if (!shapes) return null;
           els.push(
             <rect key="v" x={toX(a.x)} y={toY(a.y + a.height)} width={a.width * scale} height={a.height * scale} fill={a.color} opacity={0.4} style={{ pointerEvents: "none" }} />,
             <rect key="h" x={toX(a.x)} y={toY(a.y + a.height)} width={a.width * scale} height={a.height * scale} fill="transparent" {...fillHit(a)} />,
           );
         } else if (a.kind === "rect") {
+          if (!shapes) return null;
           els.push(
             <rect key="v" x={toX(a.x)} y={toY(a.y + a.height)} width={a.width * scale} height={a.height * scale} fill="none" stroke={a.color} strokeWidth={stroke} style={{ pointerEvents: "none" }} />,
             // Whole interior is grabbable so the box moves like a stamp.
@@ -134,11 +163,16 @@ export function AnnotationLayer({
           );
         } else if (a.kind === "line" || a.kind === "arrow") {
           const x1 = toX(a.x1), y1 = toY(a.y1), x2 = toX(a.x2), y2 = toY(a.y2);
-          els.push(
-            <line key="v" x1={x1} y1={y1} x2={x2} y2={y2} stroke={a.color} strokeWidth={stroke} strokeLinecap="round" style={{ pointerEvents: "none" }} />,
-            <line key="h" x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={Math.max(stroke, 16)} {...hitProps(a)} />,
-          );
-          if (a.kind === "arrow") {
+          if (shapes) {
+            els.push(
+              <line key="v" x1={x1} y1={y1} x2={x2} y2={y2} stroke={a.color} strokeWidth={stroke} strokeLinecap="round" style={{ pointerEvents: "none" }} />,
+            );
+          } else {
+            els.push(
+              <line key="h" x1={x1} y1={y1} x2={x2} y2={y2} stroke="transparent" strokeWidth={Math.max(stroke, 16)} {...hitProps(a)} />,
+            );
+          }
+          if (shapes && a.kind === "arrow") {
             const L = Math.max(8, a.strokeWidth * 4) * scale;
             const back = Math.atan2(y2 - y1, x2 - x1) + Math.PI;
             for (const off of [-Math.PI / 6, Math.PI / 6]) {
@@ -147,8 +181,10 @@ export function AnnotationLayer({
               );
             }
           }
-          // Draggable endpoints when selected: reshape length & direction.
-          if (selectedId === a.id && interactive) {
+          // Draggable endpoints when selected: reshape length & direction. They
+          // live in the hits layer with the line itself, or the text overlay
+          // would swallow a handle that happens to land on a word.
+          if (!shapes && selectedId === a.id && interactive) {
             for (const [k, cx, cy, w] of [["e1", x1, y1, 1] as const, ["e2", x2, y2, 2] as const]) {
               els.push(
                 <circle key={`${k}hit`} className="endpoint-hit" cx={cx} cy={cy} r={14} onPointerDown={(e) => beginEndpoint(a, w, e)} />,
@@ -157,6 +193,7 @@ export function AnnotationLayer({
             }
           }
         } else if (a.kind === "check" || a.kind === "cross") {
+          if (!shapes) return null;
           // One glyph definition, three draw paths — see pdf/marks.ts.
           const sw = markStroke(a.strokeWidth, a) * scale;
           markPolylines(a.kind, a).forEach((line, i) => {
@@ -173,13 +210,19 @@ export function AnnotationLayer({
         } else if (a.kind === "pen") {
           const pts = a.pts.map((p) => `${toX(p.x)},${toY(p.y)}`).join(" ");
           els.push(
-            <polyline key="v" points={pts} fill="none" stroke={a.color} strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: "none" }} />,
-            <polyline key="h" points={pts} fill="none" stroke="transparent" strokeWidth={Math.max(stroke, 16)} {...hitProps(a)} />,
+            shapes ? (
+              <polyline key="v" points={pts} fill="none" stroke={a.color} strokeWidth={stroke} strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: "none" }} />
+            ) : (
+              <polyline key="h" points={pts} fill="none" stroke="transparent" strokeWidth={Math.max(stroke, 16)} {...hitProps(a)} />
+            ),
           );
+        } else if (!shapes) {
+          // Notes carry their own HTML element; nothing to put in this layer.
+          return null;
         }
         // Dashed outline only for kinds without dedicated handles (pen/note);
         // line/arrow show endpoints, rect/highlight get the HTML frame.
-        const showBox = selectedId === a.id && (a.kind === "pen" || a.kind === "note");
+        const showBox = shapes && selectedId === a.id && (a.kind === "pen" || a.kind === "note");
         const b = showBox ? bbox(a, scale, H) : null;
         return (
           <g key={key} transform={groupTransform}>

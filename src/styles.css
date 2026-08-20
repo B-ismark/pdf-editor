@@ -167,7 +167,39 @@ body {
    clickable, unreadable as a button, and well under any touch minimum. The row
    is now sized to fit instead (the theme control moved into the overflow menu),
    and the primary action holds its size regardless. */
-.appbar__download { margin-left: 4px; flex: none; }
+.appbar__download {
+  margin-left: 4px;
+  flex: none;
+  /* Sized for the bar it lives in. At 44px tall with 18px flanks it was 130×44
+     inside a 52px row — 85% of the bar's height and wider than every other
+     control put together, which reads as a button that outgrew its slot. The
+     touch minimum still applies where fingers are the input: the phone rule
+     below keeps it 44px and icon-only. */
+  height: 38px;
+  padding: 0 14px;
+  font-size: 0.8125rem;
+}
+
+/* The overflow menu holds every document action there is, and it was a bare
+   glyph pressed against the window edge next to a filled pill — the loudest
+   thing in the row standing beside the quietest. A container is what says
+   "control" rather than "label"; the 48px hit area is unchanged. */
+/* A container is what says "control" rather than "label" — the menu holds every
+   document action there is and was a bare glyph pressed against the window
+   edge, beside a filled pill. Painted on the *content* box: the hit area stays
+   the full 48px every control here has, while the visible chip is 40px, the
+   same weight as the 38px Download next to it. (A 48px filled circle made the
+   menu the loudest thing in the row, which is the opposite fix. And it can't be
+   an absolutely-positioned ::before — that paints above the icon, which is how
+   this first shipped as an empty grey disc.) */
+.appbar__more {
+  color: var(--on-surface);
+  padding: 4px;
+  background: var(--surface-container-highest);
+  background-clip: content-box;
+}
+/* Keep the state layer on the chip rather than the whole hit area. */
+.appbar__more::after { inset: 4px; border-radius: var(--radius-full); }
 
 /* ============ Workspace ============ */
 .workspace {
@@ -1050,7 +1082,12 @@ body {
   cursor: text;
   outline: none;
   transform-origin: left top;
-  padding: 0 1px;
+  /* No horizontal padding. `left` is the x the exporter draws this text at, so
+     any inset here renders the preview a pixel off the file — and off the
+     glyphs underneath, which is a visible letter-shift the moment you click a
+     fragment. Vertical padding stays zero for the baseline probe (see
+     textBaseline.ts). */
+  padding: 0;
   border-radius: 2px;
 }
 .fragment:hover { background: color-mix(in srgb, var(--primary) 14%, transparent); }
@@ -1060,7 +1097,26 @@ body {
   border-radius: 2px;
   pointer-events: none;
 }
-.fragment__cover--sel { box-shadow: 0 0 0 1.5px var(--primary); }
+/* Selected: two rules above and below the run, NOT a box around it.
+   The cover hugs the glyphs (it has to — it hides exactly the text it
+   replaces), so a ring hugs them too: its vertical edge landed in the gap
+   between this fragment and the next word and read as a glyph. "Most of"
+   selected rendered as "Most ofl". A horizontal rule can't be mistaken for a
+   letter, which is the whole reason this is two edges and not four. The cover's
+   own geometry and colour are untouched — they are a claim about the exported
+   file. */
+.fragment__cover--sel::before,
+.fragment__cover--sel::after {
+  content: "";
+  position: absolute;
+  left: -2px;
+  right: -2px;
+  height: 2px;
+  background: var(--primary);
+  border-radius: 1px;
+}
+.fragment__cover--sel::before { top: -4px; }
+.fragment__cover--sel::after { bottom: -4px; }
 
 /* ============ Text boxes ============ */
 .tb-wrap { position: absolute; }
@@ -1176,9 +1232,33 @@ body {
   outline-offset: 1px;
   background: color-mix(in srgb, var(--primary) 10%, transparent);
   border-radius: 2px;
-  pointer-events: none;
+  /* Interactive: this is the group's drag handle (see `beginGroupDrag`). It
+     covers its object, so it also has to hand a plain click back through as
+     "select just this one" — otherwise it would eat the gesture. */
+  cursor: move;
   z-index: 5;
 }
+
+/* The mark a tap would place. Translucent, and the box shows the size the tap
+   commits to — a tick is otherwise the only tool whose result you can't see
+   coming. Non-interactive: it must never take the tap it's advertising. */
+.markghost {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  opacity: 0.55;
+}
+.markghost__box {
+  fill: color-mix(in srgb, var(--primary) 8%, transparent);
+  stroke: var(--primary);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+}
+/* The two stacking-order buttons sit as a pair on the row, like a segmented
+   control rather than two loose icons. */
+.props__arrange { display: flex; gap: 2px; }
+
 .multibar {
   position: absolute;
   top: 12px;
@@ -1532,10 +1612,34 @@ body {
    audience that needs it least: the hint exists because the other sub-tools all
    want a drag and someone on a mouse will try to drag. Tapping is already what
    a touch user does first. */
+/* ...but the *collapsed* bar is a 36px handle, so the hint fits there even on a
+   phone — which is the payoff of collapsing, not an exception to this rule. */
 @media (max-width: 599px) {
-  .drawbar__hint { display: none; }
+  .drawbar:not(.drawbar--closed) .drawbar__hint { display: none; }
 }
 .drawbar__width { display: flex; align-items: center; flex: none; }
+.drawbar__collapse { flex: none; margin-left: 2px; }
+/* Collapsed: a handle naming the active sub-tool, in the same place the strip
+   was, so re-opening is where closing happened. Padding shrinks with it —
+   6px around a 48px row is right, and far too much around one 36px pill. */
+.drawbar--closed { padding: 4px; gap: 6px; }
+.drawbar__handle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--radius-full);
+  background: var(--secondary-container);
+  color: var(--on-secondary-container);
+  font: inherit;
+  cursor: pointer;
+  flex: none;
+}
+.drawbar__handle:hover { background: var(--surface-container-highest); }
+.drawbar__handle:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.drawbar__handlelabel { white-space: nowrap; }
 .icon-btn--on { background: var(--secondary-container); color: var(--on-secondary-container); }
 .swatch--sm { width: 40px; height: 40px; flex: none; }
 .swatch--sm span { width: 30px; height: 30px; border-radius: var(--radius-sm); }
@@ -1982,7 +2086,11 @@ body {
   .panel .props__header .icon-btn { display: none; }
 
   /* Sit above the floating tool dock so it never covers the tools. */
-  .snackbar { top: auto; bottom: 88px; }
+  /* Above the whole bottom cluster, not just the dock: at 88px this landed on
+     the draw toolbar (bottom 76px, 60px tall), so the one line explaining how a
+     mark tool is placed was covered by the status message that shows when a
+     document opens. Dock 16+56, drawbar 76+60 = 136; clear it. */
+  .snackbar { top: auto; bottom: 148px; }
 }
 
 @media (max-width: 599px) {
@@ -1996,7 +2104,7 @@ body {
 
   /* Download stays in the app bar on every breakpoint (no more FAB) — icon-only
      on phones to save room. */
-  .appbar__download { padding: 0; width: 44px; }
+  .appbar__download { padding: 0; width: 44px; height: 44px; }
   .appbar__download span { display: none; }
   /* The 14px left inset exists to sit the wordmark off the edge; the wordmark is
      hidden here, so an icon-first bar wants the same 8px as the right side — and
