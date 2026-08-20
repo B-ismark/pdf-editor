@@ -37,13 +37,50 @@ interface Box {
   height: number;
 }
 
-/** Map the unit polylines onto a box, in the box's own coordinate space. */
-export function markPolylines(kind: MarkKind, box: Box): { x: number; y: number }[][] {
+/**
+ * Rotate a point about a centre.
+ *
+ * `rotation` on an annotation is degrees *clockwise in screen space*, and
+ * screen space has y pointing down while PDF space has it pointing up — so in
+ * PDF coordinates the same rotation runs the other way and the angle is
+ * negated. This is the identical convention `rotatedBox` uses in the exporter;
+ * getting it backwards mirrors the mark instead of failing loudly.
+ */
+function rotateAbout(
+  p: { x: number; y: number },
+  cx: number,
+  cy: number,
+  deg: number,
+): { x: number; y: number } {
+  const th = (-deg * Math.PI) / 180;
+  const cos = Math.cos(th);
+  const sin = Math.sin(th);
+  const dx = p.x - cx;
+  const dy = p.y - cy;
+  return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+}
+
+/**
+ * Map the unit polylines onto a box, in the box's own coordinate space.
+ *
+ * `rotation` defaults to 0 and must be left that way by any caller that has
+ * *already* rotated its coordinate system — the redaction raster translates and
+ * rotates the canvas about the box centre before it draws, the same way it does
+ * for every other box kind, so passing the angle here too would apply it twice.
+ * The pdf-lib path has no such transform and therefore passes it.
+ */
+export function markPolylines(
+  kind: MarkKind,
+  box: Box,
+  rotation = 0,
+): { x: number; y: number }[][] {
+  const cx = box.x + box.width / 2;
+  const cy = box.y + box.height / 2;
   return MARK_PATHS[kind].map((line) =>
-    line.map(([ux, uy]) => ({
-      x: box.x + ux * box.width,
-      y: box.y + uy * box.height,
-    })),
+    line.map(([ux, uy]) => {
+      const p = { x: box.x + ux * box.width, y: box.y + uy * box.height };
+      return rotation ? rotateAbout(p, cx, cy, rotation) : p;
+    }),
   );
 }
 

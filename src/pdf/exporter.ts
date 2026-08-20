@@ -274,8 +274,12 @@ function drawVectorAnnots(page: PDFPage, annots: Annotation[], helv: PDFFont): v
         page.drawLine({ start: { x, y: y + h }, end: { x, y }, thickness: t, color });
       }
     } else if (a.kind === "check" || a.kind === "cross") {
+      // Rotation is applied to the points here because, unlike `rect` and
+      // `highlight`, there is no pdf-lib primitive to hand it to. Dropping it
+      // is invisible until someone rotates a mark and the exported file does
+      // not match what the overlay drew.
       const t = markStroke(a.strokeWidth, a);
-      for (const line of markPolylines(a.kind, a)) {
+      for (const line of markPolylines(a.kind, a, a.rotation ?? 0)) {
         for (let i = 1; i < line.length; i++) {
           page.drawLine({ start: line[i - 1], end: line[i], thickness: t, color, lineCap: LineCapStyle.Round });
         }
@@ -352,6 +356,8 @@ function drawRasterAnnots(
     } else if (a.kind === "check" || a.kind === "cross") {
       ctx.lineWidth = markStroke(a.strokeWidth, a) * S;
       ctx.beginPath();
+      // Unrotated on purpose: the canvas is already rotated about the box
+      // centre above, as it is for every box kind. See `markPolylines`.
       for (const line of markPolylines(a.kind, a)) {
         // A rotated box has the canvas already translated to its centre, so
         // the glyph is drawn about the origin rather than in page coordinates.

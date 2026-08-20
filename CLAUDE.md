@@ -80,8 +80,10 @@ type-checking can't see, and each exists because it broke once:
   blank square, silently) and every mapped name is used;
 - `marks.spec.ts` — a tick is placed by a *tap* (a checkbox is smaller than the
   drag threshold), a drag sizes it instead, both cross strokes are drawn, a mark
-  gets the same resize frame as any other box, and the glyph reaches the
-  exported bytes rather than living only in the overlay;
+  gets the same resize frame as any other box, the glyph reaches the exported
+  bytes rather than living only in the overlay, a *rotated* mark exports at the
+  angle the overlay drew, and a mark survives its page being rasterised for
+  redaction;
 - `affordance.spec.ts` — the Inspector, the ⋯ menu and the command palette mark
   the *same* set of actions as opening something, an action that acts
   immediately carries no mark, and a tool that opens something declares which
@@ -388,6 +390,14 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   hit-testing and rotation for free; the set of box kinds is `isBoxAnnotation`
   in `pdf/types.ts`, and a new box kind that isn't added there renders fine and
   silently loses its resize handles.
+  **Rotation is applied in the pdf-lib path and *not* in the raster path.**
+  `rect` and `highlight` hand their angle to a pdf-lib primitive; a polyline has
+  none, so `markPolylines` takes the rotation and turns the points itself. The
+  redaction canvas, by contrast, is already translated and rotated about the box
+  centre before the branch runs — the same setup every box kind shares — so
+  passing the angle there too rotates it twice. Shipping without the pdf-lib
+  half was invisible in every existing test: the overlay tilted the tick and the
+  file carried a level one.
 - **No native UI.** Use the in-house `ConfirmDialog` (not `confirm()`),
   `ColorField` (not `<input type=color>`), and `TooltipHost` + `data-tip=`
   (not `title=`). `ColorField`'s popover is **portaled to `document.body`** —
@@ -399,6 +409,15 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   the render path free of pdf-lib** — e.g. `isFragmentModified` lives in the
   pure `pdf/style.ts`, not `exporter.ts`. If you add code the initial render
   needs, don't import it from a pdf-lib module.
+- **Two traps when writing a spec against a shape or a raster.**
+  `getBoundingClientRect()` on a *rotated* SVG element returns the rotated
+  bounding box of the element's bounding box, not a tight fit of the path — for
+  a diagonal glyph that reports a shape half again too tall, so comparing it
+  against a pixel measurement of the exported file makes a correct exporter look
+  broken. Rotate the element's own `points` instead. And a redacted page ships
+  as a JPEG: the canvas exists and is *blank* until the image decodes, so
+  `open()` returning is not enough to measure on — wait for the page to actually
+  carry ink first.
 - **Touch = select-first.** `hooks/useDrag.ts` exports `tapSelect` and
   `startElementGesture`: on touch, an *unselected* element only selects on a
   clean tap and lets the page pan under a drag; once selected it drags. Reuse

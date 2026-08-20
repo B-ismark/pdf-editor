@@ -707,6 +707,11 @@ body {
   color: var(--primary);
   background: var(--surface-container-low);
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  /* The fillets are wider than the gap between tabs, so they reach a few pixels
+     under the neighbour — which paints later in DOM order and, once hovered,
+     covered the joint with its own background. Lifting the selected tab keeps
+     its joint on top whichever side it is on. */
+  z-index: 1;
 }
 /* The joint. Two concave fillets flanking the selected tab's foot, painted in
    the panel's colour, so the tab and the panel read as one piece of material.
@@ -1519,6 +1524,16 @@ body {
   color: var(--on-surface-variant);
   white-space: nowrap;
   padding: 0 4px;
+}
+/* Not on a phone. The drawbar scrolls horizontally there, and this line took
+   its scroll width from 425px to 692px on a 390px screen — which pushes the
+   colour swatch and the stroke slider off the end, so the hint would be buying
+   discoverability for one gesture by hiding two controls. It is also the
+   audience that needs it least: the hint exists because the other sub-tools all
+   want a drag and someone on a mouse will try to drag. Tapping is already what
+   a touch user does first. */
+@media (max-width: 599px) {
+  .drawbar__hint { display: none; }
 }
 .drawbar__width { display: flex; align-items: center; flex: none; }
 .icon-btn--on { background: var(--secondary-container); color: var(--on-secondary-container); }

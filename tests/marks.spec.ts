@@ -49,6 +49,64 @@ async function inkShare(
   }, rect);
 }
 
+/** Tight bounding box of the non-paper pixels in an overlay-relative rect,
+ * returned in CSS pixels. */
+async function inkBox(
+  page: Page,
+  rect: { x: number; y: number; w: number; h: number },
+): Promise<{ w: number; h: number } | null> {
+  return page.evaluate(({ x, y, w, h }) => {
+    const canvas = document.querySelector<HTMLCanvasElement>(".page canvas")!;
+    const overlay = canvas.closest(".page") as HTMLElement;
+    const sx = canvas.width / overlay.clientWidth;
+    const sy = canvas.height / overlay.clientHeight;
+    const d = canvas.getContext("2d", { willReadFrequently: true })!.getImageData(
+      Math.round(x * sx), Math.round(y * sy),
+      Math.round(w * sx), Math.round(h * sy),
+    );
+    let mnX = Infinity, mxX = -1, mnY = Infinity, mxY = -1;
+    for (let py = 0; py < d.height; py++) {
+      for (let px = 0; px < d.width; px++) {
+        const i = (py * d.width + px) * 4;
+        const off = Math.max(255 - d.data[i], 255 - d.data[i + 1], 255 - d.data[i + 2]);
+        if (off > 40) {
+          if (px < mnX) mnX = px;
+          if (px > mxX) mxX = px;
+          if (py < mnY) mnY = py;
+          if (py > mxY) mxY = py;
+        }
+      }
+    }
+    return mxX < 0 ? null : { w: (mxX - mnX + 1) / sx, h: (mxY - mnY + 1) / sy };
+  }, rect);
+}
+
+/**
+ * Wait until the first page has actually painted its content.
+ *
+ * `open()` waits for a canvas with a real backing store, which is enough for a
+ * vector page but not for a redacted one: that page ships as a JPEG, and the
+ * canvas exists and is blank for a while before the image decodes. Measuring in
+ * that gap reports a perfectly good raster as an empty one.
+ */
+async function waitForPaint(page: Page): Promise<void> {
+  await page.waitForFunction(
+    () => {
+      const c = document.querySelector<HTMLCanvasElement>(".page canvas");
+      if (!c || c.width < 2) return false;
+      const d = c.getContext("2d", { willReadFrequently: true })!
+        .getImageData(0, 0, c.width, Math.min(c.height, 400)).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (Math.max(255 - d[i], 255 - d[i + 1], 255 - d[i + 2]) > 40) n++;
+      }
+      return n > 500;
+    },
+    null,
+    { timeout: 30_000 },
+  );
+}
+
 /** Download the current document and save it where the app can reopen it. */
 async function exportTo(page: Page): Promise<string> {
   const [download] = await Promise.all([
@@ -156,5 +214,154 @@ test("a placed mark can be selected and resized like any other box", async ({ pa
   // Box annotations get the HTML resize/rotate frame; a mark that fell out of
   // `isBoxAnnotation` would still render but silently lose its handles.
   await expect(page.locator(".handle").first()).toBeVisible();
+  expectClean(w);
+});
+
+test("a rotated mark exports at the angle the overlay drew", async ({ page }) => {
+  const w = watch(page);
+  const f = await fixtures();
+  await open(page, f.sample);
+  const box = (await page.locator(".page").first().boundingBox())!;
+  const dock = (await page.locator(".tooldock").boundingBox())!;
+
+  // Blank paper big enough to hold the mark once it has been rotated.
+  const WIN = { w: 190, h: 150 };
+  let spot: { x: number; y: number } | null = null;
+  outer: for (let y = 100; y < dock.y - box.y - WIN.h - 20; y += 15) {
+    for (let x = 30; x < box.width - WIN.w; x += 30) {
+      if ((await inkShare(page, { x, y, w: WIN.w, h: WIN.h })) < 0.0005) {
+        spot = { x, y };
+        break outer;
+      }
+    }
+  }
+  expect(spot, "found blank paper to draw on").not.toBeNull();
+  const from = { x: spot!.x + 45, y: spot!.y + 60 };
+
+  await pickMark(page, "Tick");
+  await page.mouse.move(box.x + from.x, box.y + from.y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + from.x + 90, box.y + from.y + 30, { steps: 6 });
+  await page.mouse.up();
+
+  await pickTool(page, "Select");
+  await page.mouse.click(box.x + from.x + 45, box.y + from.y + 15);
+  await expect(page.locator(".rotate-zone").first()).toBeAttached();
+
+  // 35 degrees, not 90: a bounding box cannot tell +90 from -90, so a sign
+  // error in the exporter's rotation would sail straight through a
+  // right-angle test.
+  const cx = box.x + from.x + 45;
+  const cy = box.y + from.y + 15;
+  const rz = (await page.locator(".rotate-zone").first().boundingBox())!;
+  // The resize handle sits on the corner, covering the middle of the rotate
+  // ring — press the ring's outer corner or the gesture silently becomes a
+  // resize and the test "passes" against an unrotated mark.
+  const hx = rz.x + 4;
+  const hy = rz.y + 4;
+  const r = Math.hypot(hx - cx, hy - cy);
+  const a0 = Math.atan2(hy - cy, hx - cx);
+  await page.mouse.move(hx, hy);
+  await page.mouse.down();
+  for (let k = 1; k <= 10; k++) {
+    const a = a0 + ((35 * Math.PI) / 180) * (k / 10);
+    await page.mouse.move(cx + r * Math.cos(a), cy + r * Math.sin(a));
+    await page.waitForTimeout(15);
+  }
+  await page.mouse.up();
+  await page.waitForTimeout(250);
+
+  // What the overlay will look like once rotated, computed from its own
+  // points. Note `getBoundingClientRect()` is NOT usable here: on a rotated
+  // SVG element it returns the rotated *bounding box of the bounding box*, so
+  // for a diagonal glyph it reports a shape half again too tall and quietly
+  // disagrees with a correct exporter.
+  const want = await page.locator(".annot-svg polyline").first().evaluate((el) => {
+    const g = el.parentElement as SVGGElement;
+    const m = /rotate\(([-\d.]+)/.exec(g.getAttribute("transform") ?? "");
+    const deg = m ? parseFloat(m[1]) : 0;
+    const pts = (el.getAttribute("points") ?? "").trim().split(/\s+/)
+      .map((p) => p.split(",").map(Number));
+    const sw = parseFloat(el.getAttribute("stroke-width") ?? "0");
+    const cxs = pts.reduce((n, p) => n + p[0], 0) / pts.length;
+    const cys = pts.reduce((n, p) => n + p[1], 0) / pts.length;
+    // The centre of rotation is the box centre, which the transform carries.
+    const c = /rotate\([-\d.]+ ([-\d.]+) ([-\d.]+)\)/.exec(g.getAttribute("transform") ?? "");
+    const ox = c ? parseFloat(c[1]) : cxs;
+    const oy = c ? parseFloat(c[2]) : cys;
+    const th = (deg * Math.PI) / 180;
+    const cos = Math.cos(th), sin = Math.sin(th);
+    const xs: number[] = [], ys: number[] = [];
+    for (const [px, py] of pts) {
+      const dx = px - ox, dy = py - oy;
+      xs.push(dx * cos - dy * sin);
+      ys.push(dx * sin + dy * cos);
+    }
+    return {
+      deg,
+      w: Math.max(...xs) - Math.min(...xs) + sw,
+      h: Math.max(...ys) - Math.min(...ys) + sw,
+    };
+  });
+  expect(Math.abs(want.deg), "the overlay actually rotated").toBeGreaterThan(20);
+
+  const path = await exportTo(page);
+  await open(page, path);
+  const got = await inkBox(page, { ...spot!, w: WIN.w, h: WIN.h });
+
+  expect(got, "the mark is in the exported file").not.toBeNull();
+  // Height first: it is the dimension that actually distinguishes a tilted
+  // tick from a level one. Measured against the exporter before it learned
+  // about rotation, height was 37% out while width was only 12% out — a tick
+  // is long and thin, so rotating it barely changes how wide its bounding box
+  // is. Asserting width first would have made this spec hang on a hair.
+  expect(Math.abs(got!.h - want.h) / want.h, "exported height matches the overlay").toBeLessThan(0.12);
+  expect(Math.abs(got!.w - want.w) / want.w, "exported width matches the overlay").toBeLessThan(0.12);
+  expectClean(w);
+});
+
+test("a mark survives a page being rasterised for redaction", async ({ page }) => {
+  const w = watch(page);
+  const f = await fixtures();
+  await open(page, f.sample);
+  const box = (await page.locator(".page").first().boundingBox())!;
+  const spot = await blankSpot(page);
+  const win = { x: spot.x - 24, y: spot.y - 24, w: 48, h: 48 };
+
+  await pickMark(page, "Tick");
+  await page.mouse.click(box.x + spot.x, box.y + spot.y);
+  // `getBBox()` is the path's own extent and excludes the stroke, while a pixel
+  // measurement necessarily includes it — on a glyph this small the stroke is
+  // nearly half the height, so the two are not comparable until it is added
+  // back.
+  const overlay = await page.locator(".annot-svg polyline").first().evaluate((el) => {
+    const b = (el as SVGGraphicsElement).getBBox();
+    const sw = parseFloat(el.getAttribute("stroke-width") ?? "0");
+    return { w: b.width + sw, h: b.height + sw };
+  });
+
+  // Redact something else on the same page. That switches the whole page onto
+  // the raster path — a third place the glyph is drawn, with its own
+  // coordinate system (y down, canvas-space) and its own rotation handling.
+  // Nothing else exercises it, and a mark that vanished here would only ever
+  // be noticed by someone redacting a filled-in form.
+  await pickTool(page, "Redact");
+  await page.mouse.move(box.x + 60, box.y + 60);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 220, box.y + 88, { steps: 6 });
+  await page.mouse.up();
+
+  const path = await exportTo(page);
+  await open(page, path);
+  await waitForPaint(page);
+  const got = await inkBox(page, win);
+
+  expect(got, "the tick is still on the rasterised page").not.toBeNull();
+  // And at the right size — a coordinate slip in the raster path would place
+  // or scale it wrongly rather than lose it. The tolerance is loose because the
+  // raster is JPEG-compressed after the mark is drawn onto it, which blurs the
+  // stroke edges outward past the threshold this measures with.
+  expect(Math.abs(got!.w - overlay.w) / overlay.w, "the raster kept the mark's width").toBeLessThan(0.3);
+  expect(Math.abs(got!.h - overlay.h) / overlay.h, "the raster kept the mark's height").toBeLessThan(0.3);
   expectClean(w);
 });
