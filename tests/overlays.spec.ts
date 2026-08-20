@@ -246,6 +246,74 @@ test("a buried stroke can be brought to the front, in the overlay and the export
   expectClean(w);
 });
 
+test("a note stays above the shapes in the exported file, as it does on screen", async ({
+  page,
+}) => {
+  const w = watch(page);
+  await open(page, (await fixtures()).sample);
+  const box = (await page.locator(".page").first().boundingBox())!;
+
+  // A note is an HTML element above the whole SVG layer, so on screen it is
+  // always on top. The exporter drew strictly in array order, so a shape added
+  // *after* a note covered it in the file and not in the preview.
+  await pickSubTool(page, "Note");
+  await setColour(page, "#000000");
+  await page.mouse.click(box.x + 120, box.y + 300);
+  // The new note takes focus, so this types into it — and a note wide enough to
+  // sample needs some text (its exported box is sized to the string).
+  await page.keyboard.type("NOTE");
+  await page.waitForTimeout(200);
+
+  await pickSubTool(page, "Highlight");
+  await setColour(page, "#ffffff");
+  await page.mouse.move(box.x + 100, box.y + 292);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 260, box.y + 330, { steps: 8 });
+  await page.mouse.up();
+  await page.waitForTimeout(200);
+
+  const [download] = await Promise.all([
+    page.waitForEvent("download", { timeout: 120_000 }),
+    page.click(".appbar__download"),
+  ]);
+  const out = join(mkdtempSync(join(tmpdir(), "notes-")), "out.pdf");
+  writeFileSync(out, readFileSync((await download.path())!));
+  await open(page, out);
+
+  // Inside the note. A black note is ~20 grey on paper (it draws at 0.92
+  // opacity); the white highlight at 0.4 over that is ~114. So the two readings
+  // are far apart and each says exactly which shape ended up on top.
+  expect(
+    await dominant(page, { x: 126, y: 308, w: 8, h: 5 }, [20, 20, 20], [114, 114, 114]),
+    "the highlight was painted over the note, which the preview never showed",
+  ).toBe("a");
+  expectClean(w);
+});
+
+test("restacking something already at the front costs no undo step", async ({ page }) => {
+  const w = watch(page);
+  await open(page, (await fixtures()).sample);
+
+  await pickSubTool(page, "Pen");
+  await stroke(page, 200);
+  await stroke(page, 260);
+  await pickTool(page, "Select");
+
+  // Select the frontmost stroke (the one drawn last) and raise it again.
+  const box = (await page.locator(".page").first().boundingBox())!;
+  await page.mouse.click(box.x + 140, box.y + 268);
+  await page.waitForTimeout(250);
+  await page.keyboard.press("]");
+  await page.waitForTimeout(250);
+
+  // One undo has to take the *stroke* back. A dead history entry would spend it
+  // on restoring an order that never changed, so the stroke would still be here.
+  await page.keyboard.press("Control+z");
+  await page.waitForTimeout(250);
+  expect(await strokePoints(page), "the undo went to a no-op restack").toHaveLength(1);
+  expectClean(w);
+});
+
 test("the keyboard sends a raised stroke back down", async ({ page }) => {
   const w = watch(page);
   await open(page, (await fixtures()).sample);

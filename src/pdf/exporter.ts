@@ -24,7 +24,7 @@ import {
   resolveFragmentStyle,
   standardFontKey,
 } from "./style";
-import { isBoxAnnotation } from "./types";
+import { annotationPaintOrder, isBoxAnnotation } from "./types";
 import type {
   Annotation,
   Edits,
@@ -251,7 +251,7 @@ function rotatedBox(x: number, y: number, w: number, h: number, rotDeg: number) 
 
 /** Draw vector annotations onto a pdf-lib page (PDF coords, y up). */
 function drawVectorAnnots(page: PDFPage, annots: Annotation[], helv: PDFFont): void {
-  for (const a of annots) {
+  for (const a of annotationPaintOrder(annots)) {
     const c = hexToRgb(a.color);
     const color = rgb(c.r, c.g, c.b);
     if (a.kind === "highlight") {
@@ -330,7 +330,7 @@ function drawRasterAnnots(
 ): void {
   const X = (x: number) => x * S;
   const Y = (y: number) => (H - y) * S;
-  for (const a of annots) {
+  for (const a of annotationPaintOrder(annots)) {
     ctx.strokeStyle = a.color;
     ctx.fillStyle = a.color;
     ctx.lineCap = "round";

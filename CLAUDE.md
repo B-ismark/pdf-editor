@@ -454,7 +454,11 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   are fixed (edits → text boxes → annotations → stamps → whiteout covers), so
   there is no order in which a stroke sits above a signature, and offering the
   control per-kind would promise one. Surfaced in the Properties tab, the
-  multi-select bar, and `]` / `[`.
+  multi-select bar, and `]` / `[` — but not for a *sticky note*: a note is an
+  HTML element rendered after the SVG, so it is above every shape whatever the
+  array says, and both export paths now order through `annotationPaintOrder`
+  (notes last) so the file agrees. Before that, a shape drawn after a note
+  covered it in the export and not on screen.
 
 - **A multi-selection is dragged by its own highlights.** `.multisel` used to be
   inert decoration, so a group could be aligned and distributed but not *moved* —

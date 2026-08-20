@@ -37,9 +37,14 @@ export function ColorField({ value, onChange, small }: Props) {
   useEffect(() => setHex(value), [value]);
 
   /** The rect of the toolbar this swatch lives in, if any — the popover has to
-   * clear the whole bar, not just the swatch inside it. */
+   * clear the whole bar, not just the swatch inside it.
+   *
+   * A *toolbar* only. Clearing a container taller than the popover moves it far
+   * from the swatch that opened it rather than off it: with `.panel` in this
+   * list, a swatch at y=723 in the phone's properties sheet threw the palette to
+   * y=205, most of a screen away from the control it belongs to. */
   const barRect = (): AnchorRect | null => {
-    const bar = swatchRef.current?.closest('[role="toolbar"], .drawbar, .panel');
+    const bar = swatchRef.current?.closest('[role="toolbar"], .drawbar');
     if (!bar) return null;
     const r = bar.getBoundingClientRect();
     return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };

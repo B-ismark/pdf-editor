@@ -1452,7 +1452,7 @@ export function App() {
   const canArrange =
     multi.length > 0
       ? annotations.some((a) => multiIds.has(a.id))
-      : selection?.kind === "annotation";
+      : selection?.kind === "annotation" && selectedAnnotation?.kind !== "note";
 
   type AlignOp = "left" | "center-h" | "right" | "top" | "middle" | "bottom";
   const alignMulti = useCallback(

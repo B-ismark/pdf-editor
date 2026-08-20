@@ -151,7 +151,12 @@ export function reorderAnnotations(
   const moving = d.annotations.filter((a) => ids.has(a.id));
   if (moving.length === 0 || moving.length === d.annotations.length) return d;
   const rest = d.annotations.filter((a) => !ids.has(a.id));
-  return { ...d, annotations: to === "front" ? [...rest, ...moving] : [...moving, ...rest] };
+  const next = to === "front" ? [...rest, ...moving] : [...moving, ...rest];
+  // Already there: return the same state so `doc.set` treats it as a no-op.
+  // Otherwise pressing `]` on the frontmost stroke pushes an undo step that
+  // undoes nothing and re-triggers autosave.
+  if (next.every((a, i) => a === d.annotations[i])) return d;
+  return { ...d, annotations: next };
 }
 
 /** All overlays currently in the id set, tagged with kind + bounding box. */

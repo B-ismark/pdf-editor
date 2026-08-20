@@ -188,6 +188,24 @@ export function isBoxAnnotation(a: Annotation): a is BoxAnnotation {
   return a.kind === "rect" || a.kind === "highlight" || a.kind === "check" || a.kind === "cross";
 }
 
+/**
+ * The annotations of a page in the order they are painted: array order, with
+ * sticky notes last.
+ *
+ * Array order is the whole of stacking order (`reorderAnnotations`), and on
+ * screen it decides the SVG layer — but a note isn't in that layer. It is an
+ * HTML element rendered after it, so a note is always above every shape no
+ * matter where it sits in the array. The exporter drew strictly in array
+ * order, so a shape added after a note covered it in the file and not in the
+ * preview: the screen lying about the file, in the one place this app can't
+ * afford it. Both export paths order through here instead.
+ */
+export function annotationPaintOrder(annots: Annotation[]): Annotation[] {
+  const notes = annots.filter((a) => a.kind === "note");
+  if (notes.length === 0 || notes.length === annots.length) return annots;
+  return [...annots.filter((a) => a.kind !== "note"), ...notes];
+}
+
 /** A placed image (signature or picture). Rect is bottom-left in PDF units. */
 export interface Stamp {
   id: string;

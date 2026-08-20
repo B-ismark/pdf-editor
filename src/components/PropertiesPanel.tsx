@@ -178,8 +178,11 @@ export function PropertiesPanel({
           )}
           {/* Stacking order. Drawings paint in the order they were made, so
               anything drawn later buries what's under it — a highlight over a
-              pen line used to be permanent. */}
-          {onArrange && (
+              pen line used to be permanent. Not offered for a sticky note: a
+              note is an HTML element above the whole shape layer (and, since
+              `annotationPaintOrder`, above it in the file too), so "bring to
+              front" would be a control with nothing to do. */}
+          {onArrange && annotation.kind !== "note" && (
             <div className="field field--row">
               <span className="field__label label-medium">Order</span>
               <div className="props__arrange">
