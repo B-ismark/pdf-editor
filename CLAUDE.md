@@ -94,10 +94,10 @@ type-checking can't see, and each exists because it broke once:
   `corner-shape`d (so it renders off Chromium), the fillets are painted in the
   panel's colour and not the strip's, shape follows the selection, and no
   chrome geometry reaches `.page` / `.page__canvas` / the thumbnails;
-- `fragment.spec.ts` — an edit's overlay text starts at exactly the x the
-  exporter draws it at (no horizontal padding), and a selected fragment is marked
-  by rules above and below rather than a ring whose vertical edge reads as a
-  letter;
+- `fragment.spec.ts` — an edit's overlay text (and a text box's) starts at
+  exactly the x the exporter draws it at, with no horizontal padding anywhere in
+  the chain, and a selected fragment is marked by rules above and below rather
+  than a ring whose vertical edge reads as a letter;
 - `chrome.spec.ts` — the draw sub-toolbar opens with its tool, folds away when a
   sub-tool is picked and comes back from its handle; the colour popover stays on
   screen and covers neither the toolbar it lives in nor the tool dock, at three
@@ -189,12 +189,15 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   the probe is only valid for the line-height the element actually gets (hence
   `FRAGMENT_LINE_HEIGHT` / `TEXTBOX_LINE_HEIGHT` being passed in), and the
   measured element must keep zero *vertical* padding.
-- **An edit's overlay carries no horizontal inset, and its selection mark has no
-  vertical edges.** Two ways the overlay stopped matching the page underneath it,
-  both of them chrome hugging glyphs. `.fragment` had `padding: 0 1px`, and since
-  `left` is the exact x the exporter draws at, the replacement text rendered a
-  pixel right of both the original glyphs and the file — every click nudged the
-  line sideways. And `.fragment__cover--sel` was a 1.5px ring around the cover;
+- **A text overlay carries no horizontal inset, and a fragment's selection mark
+  has no vertical edges.** Two ways the overlay stopped matching the page
+  underneath it, both of them chrome hugging glyphs. `.fragment` had
+  `padding: 0 1px`, and since `left` is the exact x the exporter draws at, the
+  replacement text rendered a pixel right of both the original glyphs and the
+  file — every click nudged the line sideways. `.textbox` had the same inset for
+  the same reason and lost it in the same pass: no original glyphs sit under a
+  text box, so nothing looked wrong, but the preview was still a pixel off the
+  file it previews. And `.fragment__cover--sel` was a 1.5px ring around the cover;
   the cover hugs the run (it has to, it hides exactly what it replaces), so the
   ring's *vertical* edge landed in the gap before the next word and read as a
   letter — selecting "Most of" rendered "Most ofl", which is what it was reported
@@ -250,7 +253,16 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
     the same: one cache, one algorithm, and for any page you can actually see a
     disagreement on, one measurement. The exporter rasterises a page itself only
     when nobody ever looked at it — and on the redaction path it offers its own
-    raster instead, since it has one. The corollary is that a page first painted
+    raster instead, since it has one, *and only for a page that has an edited
+    fragment*: nothing else reads the sample, so on a redacted-but-unedited
+    document the whole tally was being paid for data no one asks for. Two rules
+    follow. `readPageColors` must not publish over a reading that landed while
+    its own render was in flight — that reading came from the raster on screen,
+    and overwriting it with a sample of a different one is precisely how the
+    exported colours come to disagree with the previewed ones. And whatever
+    decides the gate has to be the same test the drawing code uses
+    (`isFragmentModified`), or an edited fragment on a rasterised page loses its
+    colours; `colors.spec.ts` covers exactly that case. The corollary is that a page first painted
     at a low scale keeps that reading: sub-12px-em type on a narrow low-dpi
     window exports black even after zooming in. Re-sampling on a better raster
     would fix that at the cost of colours changing under the user, and was not
@@ -363,7 +375,18 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   say it had, so clicking the page made Compress/Watermark/OCR vanish with no way
   back. Selecting moves to Properties (that's what the click asked for);
   deselecting deliberately does *not* move back, or the panel would flip on every
-  stray click. The document actions also live in the ⋯ menu — deliberately, since
+  stray click. **A stamp is the exception**: stamps are edited on the canvas and
+  have no controls in this panel, so moving there for one traded every document
+  action for "Nothing selected" — clicking your own signature emptied the panel.
+  `onSelect` skips the move for stamps (the selection-change effect already keyed
+  on `panelSelection`, which is stamp-aware), and Properties names an image and
+  says where to edit it rather than claiming nothing is selected.
+  The tab strip is a *roving* tabstop, which means the arrow keys move focus and
+  not just `aria-selected`: the unselected tab is `tabIndex={-1}`, so changing
+  the selection alone leaves the keyboard on a control outside the tab order —
+  the next Tab jumps somewhere unrelated and Space acts on the wrong tab. Focus
+  moves synchronously, not in a `requestAnimationFrame`, because the next
+  keystroke has to land on the tab this one moved to. The document actions also live in the ⋯ menu — deliberately, since
   on a phone the panel is a selection-driven sheet and the palette needs a
   keyboard — so the two must keep the *same* groups, order, names and icons; they
   both read from `docActions` and `DOC_GROUPS`.

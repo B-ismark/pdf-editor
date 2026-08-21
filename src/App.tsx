@@ -324,22 +324,33 @@ export function App() {
     if (selectedKey) setPanelTab("properties");
   }, [selectedKey]);
 
-  /** Roving focus across the panel tabs (WAI-ARIA tabs pattern). */
+  /** Roving focus across the panel tabs (WAI-ARIA tabs pattern).
+   *
+   * "Roving" is the whole point: the unselected tabs are `tabIndex={-1}`, so
+   * moving the selection without moving focus leaves the keyboard on a button
+   * that is no longer in the tab order — the next Tab jumps somewhere
+   * unrelated, and Space/Enter act on a tab that isn't the selected one. The
+   * focus call is what makes this the pattern rather than a lookalike. */
   const onPanelTabKeyDown = useCallback((e: ReactKeyboardEvent<HTMLElement>) => {
     const delta = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
     if (!delta && e.key !== "Home" && e.key !== "End") return;
     e.preventDefault();
-    setPanelTab((cur) => {
-      const i = PANEL_TABS.findIndex((t) => t.key === cur);
-      const next =
-        e.key === "Home"
-          ? 0
-          : e.key === "End"
-            ? PANEL_TABS.length - 1
-            : (i + delta + PANEL_TABS.length) % PANEL_TABS.length;
-      return PANEL_TABS[next].key;
-    });
-  }, []);
+    const list = e.currentTarget.closest("[role=tablist]") ?? document;
+    const i = PANEL_TABS.findIndex((t) => t.key === panelTab);
+    const next =
+      e.key === "Home"
+        ? 0
+        : e.key === "End"
+          ? PANEL_TABS.length - 1
+          : (i + delta + PANEL_TABS.length) % PANEL_TABS.length;
+    const key = PANEL_TABS[next].key;
+    setPanelTab(key);
+    // Now, not after a frame: the next keystroke has to land on the tab this one
+    // moved to. Focusing it while React has yet to flip `tabIndex` to 0 is fine
+    // — `focus()` doesn't consult the tab order, and the attribute lands in the
+    // same commit as `aria-selected`.
+    list.querySelector<HTMLElement>(`#panel-tab-${key}`)?.focus();
+  }, [panelTab]);
 
   // Per-page buckets, recomputed only when the underlying list changes.
   const boxesByPage = useMemo(() => bucketByPage(textBoxes), [textBoxes]);
@@ -1101,7 +1112,13 @@ export function App() {
     // selection didn't change; without this, re-clicking the selected element
     // while reading the Document tab did nothing at all. `onSelect(null)`
     // (clicking empty space) deliberately doesn't move the panel.
-    if (sel) setPanelTab("properties");
+    //
+    // A stamp is the exception, and the effect below already knows it: stamps
+    // are edited on the canvas and have no panel controls, so moving to
+    // Properties for one replaced every document action with an empty state —
+    // clicking your own signature made Compress/Watermark/OCR vanish and showed
+    // nothing in their place.
+    if (sel && sel.kind !== "stamp") setPanelTab("properties");
   }, []);
 
   /** Enter text-edit mode for the current selection (mobile): make it editable,
@@ -2095,6 +2112,7 @@ export function App() {
       redactionColor={redactionColor}
       redactionCover={!!selectedRedaction?.cover}
       annotation={selectedAnnotation}
+      stampSelected={selection?.kind === "stamp"}
       linkUrl={selectedLink?.url ?? null}
       onChangeStyle={onChangeStyle}
       onChangeRedactionColor={onChangeRedactionColor}

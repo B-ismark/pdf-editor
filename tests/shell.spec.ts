@@ -141,6 +141,15 @@ test.describe("overflow menu", () => {
   });
 });
 
+/** A 64×64 solid PNG. Deliberately not a 1×1 one: a stamp is placed at its
+ * natural size, and on a stamp that small the delete badge covers the whole
+ * thing — the first draft of this spec clicked the badge and asserted against a
+ * stamp it had just deleted. */
+const PNG_SQUARE = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAAT0lEQVR42u3PQQkAAAgEsItz/VMYywi+hcEKLO28FgEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQGBywLt4oEAvGaPlQAAAABJRU5ErkJggg==",
+  "base64",
+);
+
 test.describe("inspector", () => {
   test("names both of its jobs, and selecting something does not lose the other", async ({
     page,
@@ -176,7 +185,7 @@ test.describe("inspector", () => {
     expectClean(w);
   });
 
-  test("tabs are keyboard-operable", async ({ page }) => {
+  test("tabs are keyboard-operable, and focus travels with the selection", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await open(page, (await fixtures()).sample);
     const tabs = page.locator(".inspector__tabbtn");
@@ -187,6 +196,59 @@ test.describe("inspector", () => {
     await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
     await page.keyboard.press("End");
     await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
+
+    // The unselected tab is `tabIndex={-1}`, so a selection that moves without
+    // focus leaves the keyboard parked on a control that is no longer in the tab
+    // order: the next Tab jumps somewhere unrelated and Space acts on the wrong
+    // tab. "Roving" is the focus moving, not just `aria-selected`.
+    const focused = await page.evaluate(() => document.activeElement?.id ?? "");
+    expect(focused, "focus stayed on the tab that is no longer selected").toBe(
+      "panel-tab-properties",
+    );
+    const tabIndex = await page.evaluate(
+      () => (document.activeElement as HTMLElement | null)?.tabIndex,
+    );
+    expect(tabIndex, "focus is on a control outside the tab order").toBe(0);
+  });
+
+  test("clicking an image keeps the document actions, and says what it is", async ({ page }) => {
+    const w = watch(page);
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+
+    // A stamp has no controls in this panel — it is edited on the canvas — so
+    // moving to Properties for one replaced every document action with "Nothing
+    // selected": clicking your own signature made Compress/Watermark/OCR vanish
+    // and put nothing in their place.
+    await page.locator('[aria-label="More actions"]').click();
+    await page.locator('[role="menuitem"]', { hasText: "Add image" }).click();
+    await page.setInputFiles('input[accept="image/*"]', {
+      name: "stamp.png",
+      mimeType: "image/png",
+      buffer: PNG_SQUARE,
+    });
+    const box = (await page.locator(".page").first().boundingBox())!;
+    await page.mouse.click(box.x + 120, box.y + 300);
+    await expect(page.locator(".stamp")).toHaveCount(1);
+
+    const tabs = page.locator(".inspector__tabbtn");
+    // Low-left of the stamp: the delete badge and the resize handle live on the
+    // right-hand corners, and both are bigger than a small stamp's centre.
+    const stamp = (await page.locator(".stamp").first().boundingBox())!;
+    await page.mouse.click(stamp.x + 8, stamp.y + stamp.height - 8);
+    await expect(page.locator(".stamp")).toHaveCount(1);
+    await expect(tabs.nth(0), "selecting an image moved the panel off Document").toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(page.locator(".doclist__item").first()).toBeVisible();
+
+    // And if you were already reading Properties, it says which it is rather
+    // than claiming nothing is selected.
+    await tabs.nth(1).click();
+    await expect(page.locator(".props__empty")).toContainText(/edited on the page/);
+    await expect(page.locator(".props__title")).toContainText("Image");
+    expectClean(w);
   });
 
   test("re-clicking what is already selected comes back to Properties", async ({ page }) => {
