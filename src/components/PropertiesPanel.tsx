@@ -109,10 +109,14 @@ export function PropertiesPanel({
         </p>
       )}
 
+      {/* Every gesture, not a sample of them: this paragraph is the only place
+          the app explains how a stamp is edited, so leaving rotate out (or
+          saying "the corner handle" of eight) sends the reader hunting. */}
       {!selection && stampSelected && (
         <p className="props__empty body-medium">
-          This image is edited on the page: drag to move it, use the corner
-          handle to resize, and the badge to delete.
+          This image is edited on the page: drag it to move, pull any handle to
+          resize, twist just outside a corner to rotate, and use the badge to
+          delete.
         </p>
       )}
 
