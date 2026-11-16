@@ -16,6 +16,10 @@ interface Props {
   /** Download the given bytes without changing the working document. */
   onExtract: (bytes: Uint8Array) => void;
   onClose: () => void;
+  /** The other documents open in tabs. Their pages can be merged in without
+   * going back to the file system — with their edits baked in, since what you
+   * see in that tab is what you mean by "that document". */
+  otherDocs?: { id: string; name: string; bake: () => Promise<ArrayBuffer> }[];
 }
 
 /** Full-screen page organizer: reorder, rotate, delete, merge, extract. */
@@ -26,6 +30,7 @@ export function Organize({
   onApply,
   onExtract,
   onClose,
+  otherDocs = [],
 }: Props) {
   const [sources, setSources] = useState<Map<string, ArrayBuffer>>(
     () => new Map([["main", mainBytes]]),
@@ -82,6 +87,29 @@ export function Organize({
     setSelected(s);
   };
 
+  /** Append every page of `bytes` to the plan. */
+  const addBytes = async (bytes: ArrayBuffer) => {
+    const key = `add-${addCounter.current++}`;
+    const n = await pageCount(bytes);
+    setSources((prev) => new Map(prev).set(key, bytes));
+    setPlan((prev) => [
+      ...(prev ?? []),
+      ...Array.from({ length: n }, (_, i) => ({ sourceKey: key, index: i, rotation: 0 })),
+    ]);
+  };
+
+  const addOpenDoc = async (d: { name: string; bake: () => Promise<ArrayBuffer> }) => {
+    setErr(null);
+    setBusy("Adding pages…");
+    try {
+      await addBytes(await d.bake());
+    } catch {
+      setErr(`Couldn't add the pages of "${d.name}".`);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const addFile = async (file: File) => {
     setErr(null);
     setBusy("Adding pages…");
@@ -93,13 +121,7 @@ export function Organize({
         setErr(`"${file.name}" isn't a PDF file.`);
         return;
       }
-      const key = `add-${addCounter.current++}`;
-      const n = await pageCount(bytes);
-      setSources((prev) => new Map(prev).set(key, bytes));
-      setPlan((prev) => [
-        ...(prev ?? []),
-        ...Array.from({ length: n }, (_, i) => ({ sourceKey: key, index: i, rotation: 0 })),
-      ]);
+      await addBytes(bytes);
     } catch {
       setErr(`Couldn't add "${file.name}". It may be damaged or password-protected.`);
     } finally {
@@ -189,6 +211,23 @@ export function Organize({
         Reorder, rotate, or delete pages · tap a page to select it for extract ·
         add another PDF to merge. {fileName}
       </p>
+
+      {otherDocs.length > 0 && (
+        <div className="organize__docs" role="group" aria-label="Add pages from an open document">
+          <span className="label-medium organize__docslabel">From open tabs</span>
+          {otherDocs.map((d) => (
+            <button
+              key={d.id}
+              className="chip"
+              onClick={() => void addOpenDoc(d)}
+              disabled={!!busy}
+              data-tip={`Add every page of ${d.name}, with its edits`}
+            >
+              <Icon name="add" size={14} /> <span className="organize__docname">{d.name}</span>
+            </button>
+          ))}
+        </div>
+      )}
 
       {err && (
         <p className="organize__err body-small" role="alert">

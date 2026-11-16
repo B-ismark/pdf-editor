@@ -1,6 +1,11 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 
 type Updater<T> = (prev: T) => T;
+
+/** A whole history — every entry, where you are in it — as an opaque value.
+ * It is what lets a document that isn't on screen keep its undo stack: the
+ * workspace parks one of these per background tab and hands it back on switch. */
+export type HistorySnapshot<T> = Internal<T>;
 
 interface Internal<T> {
   entries: T[];
@@ -24,6 +29,10 @@ export interface History<T> {
   redo: () => void;
   /** Replace the entire history with a single entry (e.g. on file load). */
   reset: (value: T) => void;
+  /** The current history, entries and position, for parking a document. */
+  snapshot: () => HistorySnapshot<T>;
+  /** Put back a history taken by {@link snapshot} — undo and redo included. */
+  restore: (snap: HistorySnapshot<T>) => void;
   canUndo: boolean;
   canRedo: boolean;
 }
@@ -35,6 +44,10 @@ export function useHistory<T>(initial: T, limit = 200): History<T> {
     index: 0,
     lastKey: null,
   });
+  // Mirrors `h` so `snapshot` can be stable and still read the latest value
+  // (a switch reads it from an event handler, after any pending commit).
+  const latest = useRef(h);
+  latest.current = h;
 
   const set = useCallback(
     (updater: Updater<T>, key?: string) => {
@@ -83,12 +96,21 @@ export function useHistory<T>(initial: T, limit = 200): History<T> {
     setH({ entries: [value], index: 0, lastKey: null });
   }, []);
 
+  const snapshot = useCallback(() => latest.current, []);
+  // A restored history must not coalesce into whatever gesture was in flight on
+  // the document being left, so the key is cleared.
+  const restore = useCallback((snap: HistorySnapshot<T>) => {
+    setH({ ...snap, lastKey: null });
+  }, []);
+
   return {
     state: h.entries[h.index],
     set,
     undo,
     redo,
     reset,
+    snapshot,
+    restore,
     canUndo: h.index > 0,
     canRedo: h.index < h.entries.length - 1,
   };

@@ -1,4 +1,5 @@
 import {
+  FileArchive,
   AlignHorizontalDistributeCenter,
   AlignHorizontalJustifyCenter,
   AlignHorizontalJustifyEnd,
@@ -155,6 +156,8 @@ const MAP: Record<string, LucideIcon> = {
   download: Download,
   /** A plain-text sidecar, not the PDF. */
   text_download: FileDown,
+  /** Every open document at once, bundled — not the one in front. */
+  download_all: FileArchive,
   picture_as_pdf: FileText,
   note_add: FilePlus,
   /** Bring one image in. */

@@ -295,6 +295,7 @@ async function rotatedPdf(): Promise<Uint8Array> {
 async function scannedPdf(): Promise<Uint8Array> {
   const exec = [
     "/opt/pw-browsers/chromium-1194/chrome-linux/chrome",
+    "/opt/pw-browsers/chromium-1243/chrome-linux64/chrome",
     process.env.PW_EXECUTABLE_PATH ?? "",
   ].find((p) => p && existsSync(p));
 

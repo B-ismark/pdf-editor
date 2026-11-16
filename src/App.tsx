@@ -17,14 +17,15 @@ import { useAutosave } from "./hooks/useAutosave";
 import { downloadBytes, downloadText } from "./download";
 import { plural } from "./plural";
 import type { PageNumberOptions, WatermarkOptions } from "./pdf/types";
-import { useHistory } from "./hooks/useHistory";
+import { useHistory, type HistorySnapshot } from "./hooks/useHistory";
+import { DocTabs } from "./components/DocTabs";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useFragmentFont } from "./hooks/usePageFonts";
 import { useFragmentColors } from "./hooks/usePageColors";
 import { usePersistentState, usePersistentFlag } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
 import { useViewport } from "./hooks/useViewport";
-import { loadPdf, looksLikePdf } from "./pdf/loader";
+import { loadPdf, looksLikePdf, releaseDoc } from "./pdf/loader";
 import { clearEngineCache } from "./pdf/engineCache";
 import { prepareImageStamp } from "./pdf/imageStamp";
 import {
@@ -197,6 +198,25 @@ function isTypingTarget(): boolean {
   );
 }
 
+/** A document open in the workspace. For the one in front, `history`,
+ * `view` and `changeCount` are stale — the live values are in `App`'s state —
+ * and are refreshed whenever it is parked. */
+interface OpenDoc {
+  id: string;
+  fileName: string;
+  pdf: LoadedPdf;
+  /** Its whole undo history, or null for a document that was never edited. */
+  history: HistorySnapshot<DocState> | null;
+  /** Where it was scrolled to and zoomed, so coming back lands in place. */
+  view: { zoom: number; ry: number } | null;
+  changeCount: number;
+}
+
+/** Open documents at once. Each holds its source bytes and a pdf.js parse in
+ * memory; past a handful, a phone runs out before the user runs out of tabs.
+ * Ten is generous for real work and keeps the worst case bounded. */
+const MAX_TABS = 10;
+
 /** True when a modal dialog (Organize, Finish, Compress, Command Palette, …)
  * is open. Global editing shortcuts must not act on the hidden canvas beneath
  * it. */
@@ -207,6 +227,16 @@ function aModalIsOpen(): boolean {
 export function App() {
   const [pdf, setPdf] = useState<LoadedPdf | null>(null);
   const [fileName, setFileName] = useState("document.pdf");
+  // ---- Workspace: every open document, one tab each ----
+  // The document in front lives in `pdf` / `fileName` / `doc` exactly as it did
+  // when there was only ever one, so nothing that edits it had to change. The
+  // others are *parked* here: their bytes, their whole undo history, and where
+  // they were scrolled to. Switching parks the front one and unparks another, so
+  // opening a second PDF no longer costs the first one its edits.
+  const [tabs, setTabs] = useState<OpenDoc[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const tabCounter = useRef(0);
+  const [confirmCloseId, setConfirmCloseId] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>("select");
   const doc = useHistory<DocState>(EMPTY_DOC);
   const { edits, textBoxes, redactions, annotations, stamps } = doc.state;
@@ -266,8 +296,6 @@ export function App() {
   const [dragging, setDragging] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [organizeOpen, setOrganizeOpen] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [confirmClose, setConfirmClose] = useState(false);
   const [coverWarn, setCoverWarn] = useState<CoverWarning | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
@@ -295,7 +323,7 @@ export function App() {
 
   const vp = useViewport();
   const theme = useTheme();
-  const { restorable, save: saveSession, clear: clearSession, dismissRestore } = useAutosave();
+  const { restorable, save: saveSession, clear: clearSession, dismissRestore, adopt: adoptSession } = useAutosave();
   // >=600px gets the persistent side panel + tool rail (Material Medium+);
   // <600px is the compact phone layout (contextual selection bar + on-demand
   // sheet, `sheetOpen` state above).
@@ -497,10 +525,23 @@ export function App() {
   }, [pdf, edits, fileName]);
 
   // ---- Autosave to IndexedDB (debounced) + one-time restore ----
+  // Every tab is saved, not just the one in front: a parked tab's state comes
+  // from its parked history, the front one's from the live one.
   useEffect(() => {
-    if (!pdf || !autosaveOn) return;
-    saveSession(fileName, pdf.bytes, doc.state, changeCount > 0);
-  }, [pdf, fileName, doc.state, changeCount, saveSession, autosaveOn]);
+    if (!autosaveOn) return;
+    const entries = tabs.map((t) =>
+      t.id === activeId && pdf
+        ? { id: t.id, fileName, bytes: pdf.bytes, doc: doc.state, hasChanges: changeCount > 0 }
+        : {
+            id: t.id,
+            fileName: t.fileName,
+            bytes: t.pdf.bytes,
+            doc: t.history ? t.history.entries[t.history.index] : EMPTY_DOC,
+            hasChanges: t.changeCount > 0,
+          },
+    );
+    saveSession(entries, activeId);
+  }, [tabs, activeId, pdf, fileName, doc.state, changeCount, saveSession, autosaveOn]);
 
   /** Toggle the on-device session copy. Turning it off erases whatever is
    * already stored — the point of the switch is that no copy remains. That
@@ -528,32 +569,147 @@ export function App() {
     setMessage("Deleted the saved session.");
   }, [clearSession]);
 
+  /** Clear everything that belongs to the document in front rather than to the
+   * app — selection, find, an armed tool — before another document takes its
+   * place. A selection id from one file means nothing (or something else) in
+   * the next. */
+  const resetDocUi = useCallback(() => {
+    setSelection(null);
+    setMulti([]);
+    setEditingId(null);
+    setAutoFocusId(null);
+    setPendingStamp(null);
+    setFindOpen(false);
+    setFindQuery("");
+    setSheetOpen(false);
+    // A fresh document has nothing selected, so leaving the panel on
+    // Properties would greet it with an empty state while the actions it can
+    // actually use sit one unmentioned click away. The tab is per-document.
+    setPanelTab("document");
+    setTool("select");
+  }, []);
+
+  /** The document in front, packed up to go into the background. */
+  const parkActive = useCallback(
+    (list: OpenDoc[]): OpenDoc[] =>
+      list.map((t) =>
+        t.id === activeId && pdf
+          ? {
+              ...t,
+              pdf,
+              fileName,
+              history: doc.snapshot(),
+              view: vp.captureView(),
+              changeCount,
+            }
+          : t,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [activeId, pdf, fileName, doc.snapshot, vp.captureView, changeCount],
+  );
+
+  /** Bring a parked document to the front. */
+  const showDoc = useCallback(
+    (t: OpenDoc) => {
+      resetDocUi();
+      setPdf(t.pdf);
+      setFileName(t.fileName);
+      setActiveId(t.id);
+      if (t.history) doc.restore(t.history);
+      else doc.reset(EMPTY_DOC);
+      vp.setPageWidth(Math.max(...t.pdf.pages.map((p) => p.viewBox.width), 1));
+      if (t.view) vp.restoreView(t.view);
+      else vp.resetZoom();
+    },
+    [resetDocUi, doc, vp],
+  );
+
+  const switchTo = useCallback(
+    (id: string) => {
+      if (id === activeId || busy) return;
+      const target = tabs.find((t) => t.id === id);
+      if (!target) return;
+      setTabs(parkActive(tabs));
+      showDoc(target);
+    },
+    [activeId, busy, tabs, parkActive, showDoc],
+  );
+
+  /**
+   * Load bytes as a document.
+   *
+   * By default it opens in a **new tab** beside the current one, which keeps
+   * everything the current one has. `replace` is for the operations that
+   * rebuild *this* document (organise, page numbers, watermark): their output
+   * is the same document with its edits baked in, so it takes the tab's place.
+   */
+  // `openBytes` is called in loops — several dropped files, a restored
+  // workspace — and each call has to see the tab the *previous* call opened, not
+  // the one that was in front when the loop began. A stale closure there parked
+  // nothing, so a restored document went into the background counted as clean
+  // and its stored copy was then deleted as unneeded.
+  const liveTabs = useRef({ tabs, activeId, pdf, parkActive, showDoc });
+  liveTabs.current = { tabs, activeId, pdf, parkActive, showDoc };
+
   const openBytes = useCallback(
-    async (bytes: ArrayBuffer, name: string, note?: string, seedDoc?: DocState) => {
+    async (
+      bytes: ArrayBuffer,
+      name: string,
+      note?: string,
+      seedDoc?: DocState,
+      opts: { replace?: boolean; id?: string; quiet?: boolean } = {},
+    ): Promise<OpenDoc | null> => {
+      const { tabs, activeId } = liveTabs.current;
+      const replacing = opts.replace && activeId != null;
+      if (!replacing && tabs.length >= MAX_TABS) {
+        setStatus("error");
+        setMessage(`${MAX_TABS} documents are open — close one to open another.`);
+        return null;
+      }
       setStatus("loading");
       setMessage(`Loading ${name}…`);
       try {
         const loaded = await loadPdf(bytes);
-        setPdf(loaded);
-        setFileName(name);
-        doc.reset(seedDoc ?? EMPTY_DOC);
-        setSelection(null);
-        // A fresh document has nothing selected, so leaving the panel on
-        // Properties would greet it with an empty state while the actions it can
-        // actually use sit one unmentioned click away. The tab is per-document.
-        setPanelTab("document");
-        setTool("select");
-        vp.setPageWidth(Math.max(...loaded.pages.map((p) => p.viewBox.width), 1));
-        vp.resetZoom();
+        // Re-read after the await: renders have happened since.
+        const { activeId, pdf, parkActive, showDoc } = liveTabs.current;
+        const id = replacing ? activeId! : opts.id ?? `doc-${Date.now().toString(36)}-${tabCounter.current++}`;
+        const fresh: OpenDoc = {
+          id,
+          fileName: name,
+          pdf: loaded,
+          history: seedDoc ? { entries: [seedDoc], index: 0, lastKey: null } : null,
+          view: null,
+          changeCount: 0,
+        };
+        if (replacing) {
+          const old = pdf;
+          setTabs((list) => list.map((t) => (t.id === id ? fresh : t)));
+          showDoc(fresh);
+          // The superseded parse is unreachable now; let the worker drop it.
+          if (old && old.bytes !== loaded.bytes) releaseDoc(old.bytes);
+        } else {
+          setTabs((list) => {
+            const parked = parkActive(list);
+            const at = parked.findIndex((t) => t.id === activeId);
+            const next = parked.slice();
+            next.splice(at < 0 ? next.length : at + 1, 0, fresh);
+            return next;
+          });
+          showDoc(fresh);
+        }
         setStatus("ready");
-        const total = loaded.pages.reduce((n, p) => n + p.fragments.length, 0);
-        setMessage(note ?? `${plural(loaded.pages.length, "page")} · ${plural(total, "text fragment")}`);
+        if (!opts.quiet) {
+          const total = loaded.pages.reduce((n, p) => n + p.fragments.length, 0);
+          setMessage(note ?? `${plural(loaded.pages.length, "page")} · ${plural(total, "text fragment")}`);
+        }
+        return fresh;
       } catch (err) {
         setStatus("error");
         setMessage(pdfOpenError(err));
+        return null;
       }
     },
-    [doc, vp],
+    [],
   );
 
   const openFile = useCallback(
@@ -583,24 +739,73 @@ export function App() {
     [openBytes],
   );
 
+  // Open the OS file picker. What's picked opens in new tabs, so this no longer
+  // needs a "discard your changes?" gate — it used to replace the document, and
+  // the only way to work on two files was to finish one first.
+  const openAnother = useCallback(() => {
+    setMenuOpen(false);
+    openInputRef.current?.click();
+  }, []);
+
+  /** Open several files, each in its own tab (a multi-select pick or a drop). */
+  const openFiles = useCallback(
+    async (files: FileList | File[] | null | undefined) => {
+      const list = [...(files ?? [])];
+      for (const f of list) await openFile(f);
+      if (list.length > 1) {
+        setStatus((s) => (s === "error" ? s : "ready"));
+        setMessage((m) => (/^Loading|·/.test(m) ? `Opened ${plural(list.length, "document")} in tabs.` : m));
+      }
+    },
+    [openFile],
+  );
+
   const restoreSession = useCallback(async () => {
     if (!restorable) return;
     const s = restorable;
     // Bump the id counter past any restored ids so new objects don't collide.
-    const ids = [
-      ...s.doc.textBoxes.map((b) => b.id),
-      ...s.doc.redactions.map((r) => r.id),
-      ...s.doc.annotations.map((a) => a.id),
-      ...s.doc.stamps.map((st) => st.id),
-      ...(s.doc.links ?? []).map((l) => l.id),
-    ];
-    for (const id of ids) {
-      const n = Number(id.split("-").pop());
-      if (Number.isFinite(n) && n + 1 > counter.current) counter.current = n + 1;
+    // Object ids are unique across the whole workspace, not per document, so
+    // every restored document counts.
+    for (const d of s.docs) {
+      const ids = [
+        ...d.doc.textBoxes.map((b) => b.id),
+        ...d.doc.redactions.map((r) => r.id),
+        ...d.doc.annotations.map((a) => a.id),
+        ...d.doc.stamps.map((st) => st.id),
+        ...(d.doc.links ?? []).map((l) => l.id),
+      ];
+      for (const id of ids) {
+        const n = Number(id.split("-").pop());
+        if (Number.isFinite(n) && n + 1 > counter.current) counter.current = n + 1;
+      }
     }
     dismissRestore();
-    await openBytes(s.bytes, s.fileName, "Session restored.", s.doc);
-  }, [restorable, dismissRestore, openBytes]);
+    adoptSession(s.docs.map((d) => d.id));
+    const opened: OpenDoc[] = [];
+    for (const d of s.docs) {
+      // Same ids as before, so their stored copies are updated in place rather
+      // than duplicated alongside.
+      const t = await openBytes(d.bytes, d.fileName, undefined, d.doc, { id: d.id, quiet: true });
+      if (t) opened.push(t);
+    }
+    if (opened.length === 0) return;
+    setStatus("ready");
+    setMessage(
+      opened.length === 1 ? "Session restored." : `Session restored · ${plural(opened.length, "document")}.`,
+    );
+    pendingActivate.current = s.activeId;
+  }, [restorable, dismissRestore, adoptSession, openBytes]);
+
+  // Restoring opens every document in turn, which leaves the *last* one in
+  // front; the one that was in front when the session was saved should be. The
+  // switch waits a commit so it parks the last-opened tab with its real state.
+  const pendingActivate = useRef<string | null>(null);
+  useEffect(() => {
+    const id = pendingActivate.current;
+    if (!id || busy) return;
+    pendingActivate.current = null;
+    if (id !== activeId && tabs.some((t) => t.id === id)) switchTo(id);
+  }, [tabs, activeId, busy, switchTo]);
 
   const toAB = (u8: Uint8Array): ArrayBuffer => {
     const ab = new ArrayBuffer(u8.byteLength);
@@ -1595,15 +1800,16 @@ export function App() {
   // Warn before leaving/reloading the tab while there are unsaved changes.
   // Everything lives in memory (no server, no autosave), so an accidental
   // refresh or back-navigation would otherwise silently discard all edits.
+  const anyBackgroundChanges = tabs.some((t) => t.id !== activeId && t.changeCount > 0);
   useEffect(() => {
-    if (changeCount === 0) return;
+    if (changeCount === 0 && !anyBackgroundChanges) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [changeCount]);
+  }, [changeCount, anyBackgroundChanges]);
 
   // Auto-dismiss transient status messages (keep errors and in-progress
   // messages until superseded).
@@ -1624,6 +1830,13 @@ export function App() {
       if (mod && key === "z") {
         e.preventDefault();
         e.shiftKey ? redo() : undo();
+        return;
+      }
+      // Ctrl/⌘+O opens files into new tabs (the browser's own "open file" would
+      // navigate away from everything open here).
+      if (mod && key === "o" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        openAnother();
         return;
       }
       if (mod && key === "y") {
@@ -1780,6 +1993,7 @@ export function App() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [
+    openAnother,
     selection,
     selectedAnnotation,
     onDelete,
@@ -1841,52 +2055,98 @@ export function App() {
     await runExport();
   }, [pdf, redactions, runExport]);
 
-  // Open the OS file picker to load a different document in place of the
-  // current one (loading a new file replaces the working doc + autosave).
-  const openAnother = useCallback(() => {
-    setConfirmReset(false);
-    openInputRef.current?.click();
-  }, []);
-
-  const reset = useCallback(() => {
+  /** Back to the start screen, with nothing open. */
+  const closeAll = useCallback(() => {
     setMenuOpen(false);
-    // Loading a new file discards the current edits, so confirm first when
-    // there's unsaved work; otherwise go straight to the picker.
-    if (changeCount > 0) setConfirmReset(true);
-    else openAnother();
-  }, [changeCount, openAnother]);
-
-  /** Close the document and go back to the start screen.
-   *
-   * The editor had no exit at all: once a PDF was open the only way out was
-   * loading a different one (which opens the OS picker) or reloading the tab.
-   * The app bar's brand is the obvious "home", so it runs this. */
-  const closeDoc = useCallback(() => {
-    setConfirmClose(false);
-    setMenuOpen(false);
+    for (const t of tabs) releaseDoc(t.pdf.bytes);
+    if (pdf) releaseDoc(pdf.bytes);
+    setTabs([]);
+    setActiveId(null);
     setPdf(null);
     setFileName("document.pdf");
     doc.reset(EMPTY_DOC);
-    setSelection(null);
-    setMulti([]);
-    setTool("select");
-    setPendingStamp(null);
-    setEditingId(null);
-    setAutoFocusId(null);
-    setFindOpen(false);
-    setFindQuery("");
+    resetDocUi();
     setNavOpen(false);
     setDrawbarOpen(true);
     setInspectorOpen(true);
-    setSheetOpen(false);
     setStatus("idle");
     setMessage("");
-  }, [doc]);
+  }, [tabs, pdf, doc, resetDocUi]);
+
+  /** Close one document. Its neighbour (right, else left) comes to the front;
+   * closing the last one returns to the start screen. */
+  const closeTab = useCallback(
+    (id: string) => {
+      setConfirmCloseId(null);
+      setMenuOpen(false);
+      const i = tabs.findIndex((t) => t.id === id);
+      if (i < 0) return;
+      if (tabs.length === 1) {
+        closeAll();
+        return;
+      }
+      const closing = tabs[i];
+      const rest = tabs.filter((t) => t.id !== id);
+      if (id === activeId) {
+        if (pdf) releaseDoc(pdf.bytes);
+        setTabs(rest);
+        showDoc(rest[Math.min(i, rest.length - 1)]);
+      } else {
+        releaseDoc(closing.pdf.bytes);
+        setTabs(rest);
+      }
+    },
+    [tabs, activeId, pdf, closeAll, showDoc],
+  );
+
+  /** Close a document, asking first if that would lose work. */
+  const requestCloseTab = useCallback(
+    (id: string) => {
+      if (busy) return;
+      const dirty = id === activeId ? changeCount > 0 : (tabs.find((t) => t.id === id)?.changeCount ?? 0) > 0;
+      if (dirty) setConfirmCloseId(id);
+      else closeTab(id);
+    },
+    [busy, activeId, changeCount, tabs, closeTab],
+  );
 
   const goHome = useCallback(() => {
-    if (changeCount > 0) setConfirmClose(true);
-    else closeDoc();
-  }, [changeCount, closeDoc]);
+    if (activeId) requestCloseTab(activeId);
+  }, [activeId, requestCloseTab]);
+
+  /** Every open document, exported and bundled into one ZIP. */
+  const downloadAll = useCallback(async () => {
+    setMenuOpen(false);
+    if (tabs.length === 0 || busy) return;
+    setStatus("exporting");
+    try {
+      const { exportPdf } = await import("./pdf/exporter");
+      const { makeZip } = await import("./pdf/zip");
+      const entries: { name: string; data: Uint8Array }[] = [];
+      const used = new Set<string>();
+      for (const [n, t] of tabs.entries()) {
+        const live = t.id === activeId && pdf;
+        const state = live ? doc.state : t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
+        const source = live ? pdf : t.pdf;
+        const name = live ? fileName : t.fileName;
+        setMessage(`Building ${n + 1} of ${tabs.length} · ${name}`);
+        const out = await exportPdf(source, { ...EMPTY_DOC, ...state, losslessRaster });
+        // Two tabs can share a file name (the same file opened twice); a ZIP
+        // with duplicate entries silently loses one on extraction.
+        const base = name.replace(/\.pdf$/i, "") + "-edited";
+        let entry = `${base}.pdf`;
+        for (let k = 2; used.has(entry); k++) entry = `${base}-${k}.pdf`;
+        used.add(entry);
+        entries.push({ name: entry, data: out });
+      }
+      downloadBytes(makeZip(entries), "documents-edited.zip", "application/zip");
+      setStatus("ready");
+      setMessage(`Downloaded ${plural(entries.length, "document")} as a ZIP.`);
+    } catch {
+      setStatus("error");
+      setMessage("Couldn't build every document. Please try again.");
+    }
+  }, [tabs, busy, activeId, pdf, doc.state, fileName, losslessRaster]);
 
   const pickTool = (t: NavKey) => {
     setPendingStamp(null);
@@ -1917,7 +2177,11 @@ export function App() {
           // The visible label is "PDF Editor", so the accessible name has to
           // start with it (WCAG 2.5.3 Label in Name) — speech-input users say
           // what they see.
-          aria-label="PDF Editor — close this PDF and return to the start screen"
+          aria-label={
+            tabs.length > 1
+              ? "PDF Editor — close this PDF"
+              : "PDF Editor — close this PDF and return to the start screen"
+          }
           data-tip="Close document"
         >
           <span className="appbar__logo">
@@ -2072,9 +2336,14 @@ export function App() {
                     <span className="menu__label label-small" id="menu-grp-file">
                       File
                     </span>
-                    <button className="menu__item" onClick={reset} role="menuitem">
+                    <button className="menu__item" onClick={openAnother} role="menuitem">
                       <Icon name="note_add" size={18} /> Open another PDF
                     </button>
+                    {tabs.length > 1 && (
+                      <button className="menu__item" onClick={() => void downloadAll()} role="menuitem" disabled={busy}>
+                        <Icon name="download_all" size={18} /> Download all ({tabs.length}) as ZIP
+                      </button>
+                    )}
                     <button className="menu__item" onClick={goHome} role="menuitem">
                       <Icon name="close" size={18} /> Close document
                     </button>
@@ -2175,8 +2444,7 @@ export function App() {
           onDrop={(e) => {
             e.preventDefault();
             setDragging(false);
-            const file = e.dataTransfer.files[0];
-            if (file) void openFile(file);
+            void openFiles(e.dataTransfer.files);
           }}
         >
           {restorable && (
@@ -2184,7 +2452,11 @@ export function App() {
               <span className="restore-banner__icon"><Icon name="restore" size={22} /></span>
               <div className="restore-banner__text">
                 <b className="title-small">Restore your last session?</b>
-                <span className="body-small">{restorable.fileName}</span>
+                <span className="body-small restore-banner__files">
+                  {restorable.docs.length === 1
+                    ? restorable.docs[0].fileName
+                    : `${plural(restorable.docs.length, "document")} · ${restorable.docs.map((d) => d.fileName).join(", ")}`}
+                </span>
               </div>
               <button className="btn btn--tonal" onClick={restoreSession}>Restore</button>
               {/* "Dismiss" only hides this prompt — the copy stays on the device
@@ -2206,7 +2478,7 @@ export function App() {
             <button className="btn btn--filled btn--lg" onClick={() => inputRef.current?.click()}>
               <Icon name="upload_file" size={18} /> Choose PDF
             </button>
-            <p className="body-small dropzone__hint">or drag &amp; drop a file here</p>
+            <p className="body-small dropzone__hint">or drag &amp; drop files here · several open as tabs</p>
             {status === "loading" && (
               <p className="body-small dropzone__note">
                 <span className="spinner spinner--sm" aria-hidden="true" /> {message}
@@ -2218,11 +2490,12 @@ export function App() {
             ref={inputRef}
             type="file"
             accept="application/pdf,.pdf"
+            multiple
             hidden
             onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) void openFile(file);
+              const files = [...(e.target.files ?? [])];
               e.target.value = "";
+              void openFiles(files);
             }}
           />
         </div>
@@ -2230,10 +2503,51 @@ export function App() {
     );
   }
 
+  const hasFiles = (e: React.DragEvent) => [...e.dataTransfer.types].includes("Files");
   return (
-    <div className={`app${dimPages ? " app--dim" : ""}`}>
+    <div
+      className={`app${dimPages ? " app--dim" : ""}${dragging ? " app--dropping" : ""}${isWide || tabs.length > 1 ? " app--tabs" : ""}`}
+      // Dropping files on an open document opens them in new tabs. Only real
+      // files: an in-app drag (a page, an overlay) carries no "Files" type and
+      // must never be swallowed here.
+      onDragOver={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        if (!dragging) setDragging(true);
+      }}
+      onDragLeave={(e) => {
+        if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget as Node)) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        setDragging(false);
+        void openFiles(e.dataTransfer.files);
+      }}
+    >
       <TooltipHost />
       {appBar}
+      {(isWide || tabs.length > 1) && (
+        <DocTabs
+          tabs={tabs.map((t) =>
+            t.id === activeId
+              ? { id: t.id, name: fileName, dirty: changeCount > 0 }
+              : { id: t.id, name: t.fileName, dirty: t.changeCount > 0 },
+          )}
+          activeId={activeId}
+          disabled={busy}
+          onSelect={switchTo}
+          onClose={requestCloseTab}
+          onOpen={openAnother}
+        />
+      )}
+      {dragging && (
+        <div className="dropveil" aria-hidden="true">
+          <span className="dropveil__card title-medium">
+            <Icon name="note_add" size={20} /> Drop to open in a new tab
+          </span>
+        </div>
+      )}
 
       <div className="workspace">
         {navOpen && (
@@ -2562,35 +2876,29 @@ export function App() {
         ref={openInputRef}
         type="file"
         accept="application/pdf,.pdf"
+        multiple
         hidden
         onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) void openFile(f);
+          const files = [...(e.target.files ?? [])];
           e.target.value = "";
+          void openFiles(files);
         }}
       />
 
-      {confirmReset && (
-        <ConfirmDialog
-          title="Open a different PDF?"
-          message="This discards all your current changes."
-          confirmLabel="Discard & open"
-          danger
-          onConfirm={openAnother}
-          onCancel={() => setConfirmReset(false)}
-        />
-      )}
-
-      {confirmClose && (
-        <ConfirmDialog
-          title="Close this PDF?"
-          message="Your unsaved changes will be discarded. Download the edited file first if you want to keep it."
-          confirmLabel="Discard & close"
-          danger
-          onConfirm={closeDoc}
-          onCancel={() => setConfirmClose(false)}
-        />
-      )}
+      {confirmCloseId && (() => {
+        const name = confirmCloseId === activeId ? fileName : tabs.find((t) => t.id === confirmCloseId)?.fileName ?? "this PDF";
+        const last = tabs.length === 1;
+        return (
+          <ConfirmDialog
+            title={last ? "Close this PDF?" : `Close ${name}?`}
+            message={`Your unsaved changes to ${name} will be discarded. Download the edited file first if you want to keep it.`}
+            confirmLabel="Discard & close"
+            danger
+            onConfirm={() => closeTab(confirmCloseId)}
+            onCancel={() => setConfirmCloseId(null)}
+          />
+        );
+      })()}
 
       {coverWarn && (
         <ConfirmDialog
@@ -2659,7 +2967,19 @@ export function App() {
               { id: "dim", label: dimPages ? "Undim pages" : "Dim pages", icon: "contrast", run: () => setDimPages((v) => !v) },
               { id: "theme", label: `Theme: ${themeLabel}`, icon: themeIcon, keywords: "dark light system", run: theme.cycle },
               { id: "download", label: "Download PDF", hint: "", icon: "download", run: download },
-              { id: "open", label: "Open another PDF", icon: "note_add", run: reset },
+              { id: "open", label: "Open another PDF", hint: "Ctrl+O", icon: "note_add", run: openAnother },
+              ...tabs
+                .filter((t) => t.id !== activeId)
+                .map((t) => ({
+                  id: `tab-${t.id}`,
+                  label: `Switch to ${t.fileName}`,
+                  icon: "picture_as_pdf",
+                  keywords: "tab document file switch",
+                  run: () => switchTo(t.id),
+                })),
+              ...(tabs.length > 1
+                ? [{ id: "download-all", label: `Download all (${tabs.length}) as ZIP`, icon: "download_all", keywords: "zip every all tabs documents", run: () => void downloadAll() }]
+                : []),
               { id: "close", label: "Close document", icon: "close", keywords: "home start exit leave", run: goHome },
             ] as Command[]
           }
@@ -2674,12 +2994,23 @@ export function App() {
             hasEdits={changeCount > 0}
             onApply={(bytes, note) => {
               setOrganizeOpen(false);
-              void openBytes(bytes, fileName, note);
+              void openBytes(bytes, fileName, note, undefined, { replace: true });
             }}
             onExtract={(bytes) =>
               downloadBytes(bytes, fileName.replace(/\.pdf$/i, "") + "-extract.pdf")
             }
             onClose={() => setOrganizeOpen(false)}
+            otherDocs={tabs
+              .filter((t) => t.id !== activeId)
+              .map((t) => ({
+                id: t.id,
+                name: t.fileName,
+                bake: async () => {
+                  const { exportPdf } = await import("./pdf/exporter");
+                  const state = t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
+                  return toAB(await exportPdf(t.pdf, { ...EMPTY_DOC, ...state, losslessRaster }));
+                },
+              }))}
           />
         </Suspense>
       )}

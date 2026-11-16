@@ -102,6 +102,12 @@ type-checking can't see, and each exists because it broke once:
   sub-tool is picked and comes back from its handle; the colour popover stays on
   screen and covers neither the toolbar it lives in nor the tool dock, at three
   widths; and the status snackbar clears both;
+- `tabs.spec.ts` — a second PDF opens in a tab beside the first instead of
+  replacing it, and the first comes back with its edits *and* its undo history;
+  closing a tab with work in it asks (a clean one doesn't); a reload restores
+  every edited tab and only those; Download all zips each tab with its own
+  edits; and on a phone the strip appears only with a second document and
+  doesn't push the status toast onto the zoom pill;
 - `overlays.spec.ts` — a marquee'd group moves as one (one undo step) and
   survives the drag, a plain click on a member selects just that one, arrows
   nudge the group, and a buried stroke can be raised — in the overlay's paint
@@ -125,6 +131,13 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   top); **redacted pages are rasterized to an image** so content is truly
   removed. `pageOps.ts` (reorder/rotate/merge/extract) and `finishOps.ts` (page
   numbers/watermark/export-as-images) also use pdf-lib.
+- **Workspace (tabs)** — several PDFs can be open at once, one `DocTabs` tab
+  each. The document *in front* lives in `App`'s `pdf` / `fileName` / `doc`
+  exactly as when there was only one, so nothing that edits it knows tabs exist;
+  the others are *parked* in `tabs: OpenDoc[]` with their whole undo history
+  (`useHistory().snapshot()` / `restore()`), their scroll position and zoom
+  (`useViewport().captureView()` / `restoreView()`), and their change count.
+  See the gotcha below before touching `openBytes`.
 - **State** — `hooks/useHistory.ts` holds a single `DocState`
   (`edits, textBoxes, redactions, annotations, stamps`) with undo/redo and
   gesture coalescing (pass a stable `key` to `doc.set` to collapse a continuous
@@ -285,6 +298,28 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
     properties panel, and both export paths cannot disagree about what colour the
     text is. A memo that reads it needs it as a dependency (`activeStyle` in
     `App.tsx`) — it arrives after the page is sampled.
+- **Tabs: park, then unpark — and `openBytes` reads live state.**
+  `openBytes` opens a *new tab* by default; `{ replace: true }` is only for the
+  operations that rebuild the document in front (Organise, page numbers,
+  watermark), whose output is the same document with its edits baked in. It is
+  called in loops (several dropped files, a restored workspace), so it reads
+  `activeId` / `tabs` / `parkActive` from the `liveTabs` ref *after* its await,
+  never from its closure: a stale closure parked nothing, so a restored document
+  went into the background counted as clean and autosave then deleted its copy.
+  Anything per-document that isn't in `DocState` (selection, find, an armed
+  tool, a pending stamp) must be cleared in `resetDocUi`, or an id from one file
+  lands on another. Object ids come from one counter across the whole workspace,
+  which is why a restore bumps it past *every* restored document's ids.
+  Closing a tab calls `releaseDoc(bytes)` (`pdf/loader.ts`): the caches are
+  WeakMaps, but the pdf.js *worker* keeps every document it opened until told
+  to `destroy()` it. The per-document stores (`fontInfo`, `fragmentColors`,
+  the parse cache) are keyed by the `ArrayBuffer`, so tabs never collide in them.
+  **Autosave is one pair of keys per edited tab** (`doc:<id>` / `bytes:<id>`,
+  tab order and the front tab stored *inside* the doc records, so a one-document
+  session is still exactly two keys). A clean tab is never stored, and autosave
+  only deletes slots it *owns* — a previous session the user said "Not now" to
+  survives opening some other file. The pre-tabs `current` / `current-bytes`
+  layout is still read once and migrated.
 - **Anything that reaches the output file is validated at the exporter**, not
   only in the UI: link URLs go through `safeLinkUrl` (`pdf/url.ts`, an
   allow-list) and copied annotation actions through `sanitize.ts` (also an
@@ -671,7 +706,8 @@ For one-off exploration (a new interaction, a screenshot in both themes):
 
 - No browser download in the sandbox, and the pinned Playwright wants a newer
   build than is installed — so run the suite as
-  `PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium-1194/chrome-linux/chrome npm test`.
+  `PW_EXECUTABLE_PATH=/opt/pw-browsers/chromium-1243/chrome-linux64/chrome npm test`
+  (the build number moves with the sandbox image; `ls /opt/pw-browsers`).
   The config reads that env var (CI uses `playwright install` instead). Without
   it every spec fails with "Executable doesn't exist", which is a missing binary,
   not a regression.

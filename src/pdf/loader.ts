@@ -182,6 +182,18 @@ export function getCachedDoc(bytes: ArrayBuffer): Promise<pdfjsLib.PDFDocumentPr
   return doc;
 }
 
+/** Free the parse behind `bytes` — its worker-side document, fonts and page
+ * caches. Called when a tab closes: the cache is a WeakMap, but the pdf.js
+ * *worker* holds its own copy of every document it has opened until it is told
+ * to let go, so without this each closed tab stayed resident for the life of
+ * the page. A later `getCachedDoc` for the same bytes simply parses again. */
+export function releaseDoc(bytes: ArrayBuffer): void {
+  const doc = docCache.get(bytes);
+  if (!doc) return;
+  docCache.delete(bytes);
+  void doc.then((d) => d.destroy()).catch(() => {});
+}
+
 /**
  * Render a page to a fresh canvas at an exact pixel scale (no devicePixelRatio
  * fiddling). Used at export time to rasterise pages that contain redactions.
