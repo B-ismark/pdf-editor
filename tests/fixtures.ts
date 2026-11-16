@@ -1,4 +1,4 @@
-import { PDFDocument, PDFName, PDFRawStream, PDFRef, StandardFonts, degrees, rgb } from "pdf-lib";
+import { PDFDict, PDFDocument, PDFName, PDFRawStream, PDFRef, PDFString, StandardFonts, degrees, rgb } from "pdf-lib";
 import { chromium } from "@playwright/test";
 import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -32,9 +32,59 @@ export interface Fixtures {
   /** `/Rotate 90`, with a solid black band where the *unrotated* coordinates of
    * its black-on-white text land. */
   rotated: string;
+  /** One page of runs where a search target sits behind narrow, wide or
+   * accented glyphs — see {@link SEARCH_REDACT}. */
+  searchRedact: string;
+  /** Three pages carrying every catalog-level structure export must keep — see
+   * {@link STRUCTURED}. */
+  structured: string;
+  /** Twelve pages that all draw the *same* image XObject. */
+  sharedImage: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
+
+/**
+ * Search targets whose position a per-character *average* gets wrong.
+ *
+ * The first run is the sample document's own line, where the audit saw "Ac"
+ * survive a "Redact all"; the others put the target behind a run of narrow
+ * glyphs, make the target itself wide, and give it an accent above the cap
+ * height and a descender below the baseline.
+ */
+export const SEARCH_REDACT = {
+  page: { width: 600, height: 300 },
+  size: 14,
+  x: 40,
+  runs: [
+    { text: "Line 1: the quick brown fox jumps over the lazy dog. Account 4111", query: "Account 4111", baseline: 240 },
+    { text: "iiiiiiiiii lllllll tttt fill: WWWWWW end", query: "WWWWWW", baseline: 180 },
+    { text: "il fill till ijl Åçg end", query: "Åçg", baseline: 120 },
+  ],
+} as const;
+
+/**
+ * Everything a document carries at catalog level that a rebuild used to drop.
+ * Page 1 holds things that must *not* survive a redaction of it: a structure
+ * element whose `/ActualText` and a form field whose value both repeat the
+ * page's text.
+ */
+export const STRUCTURED = {
+  pages: 3,
+  bodyText: (n: number) => `Structured body text on page ${n}`,
+  lang: "en-GB",
+  outlineTitles: ["Opening", "Chapter two", "Chapter three", "Evil"],
+  labels: ["i", "ii", "1"],
+  namedDest: "chap2",
+  layer: "Layer A",
+  publicField: "name",
+  secretField: "secretField",
+  secretValue: "FIELD-SECRET-VALUE",
+  taggedSecret: "TAGGED-SECRET-ALT",
+  orphanSecret: "ORPHAN-SECRET-OBJECT",
+  author: "Alice Example",
+  company: "ACME-CORP-PRIVATE",
+} as const;
 
 /** The single text run in the `rotated` fixture. */
 export const ROTATED_TEXT = "ROTATED-LABEL";
@@ -165,6 +215,9 @@ async function build(): Promise<Fixtures> {
     brokenParms: write("broken-parms.pdf", await brokenParmsPdf()),
     typeset: write("typeset.pdf", await typesetPdf()),
     rotated: write("rotated.pdf", await rotatedPdf()),
+    searchRedact: write("search-redact.pdf", await searchRedactPdf()),
+    structured: write("structured.pdf", await structuredPdf()),
+    sharedImage: write("shared-image.pdf", await sharedImagePdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -185,6 +238,151 @@ async function textPdf(pageCount: number): Promise<Uint8Array> {
         color: rgb(0.1, 0.1, 0.1),
       });
     }
+  }
+  return doc.save();
+}
+
+async function searchRedactPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([SEARCH_REDACT.page.width, SEARCH_REDACT.page.height]);
+  for (const run of SEARCH_REDACT.runs) {
+    page.drawText(run.text, { x: SEARCH_REDACT.x, y: run.baseline, size: SEARCH_REDACT.size, font });
+  }
+  return doc.save();
+}
+
+/** See {@link STRUCTURED}. Built by hand, because pdf-lib has no API for most
+ * of these — which is also why nothing in the app ever wrote them. */
+async function structuredPdf(): Promise<Uint8Array> {
+  const S = STRUCTURED;
+  const doc = await PDFDocument.create();
+  const ctx = doc.context;
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const pages = Array.from({ length: S.pages }, (_, i) => {
+    const p = doc.addPage([595, 842]);
+    p.drawText(S.bodyText(i + 1), { x: 60, y: 760, size: 14, font });
+    return p;
+  });
+  const refs = pages.map((p) => p.ref);
+  const str = (t: string) => PDFString.of(t);
+
+  // Outline: a /Dest to page 1, a /Dest to page 2, a GoTo action to page 3,
+  // and an item whose action is JavaScript (must be stripped, not kept).
+  const outlinesRef = ctx.nextRef();
+  const itemRefs = S.outlineTitles.map(() => ctx.nextRef());
+  const actions = [
+    { Dest: [refs[0], PDFName.of("Fit")] },
+    { Dest: [refs[1], PDFName.of("Fit")] },
+    { A: { S: "GoTo", D: [refs[2], PDFName.of("Fit")] } },
+    { A: { S: "JavaScript", JS: str("app.alert('outline')") } },
+  ];
+  itemRefs.forEach((ref, i) => {
+    ctx.assign(
+      ref,
+      ctx.obj({
+        Title: str(S.outlineTitles[i]),
+        Parent: outlinesRef,
+        ...(i > 0 ? { Prev: itemRefs[i - 1] } : {}),
+        ...(i < itemRefs.length - 1 ? { Next: itemRefs[i + 1] } : {}),
+        ...actions[i],
+      } as never),
+    );
+  });
+  ctx.assign(
+    outlinesRef,
+    ctx.obj({ Type: "Outlines", First: itemRefs[0], Last: itemRefs[itemRefs.length - 1], Count: itemRefs.length }),
+  );
+  doc.catalog.set(PDFName.of("Outlines"), outlinesRef);
+
+  doc.catalog.set(
+    PDFName.of("PageLabels"),
+    ctx.obj({ Nums: [0, { S: "r" }, 2, { S: "D", St: 1 }] }),
+  );
+  doc.catalog.set(PDFName.of("Lang"), str(S.lang));
+  doc.catalog.set(PDFName.of("MarkInfo"), ctx.obj({ Marked: true }));
+
+  // A tagged structure: Document → P (on page 1, with /ActualText) and P (page 2).
+  const rootRef = ctx.nextRef();
+  const docElRef = ctx.nextRef();
+  const p1 = ctx.register(ctx.obj({ Type: "StructElem", S: "P", P: docElRef, Pg: refs[0], K: 0, ActualText: str(S.taggedSecret) }));
+  const p2 = ctx.register(ctx.obj({ Type: "StructElem", S: "P", P: docElRef, Pg: refs[1], K: 0 }));
+  ctx.assign(docElRef, ctx.obj({ Type: "StructElem", S: "Document", P: rootRef, K: [p1, p2] }));
+  ctx.assign(rootRef, ctx.obj({ Type: "StructTreeRoot", K: docElRef }));
+  doc.catalog.set(PDFName.of("StructTreeRoot"), rootRef);
+
+  // Named destination, plus two internal links on page 1: one by name, one by
+  // explicit page reference.
+  doc.catalog.set(
+    PDFName.of("Names"),
+    ctx.obj({
+      Dests: { Names: [str(S.namedDest), [refs[1], PDFName.of("Fit")]] },
+      JavaScript: { Names: [str("init"), { S: "JavaScript", JS: str("app.alert('names')") }] },
+    }),
+  );
+  const named = ctx.register(ctx.obj({ Type: "Annot", Subtype: "Link", Rect: [60, 700, 200, 720], Border: [0, 0, 0], Dest: str(S.namedDest) }));
+  const direct = ctx.register(
+    ctx.obj({ Type: "Annot", Subtype: "Link", Rect: [60, 660, 200, 680], Border: [0, 0, 0], A: { S: "GoTo", D: [refs[2], PDFName.of("Fit")] } }),
+  );
+  pages[0].node.addAnnot(named);
+  pages[0].node.addAnnot(direct);
+  // ...and a link on page 2 that points *at* page 1, which a redaction of page 1
+  // replaces — the reference has to follow the replacement.
+  pages[1].node.addAnnot(
+    ctx.register(ctx.obj({ Type: "Annot", Subtype: "Link", Rect: [60, 660, 200, 680], Border: [0, 0, 0], Dest: [refs[0], PDFName.of("Fit")] })),
+  );
+
+  const ocg = ctx.register(ctx.obj({ Type: "OCG", Name: str(S.layer) }));
+  doc.catalog.set(PDFName.of("OCProperties"), ctx.obj({ OCGs: [ocg], D: { Order: [ocg], ON: [ocg] } }));
+
+  // An unfilled form: one field on page 3, one on page 1 whose value repeats
+  // page 1's text.
+  const field = (name: string, pageIdx: number, value?: string) => {
+    const ref = ctx.register(
+      ctx.obj({
+        Type: "Annot",
+        Subtype: "Widget",
+        FT: "Tx",
+        T: str(name),
+        Rect: [60, 600, 260, 620],
+        P: refs[pageIdx],
+        F: 4,
+        ...(value ? { V: str(value) } : {}),
+      } as never),
+    );
+    pages[pageIdx].node.addAnnot(ref);
+    return ref;
+  };
+  const fields = [field(S.publicField, 2), field(S.secretField, 0, S.secretValue)];
+  doc.catalog.set(PDFName.of("AcroForm"), ctx.obj({ Fields: fields, DA: str("/Helv 0 Tf 0 g") }));
+
+  doc.catalog.set(PDFName.of("OpenAction"), ctx.obj({ S: "JavaScript", JS: str("app.alert('open')") }));
+  doc.setAuthor(S.author);
+  const info = ctx.lookup(ctx.trailerInfo.Info) as PDFDict;
+  info.set(PDFName.of("Company"), str(S.company));
+  // Not reachable from anything: a leftover a rewrite must not carry along.
+  ctx.register(ctx.obj({ Leftover: str(S.orphanSecret) }));
+  return doc.save({ useObjectStreams: false });
+}
+
+/** Twelve pages drawing one shared noisy image (incompressible, so duplicating
+ * it shows up as file size immediately). */
+async function sharedImagePdf(): Promise<Uint8Array> {
+  const w = 300;
+  const h = 300;
+  const px = new Uint8Array(w * h * 3);
+  let seed = 0x1234567;
+  for (let i = 0; i < px.length; i++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    px[i] = (seed >>> 24) & 0xff;
+  }
+  const doc = await PDFDocument.create();
+  const img = await doc.embedPng(encodePng(px, w, h));
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  for (let p = 0; p < 12; p++) {
+    const page = doc.addPage([595, 842]);
+    page.drawImage(img, { x: 100, y: 300, width: 300, height: 300 });
+    page.drawText(`Shared image page ${p + 1}`, { x: 60, y: 760, size: 14, font });
   }
   return doc.save();
 }

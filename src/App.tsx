@@ -21,6 +21,7 @@ import { useHistory, type HistorySnapshot } from "./hooks/useHistory";
 import { DocTabs } from "./components/DocTabs";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useFragmentFont } from "./hooks/usePageFonts";
+import { peekPageFonts } from "./pdf/fontInfo";
 import { useFragmentColors } from "./hooks/usePageColors";
 import { usePersistentState, usePersistentFlag } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
@@ -425,9 +426,15 @@ export function App() {
   busyRef.current = busy;
 
   // ---- Find in document (Ctrl/⌘+F) ----
+  // The document's own face for a fragment, when its page has been harvested —
+  // match boxes are measured in it (see `findMatches`).
+  const fontFor = useCallback(
+    (f: TextFragment) => (pdf ? peekPageFonts(pdf.bytes, f.pageIndex).get(f.itemIndex) ?? null : null),
+    [pdf],
+  );
   const matches: FindMatch[] = useMemo(
-    () => (pdf && findOpen && findQuery ? findMatches(pdf.pages, edits, findQuery) : []),
-    [pdf, findOpen, findQuery, edits],
+    () => (pdf && findOpen && findQuery ? findMatches(pdf.pages, edits, findQuery, fontFor) : []),
+    [pdf, findOpen, findQuery, edits, fontFor],
   );
   const matchesByPage = useMemo(() => {
     const m = new Map<number, FindMatch[]>();
@@ -493,12 +500,16 @@ export function App() {
 
   /** Redact every current search match (one undo step). */
   const redactAllMatches = useCallback(() => {
-    if (matches.length === 0) return;
+    if (matches.length === 0 || !pdf) return;
+    // Re-measured now rather than reusing the highlight boxes: fonts harvested
+    // since the query was typed (pages scrolled into view) make these boxes
+    // tighter to the real glyphs, and these ones are permanent.
+    const hits = findMatches(pdf.pages, edits, findQuery, fontFor);
     doc.set((d) => ({
       ...d,
       redactions: [
         ...d.redactions,
-        ...matches.map((m) => ({
+        ...hits.map((m) => ({
           id: nextId("rd"),
           pageIndex: m.pageIndex,
           x: m.x,
@@ -509,11 +520,11 @@ export function App() {
         })),
       ],
     }));
-    const n = matches.length;
+    const n = hits.length;
     setMessage(`Redacted ${n} match${n === 1 ? "" : "es"} of “${findQuery}”.`);
     setStatus("ready");
     closeFind();
-  }, [matches, doc, findQuery, closeFind]);
+  }, [matches, pdf, edits, fontFor, doc, findQuery, closeFind]);
 
   /** Copy all document text to the clipboard. */
   const copyAllText = useCallback(async () => {

@@ -61,6 +61,30 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   (`ctx.measureText` / `widthOfTextAtSize`), never estimated from character
   counts. That estimate shipped once and left original text visible past the
   cover for wide glyphs and non-Latin scripts.
+- **Export edits the loaded file in place; it doesn't rebuild one.** That keeps
+  catalog-level structure (outline, page labels, tags, `/Lang`, named
+  destinations, layers, the form) and shares what the source shared. It also
+  inverts the privacy default — a rebuild carried only what it copied, an
+  in-place save carries everything still in the file — so three rules hold it
+  together (`pdf/structure.ts`):
+  - **A redacted page is replaced, never edited.** The raster page is inserted
+    and the original removed; references to the old page are retargeted, form
+    fields on it are pruned, and the structure tree is dropped outright when
+    any page was replaced (its `/ActualText` and `/Alt` repeat page text, and
+    partial pruning would trust every producer's bookkeeping with a redaction).
+  - **`collectGarbage` must run last, after `flush()`.** pdf-lib writes *every*
+    object in its context, reachable or not — so without it the replaced
+    page's content stream, objects orphaned by old incremental saves, and
+    whatever the sanitiser unhooked all ship in the file.
+  - **The catalog is an allow-list** (`CATALOG_KEEP` in `sanitize.ts`), and so
+    is `/Names` (only `/Dests`). Adding a key there ships it in every export;
+    outline and form-field actions go through the same `scrubActions` as
+    annotations.
+- **Organise copies pages in batches.** Each `copyPages` call has its own
+  object copier, and only one copier can notice that two pages share a font or
+  image — one call per page wrote a shared image once per page. A page the
+  plan uses twice must go in a *separate* call, because a copier hands back the
+  same object for the same page.
 - **Download via `src/download.ts`.** It attaches the anchor before clicking and
   defers `revokeObjectURL`; revoking synchronously races the browser's fetch of
   the blob and cancels downloads on Firefox/Safari.

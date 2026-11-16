@@ -21,3 +21,8 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   the render path free of pdf-lib** — e.g. `isFragmentModified` lives in the
   pure `pdf/style.ts`, not `exporter.ts`. If you add code the initial render
   needs, don't import it from a pdf-lib module.
+- **Long loops yield through `yieldToUI` (`pdf/yield.ts`), never `setTimeout(0)`.**
+  Nested timeouts clamp to ≥4 ms, which made a 150-page export spend most of
+  its time asleep. `yieldToUI` only gives the browser a turn once ~12 ms of work
+  has run, and uses `scheduler.yield` / `MessageChannel`, which aren't clamped.
+  Call it as often as you like; most calls return immediately.
