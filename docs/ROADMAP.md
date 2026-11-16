@@ -23,7 +23,7 @@ Read only the section a package points at, not the whole folder.
 - **When a package is done:**
   - tick it here;
   - add a spec for any invariant it creates;
-  - add a CLAUDE.md note only if a future session would otherwise get it wrong.
+  - add a note to the matching `docs/notes/<area>.md` only if a future session would otherwise get it wrong.
 - **Order.**
   - 0 comes first.
   - 1 only touches export files, so it can run alongside 2–4.
@@ -33,7 +33,7 @@ Read only the section a package points at, not the whole folder.
 
 ## Packages
 
-- [ ] **0. Housekeeping** (S).
+- [x] **0. Housekeeping** (S). Done: `CLAUDE.md` is an index; the per-area notes are in `docs/notes/`.
   - Slim `CLAUDE.md` into a short index (commands, architecture, the rules every session needs).
   - Move the long per-area gotchas into `docs/notes/<area>.md`, each linked from the index with a one-line "read this before touching X".
   - Lose no content; only move it.

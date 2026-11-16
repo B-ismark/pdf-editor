@@ -1,0 +1,66 @@
+# Privacy and export integrity
+
+_Read before touching anything that loads assets, `vite.config.ts`'s CSP, `pdf/exporter.ts`, `pdf/url.ts`, `sanitize.ts`, the redaction raster, `optimizeImages.ts`, or `download.ts`._
+
+Moved verbatim from `CLAUDE.md`; the index there links here.
+
+## Gotchas
+
+- **Self-contained assets only — now enforced.** A build-time
+  Content-Security-Policy (`cspPlugin` in `vite.config.ts`) sets
+  `default-src 'self'` / `connect-src 'self'`, so an off-origin request fails in
+  the browser rather than silently working in dev and leaking in production. A
+  CDN font link had shipped for months against this exact rule; the CSP plus
+  `tests/privacy.spec.ts` is what stops that recurring. Icons are **Lucide**
+  (`Icon.tsx` maps semantic names → Lucide components); type is the system font
+  stack (`--font-plain`). **Don't add CDN/font dependencies**, and if you add
+  something the policy blocks, widen the policy deliberately and say why at the
+  definition — don't reach for `'unsafe-*'`.
+- **Anything that reaches the output file is validated at the exporter**, not
+  only in the UI: link URLs go through `safeLinkUrl` (`pdf/url.ts`, an
+  allow-list) and copied annotation actions through `sanitize.ts` (also an
+  allow-list, `/Next` chains included). The exporter is the single choke point,
+  so a value from a restored session can't bypass a UI check.
+- **The redaction raster picks its own codec, and must never grow a page.**
+  `embedPageRaster` encodes both PNG and JPEG and embeds the smaller. Neither
+  wins everywhere — lossless is hopeless against scanner noise (a scanned A4
+  page measured 5127 KB as PNG against 1056 KB as JPEG), but PNG is far smaller
+  on a sparse vector page — so the comparison is the design, not a fallback.
+  `pref.losslessRaster` (⋯ menu) skips JPEG entirely for users who need the
+  raster bit-exact. `docs/RASTER-CODEC-EVAL.md` has the measurements, and the
+  reasons JBIG2 and MuPDF were evaluated and turned down.
+- **`optimizeImages.ts` decodes flate images itself.** `DCTDecode` goes to the
+  browser's JPEG decoder; `FlateDecode` is inflated, un-predicted, and unpacked
+  here — `/Predictor` is not optional, since ignoring it yields noise rather
+  than a slightly-off image, and `flateParms` therefore *bails* on anything it
+  can't read rather than assuming the default. Every unsupported shape (chained
+  filters, 1/16-bit depths, CMYK or indexed colour, masks, `/Decode`) returns
+  null and leaves the image untouched, which is why the checks are an
+  allow-list. Two traps worth keeping in mind:
+  - **A soft mask is an image XObject too**, DeviceGray/8-bit/flate — i.e.
+    indistinguishable from a candidate by its own contents, and only the
+    `/SMask` reference *from the image that owns it* marks it. Rewriting one as
+    a DeviceRGB JPEG is an invalid mask and lossy transparency, so `maskedRefs`
+    pre-scans for those references. Accepting flate is what put masks in range;
+    they were unreachable when only `DCTDecode` was.
+  - **The rebuilt image dict is a fresh minimal one**, so any key that outlives
+    the pixels has to be carried over by name — `/Interpolate` and `/Intent`,
+    plus `/OC` (without which an image on a hidden optional-content layer
+    becomes permanently visible) and `/StructParent` (which ties it to the
+    tagged-PDF tree carrying its alt text).
+  - **"Present but unreadable" is not "absent".** `flateParms` returns the
+    no-prediction defaults *only* when `/DecodeParms` is missing outright; a
+    dangling reference or a shape it doesn't model bails instead. Collapsing
+    the two is how you unfilter predicted data as if it were raw, and nothing
+    downstream can catch it — predictor-filtered data is always *larger* than
+    the samples it encodes, so the short-data guard never fires. For the same
+    reason the parms object is checked with `instanceof PDFDict`, not for a
+    `.get` method: `PDFArray` has one of those too.
+- **On the redaction raster path, anything not covered is permanent.** The
+  raster is all that survives, so cover rectangles must be *measured*
+  (`ctx.measureText` / `widthOfTextAtSize`), never estimated from character
+  counts. That estimate shipped once and left original text visible past the
+  cover for wide glyphs and non-Latin scripts.
+- **Download via `src/download.ts`.** It attaches the anchor before clicking and
+  defers `revokeObjectURL`; revoking synchronously races the browser's fetch of
+  the blob and cancels downloads on Firefox/Safari.
