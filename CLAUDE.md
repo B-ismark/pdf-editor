@@ -107,7 +107,12 @@ type-checking can't see, and each exists because it broke once:
   closing a tab with work in it asks (a clean one doesn't); a reload restores
   every edited tab and only those; Download all zips each tab with its own
   edits; and on a phone the strip appears only with a second document and
-  doesn't push the status toast onto the zoom pill;
+  doesn't push the status toast onto the zoom pill; a file dropped while a
+  dialog or OCR/export is running opens nothing (the dialog's result would land
+  in the new tab); an Organise result counts as unsaved (`baked`); restoring past
+  the tab cap, Delete from a second window, and a discarded tab each leave the
+  device holding exactly what they should; Download all refuses a whiteout over
+  live text in *any* tab; and closing a tab by keyboard keeps focus on the strip;
 - `overlays.spec.ts` — a marquee'd group moves as one (one undo step) and
   survives the drag, a plain click on a member selects just that one, arrows
   nudge the group, and a buried stroke can be raised — in the overlay's paint
@@ -320,6 +325,12 @@ See `docs/PRODUCT-AUDIT.md` for the findings behind each spec.
   only deletes slots it *owns* — a previous session the user said "Not now" to
   survives opening some other file. The pre-tabs `current` / `current-bytes`
   layout is still read once and migrated.
+  Deletion is immediate where the user asked for it: closing a tab flushes the
+  debounced save (and `pagehide` flushes any pending one), "Delete" on the
+  restore prompt removes only the slots it offered, and a page whose slot was
+  deleted by another window (BroadcastChannel `pdf-editor-autosave`) writes its
+  live copy back. A session dismissed with "Not now" is deliberately kept until
+  "Delete", so it is offered again alongside later work.
 - **Anything that reaches the output file is validated at the exporter**, not
   only in the UI: link URLs go through `safeLinkUrl` (`pdf/url.ts`, an
   allow-list) and copied annotation actions through `sanitize.ts` (also an

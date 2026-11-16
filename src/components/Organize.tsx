@@ -103,8 +103,8 @@ export function Organize({
     setBusy("Adding pages…");
     try {
       await addBytes(await d.bake());
-    } catch {
-      setErr(`Couldn't add the pages of "${d.name}".`);
+    } catch (e) {
+      setErr((e as { userFacing?: boolean })?.userFacing ? (e as Error).message : `Couldn't add the pages of "${d.name}".`);
     } finally {
       setBusy(null);
     }

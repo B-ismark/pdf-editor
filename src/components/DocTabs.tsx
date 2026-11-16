@@ -32,6 +32,7 @@ interface Props {
  * user can't find.
  */
 export function DocTabs({ tabs, activeId, disabled, onSelect, onClose, onOpen }: Props) {
+  const refocus = useRef(false);
   const onKeyDown = useCallback(
     (e: KeyboardEvent<HTMLElement>) => {
       const i = tabs.findIndex((t) => t.id === activeId);
@@ -43,6 +44,9 @@ export function DocTabs({ tabs, activeId, disabled, onSelect, onClose, onOpen }:
       else if (e.key === "End") next = tabs.length - 1;
       else if (e.key === "Delete" && activeId) {
         e.preventDefault();
+        // Closing removes the focused button; the keyboard has to land on the
+        // tab that takes its place, not on <body>, or the next arrow does nothing.
+        refocus.current = true;
         onClose(activeId);
         return;
       }
@@ -71,6 +75,12 @@ export function DocTabs({ tabs, activeId, disabled, onSelect, onClose, onOpen }:
       ?.scrollIntoView({ block: "nearest", inline: "nearest" });
   }, [activeId, tabs.length]);
 
+  useEffect(() => {
+    if (!refocus.current || !activeId) return;
+    refocus.current = false;
+    listRef.current?.querySelector<HTMLElement>(`[data-doc-tab="${CSS.escape(activeId)}"]`)?.focus();
+  }, [activeId, tabs]);
+
   return (
     <nav className="doctabs" aria-label="Open documents">
       <div className="doctabs__list" ref={listRef} onKeyDown={onKeyDown}>
@@ -85,6 +95,7 @@ export function DocTabs({ tabs, activeId, disabled, onSelect, onClose, onOpen }:
                 aria-current={active ? "page" : undefined}
                 // One stop in the tab order for the strip; arrows do the rest.
                 tabIndex={active ? 0 : -1}
+                aria-keyshortcuts="ArrowLeft ArrowRight Home End Delete"
                 disabled={disabled && !active}
                 onClick={() => onSelect(t.id)}
                 onAuxClick={(e) => {

@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import type { DocState } from "../src/pdf/types";
 import { readFileSync } from "node:fs";
 import { fixtures } from "./fixtures";
 import { open, watch } from "./helpers";
@@ -34,6 +35,59 @@ async function addText(page: Page, text: string) {
   // Leave the contentEditable so single-key shortcuts work again.
   await page.locator('.tooldock__btn[aria-label="Select"]').click();
 }
+
+/** Every key in the autosave store. */
+function storeKeys(page: Page): Promise<string[]> {
+  return page.evaluate(
+    () =>
+      new Promise<string[]>((resolve) => {
+        const req = indexedDB.open("pdf-editor", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("session");
+        req.onsuccess = () => {
+          const all = req.result.transaction("session", "readonly").objectStore("session").getAllKeys();
+          all.onsuccess = () => {
+            resolve((all.result as string[]).sort());
+            req.result.close();
+          };
+        };
+      }),
+  );
+}
+
+/** Write records straight into the autosave store, as a previous visit would
+ * have left them. `bytes` values are PDF files read from disk. */
+async function seedStore(page: Page, records: [string, unknown][], bytes: [string, string][]) {
+  const files = bytes.map(([k, path]) => [k, [...readFileSync(path)]] as const);
+  await page.evaluate(
+    ({ records, files }) =>
+      new Promise<void>((resolve) => {
+        const req = indexedDB.open("pdf-editor", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("session");
+        req.onsuccess = () => {
+          const tx = req.result.transaction("session", "readwrite");
+          const st = tx.objectStore("session");
+          for (const [k, v] of records) st.put(v, k);
+          for (const [k, arr] of files) st.put(new Uint8Array(arr).buffer, k);
+          tx.oncomplete = () => {
+            req.result.close();
+            resolve();
+          };
+        };
+      }),
+    { records, files },
+  );
+}
+
+const EMPTY: DocState = { edits: {}, textBoxes: [], redactions: [], annotations: [], stamps: [] };
+const docRecord = (id: string, fileName: string, order: number, extra: Partial<{ doc: DocState; baked: number }> = {}) => ({
+  id,
+  fileName,
+  doc: EMPTY,
+  savedAt: Date.now(),
+  order,
+  active: false,
+  ...extra,
+});
 
 test.describe("document tabs", () => {
   test.beforeEach(async ({ page }) => {
@@ -152,6 +206,152 @@ test.describe("document tabs", () => {
     expect(text).toContain("typeset-edited.pdf");
     // Two PDFs inside.
     expect(text.match(/%PDF-/g)?.length).toBe(2);
+  });
+
+  test("a file dropped on an open dialog doesn't slip in behind it", async ({ page }) => {
+    // Organise acts on whatever is in front when Apply is pressed. A drop used
+    // to open a tab behind the dialog, and Apply then wrote this document's
+    // pages into the dropped one — under its name.
+    const f = await fixtures();
+    await open(page, f.sample);
+    await page.getByRole("button", { name: /Organise pages/ }).first().click();
+    await page.waitForSelector(".organize");
+    const bytes = [...readFileSync(f.typeset)];
+    await page.evaluate((bytes) => {
+      const dt = new DataTransfer();
+      dt.items.add(new File([new Uint8Array(bytes)], "typeset.pdf", { type: "application/pdf" }));
+      document.querySelector(".organize")!.dispatchEvent(new DragEvent("drop", { dataTransfer: dt, bubbles: true, cancelable: true }));
+    }, bytes);
+    await page.waitForTimeout(800);
+    await expect(tabs(page)).toHaveCount(1);
+    await expect(activeTab(page)).toContainText("sample.pdf");
+  });
+
+  test("an organised document is still unsaved work", async ({ page }) => {
+    const f = await fixtures();
+    await open(page, f.sample);
+    await page.getByRole("button", { name: /Organise pages/ }).first().click();
+    await page.locator('.organize [aria-label="Rotate"]').first().click();
+    await page.locator(".organize .btn--filled").click();
+    await expect(page.locator(".organize")).toHaveCount(0);
+    // Its doc state is empty — the rotation is in the bytes — but it's a change.
+    await expect(activeTab(page).locator(".doctab__dirty")).toHaveCount(1);
+    await expect.poll(async () => (await storeKeys(page)).length, { timeout: 15_000 }).toBe(2);
+  });
+
+  test("restoring more documents than fit keeps the rest on the device", async ({ page }) => {
+    const f = await fixtures();
+    await page.goto("/");
+    const n = 12;
+    await seedStore(
+      page,
+      Array.from({ length: n }, (_, i) => [`doc:s${i}`, docRecord(`s${i}`, `doc${i}.pdf`, i, { baked: 1 })]),
+      Array.from({ length: n }, (_, i) => [`bytes:s${i}`, f.sample]),
+    );
+    await page.reload();
+    await page.locator(".restore-banner").getByRole("button", { name: "Restore" }).click();
+    await expect(tabs(page)).toHaveCount(10, { timeout: 60_000 });
+    await expect(page.locator(".snackbar")).toContainText("couldn't be opened");
+    // Give the autosave time to run (and, before the fix, delete).
+    await page.waitForTimeout(2500);
+    expect((await storeKeys(page)).filter((k) => k.startsWith("doc:")).length).toBe(n);
+  });
+
+  test("Delete on another window's restore prompt doesn't lose this window's work", async ({ page, context }) => {
+    const f = await fixtures();
+    await open(page, f.sample);
+    await addText(page, "Live");
+    await expect.poll(async () => (await storeKeys(page)).length, { timeout: 15_000 }).toBe(2);
+
+    const other = await context.newPage();
+    await other.goto("/");
+    await other.locator(".restore-banner").getByRole("button", { name: /Delete/ }).click();
+    // The editing window puts its copy back; it must not go on believing it's saved.
+    await expect.poll(async () => (await storeKeys(page)).length, { timeout: 15_000 }).toBe(2);
+    await other.close();
+  });
+
+  test("a pre-tabs session stays on offer after editing something else", async ({ page }) => {
+    const f = await fixtures();
+    await page.goto("/");
+    await seedStore(page, [["current", { fileName: "old.pdf", doc: EMPTY, savedAt: Date.now() }]], [["current-bytes", f.sample]]);
+    await page.reload();
+    await page.locator(".restore-banner").getByRole("button", { name: "Not now" }).click();
+    await open(page, f.typeset);
+    await addText(page, "New");
+    await expect.poll(async () => (await storeKeys(page)).filter((k) => k.startsWith("doc:")).length, { timeout: 15_000 }).toBe(1);
+    await page.reload();
+    await expect(page.locator(".restore-banner")).toContainText("old.pdf");
+  });
+
+  test("a discarded document is gone from the device at once", async ({ page }) => {
+    const f = await fixtures();
+    await open(page, f.sample);
+    await addText(page, "Discard me");
+    await expect.poll(async () => (await storeKeys(page)).length, { timeout: 15_000 }).toBe(2);
+    await activeTab(page).locator(".doctab__close").click();
+    await page.getByRole("button", { name: /Discard & close/i }).click();
+    // Well inside the autosave's debounce.
+    await page.waitForTimeout(300);
+    await page.reload();
+    await page.waitForTimeout(800);
+    await expect(page.locator(".restore-banner")).toHaveCount(0);
+    expect(await storeKeys(page)).toEqual([]);
+  });
+
+  test("Download all checks every document for whiteout over live text", async ({ page }) => {
+    const f = await fixtures();
+    await page.goto("/");
+    const cover = { id: "r-1", pageIndex: 0, x: 0, y: 0, width: 2000, height: 2000, color: "#ffffff", cover: true };
+    await seedStore(
+      page,
+      [["doc:w", docRecord("w", "covered.pdf", 0, { doc: { ...EMPTY, redactions: [cover] } })]],
+      [["bytes:w", f.sample]],
+    );
+    await page.reload();
+    await page.locator(".restore-banner").getByRole("button", { name: "Restore" }).click();
+    await expect(tabs(page)).toHaveCount(1, { timeout: 30_000 });
+    await openMore(page, f.typeset);
+
+    let downloaded = false;
+    page.on("download", () => (downloaded = true));
+    await page.locator('.icon-btn[aria-label="More actions"]').click();
+    await page.locator(".menu__item", { hasText: "Download all (2) as ZIP" }).click();
+    await expect(page.locator(".snackbar")).toContainText("covered.pdf");
+    await page.waitForTimeout(500);
+    expect(downloaded, "no ZIP built").toBe(false);
+  });
+
+  test("a batch with a bad file says so, instead of claiming every file opened", async ({ page }) => {
+    const f = await fixtures();
+    await open(page, f.sample);
+    await page.locator('input[accept="application/pdf,.pdf"][multiple]').setInputFiles([
+      { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("not a pdf") },
+      { name: "typeset.pdf", mimeType: "application/pdf", buffer: readFileSync(f.typeset) },
+    ]);
+    await expect(tabs(page)).toHaveCount(2, { timeout: 15_000 });
+    await expect(page.locator(".snackbar")).toContainText("couldn't open \"notes.txt\"");
+  });
+
+  test("closing a tab from the keyboard leaves focus on the strip", async ({ page }) => {
+    const f = await fixtures();
+    await open(page, f.sample);
+    await openMore(page, f.typeset);
+    await expect(tabs(page)).toHaveCount(2);
+    await activeTab(page).locator(".doctab__btn").focus();
+    await page.keyboard.press("Delete");
+    await expect(tabs(page)).toHaveCount(1);
+    await expect.poll(() => page.evaluate(() => document.activeElement?.className ?? "")).toContain("doctab__btn");
+  });
+
+  test("a newly opened document starts at its first page", async ({ page }) => {
+    const f = await fixtures();
+    await open(page, f.long);
+    await page.locator(".viewer__scroll").evaluate((el) => (el.scrollTop = el.scrollHeight * 0.5));
+    await openMore(page, f.sample);
+    await expect(tabs(page)).toHaveCount(2);
+    await page.waitForTimeout(500);
+    expect(await page.locator(".viewer__scroll").evaluate((el) => el.scrollTop)).toBeLessThan(50);
   });
 
   test("on a phone the strip only appears once there is something to switch to", async ({ page }) => {

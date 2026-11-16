@@ -210,6 +210,9 @@ interface OpenDoc {
   /** Where it was scrolled to and zoomed, so coming back lands in place. */
   view: { zoom: number; ry: number } | null;
   changeCount: number;
+  /** Changes already baked into `pdf.bytes` (an Organise, a merge) that the
+   * doc state can't see. They still make the document unsaved work. */
+  baked: number;
 }
 
 /** Open documents at once. Each holds its source bytes and a pdf.js parse in
@@ -235,7 +238,13 @@ export function App() {
   // opening a second PDF no longer costs the first one its edits.
   const [tabs, setTabs] = useState<OpenDoc[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
+  /** The front document's {@link OpenDoc.baked}. */
+  const [baked, setBaked] = useState(0);
   const tabCounter = useRef(0);
+  /** Ids of tabs being opened whose `setTabs` hasn't rendered yet, so the tab
+   * cap counts them: a loop of opens (a restore, a multi-file drop) reads the
+   * tab list faster than React re-renders it. */
+  const pendingTabs = useRef(new Set<string>());
   const [confirmCloseId, setConfirmCloseId] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>("select");
   const doc = useHistory<DocState>(EMPTY_DOC);
@@ -323,7 +332,10 @@ export function App() {
 
   const vp = useViewport();
   const theme = useTheme();
-  const { restorable, save: saveSession, clear: clearSession, dismissRestore, adopt: adoptSession } = useAutosave();
+  const { restorable, save: saveSession, clear: clearSession, discard: discardSession, dismissRestore, adopt: adoptSession } = useAutosave();
+  /** Set by closing a tab: the next autosave runs at once, so a discarded
+   * document's stored copy is gone before a reload can bring it back. */
+  const flushSave = useRef(false);
   // >=600px gets the persistent side panel + tool rail (Material Medium+);
   // <600px is the compact phone layout (contextual selection bar + on-demand
   // sheet, `sheetOpen` state above).
@@ -404,11 +416,13 @@ export function App() {
   );
   const changeCount =
     editedFragmentCount + textBoxes.length + redactions.length + annotations.length + stamps.length + links.length + Object.keys(formValues).length +
-    (pageNumbers ? 1 : 0) + (watermark ? 1 : 0);
+    (pageNumbers ? 1 : 0) + (watermark ? 1 : 0) + baked;
 
   // A long-running operation is in flight (opening a file, exporting, OCR,
   // finishing ops). Drives the busy spinner + prevents overlapping actions.
   const busy = status === "loading" || status === "exporting" || status === "working";
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
 
   // ---- Find in document (Ctrl/⌘+F) ----
   const matches: FindMatch[] = useMemo(
@@ -531,17 +545,19 @@ export function App() {
     if (!autosaveOn) return;
     const entries = tabs.map((t) =>
       t.id === activeId && pdf
-        ? { id: t.id, fileName, bytes: pdf.bytes, doc: doc.state, hasChanges: changeCount > 0 }
+        ? { id: t.id, fileName, bytes: pdf.bytes, doc: doc.state, hasChanges: changeCount > 0, baked }
         : {
             id: t.id,
             fileName: t.fileName,
             bytes: t.pdf.bytes,
             doc: t.history ? t.history.entries[t.history.index] : EMPTY_DOC,
             hasChanges: t.changeCount > 0,
+            baked: t.baked,
           },
     );
-    saveSession(entries, activeId);
-  }, [tabs, activeId, pdf, fileName, doc.state, changeCount, saveSession, autosaveOn]);
+    saveSession(entries, activeId, flushSave.current);
+    flushSave.current = false;
+  }, [tabs, activeId, pdf, fileName, doc.state, changeCount, baked, saveSession, autosaveOn]);
 
   /** Toggle the on-device session copy. Turning it off erases whatever is
    * already stored — the point of the switch is that no copy remains. That
@@ -564,10 +580,10 @@ export function App() {
 
   /** Erase the offered previous session without opening it. */
   const discardRestorable = useCallback(() => {
-    void clearSession();
+    void discardSession();
     setStatus("ready");
     setMessage("Deleted the saved session.");
-  }, [clearSession]);
+  }, [discardSession]);
 
   /** Clear everything that belongs to the document in front rather than to the
    * app — selection, find, an armed tool — before another document takes its
@@ -601,11 +617,12 @@ export function App() {
               history: doc.snapshot(),
               view: vp.captureView(),
               changeCount,
+              baked,
             }
           : t,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeId, pdf, fileName, doc.snapshot, vp.captureView, changeCount],
+    [activeId, pdf, fileName, doc.snapshot, vp.captureView, changeCount, baked],
   );
 
   /** Bring a parked document to the front. */
@@ -615,11 +632,13 @@ export function App() {
       setPdf(t.pdf);
       setFileName(t.fileName);
       setActiveId(t.id);
+      setBaked(t.baked);
       if (t.history) doc.restore(t.history);
       else doc.reset(EMPTY_DOC);
       vp.setPageWidth(Math.max(...t.pdf.pages.map((p) => p.viewBox.width), 1));
-      if (t.view) vp.restoreView(t.view);
-      else vp.resetZoom();
+      // A document seen for the first time starts at its first page, not at
+      // whatever scroll position the one before it was left at.
+      vp.restoreView(t.view ?? { zoom: 1, ry: 0 });
     },
     [resetDocUi, doc, vp],
   );
@@ -650,6 +669,7 @@ export function App() {
   // and its stored copy was then deleted as unneeded.
   const liveTabs = useRef({ tabs, activeId, pdf, parkActive, showDoc });
   liveTabs.current = { tabs, activeId, pdf, parkActive, showDoc };
+  for (const t of tabs) pendingTabs.current.delete(t.id);
 
   const openBytes = useCallback(
     async (
@@ -657,14 +677,20 @@ export function App() {
       name: string,
       note?: string,
       seedDoc?: DocState,
-      opts: { replace?: boolean; id?: string; quiet?: boolean } = {},
+      opts: { replace?: boolean; id?: string; quiet?: boolean; baked?: number } = {},
     ): Promise<OpenDoc | null> => {
       const { tabs, activeId } = liveTabs.current;
       const replacing = opts.replace && activeId != null;
-      if (!replacing && tabs.length >= MAX_TABS) {
-        setStatus("error");
-        setMessage(`${MAX_TABS} documents are open — close one to open another.`);
-        return null;
+      const id = replacing ? activeId! : opts.id ?? `doc-${Date.now().toString(36)}-${tabCounter.current++}`;
+      if (!replacing) {
+        // Tabs already rendered, plus opens still on their way into the list.
+        const counted = new Set([...tabs.map((t) => t.id), ...pendingTabs.current]);
+        if (counted.size >= MAX_TABS) {
+          setStatus("error");
+          setMessage(`${MAX_TABS} documents are open — close one to open another.`);
+          return null;
+        }
+        pendingTabs.current.add(id);
       }
       setStatus("loading");
       setMessage(`Loading ${name}…`);
@@ -672,7 +698,6 @@ export function App() {
         const loaded = await loadPdf(bytes);
         // Re-read after the await: renders have happened since.
         const { activeId, pdf, parkActive, showDoc } = liveTabs.current;
-        const id = replacing ? activeId! : opts.id ?? `doc-${Date.now().toString(36)}-${tabCounter.current++}`;
         const fresh: OpenDoc = {
           id,
           fileName: name,
@@ -680,6 +705,7 @@ export function App() {
           history: seedDoc ? { entries: [seedDoc], index: 0, lastKey: null } : null,
           view: null,
           changeCount: 0,
+          baked: opts.baked ?? 0,
         };
         if (replacing) {
           const old = pdf;
@@ -704,6 +730,7 @@ export function App() {
         }
         return fresh;
       } catch (err) {
+        pendingTabs.current.delete(id);
         setStatus("error");
         setMessage(pdfOpenError(err));
         return null;
@@ -713,7 +740,7 @@ export function App() {
   );
 
   const openFile = useCallback(
-    async (file: File) => {
+    async (file: File): Promise<boolean> => {
       // Show feedback immediately — reading a large file into memory and
       // sniffing it can take a beat, and a drag-drop gives no other signal.
       setStatus("loading");
@@ -724,7 +751,7 @@ export function App() {
       } catch {
         setStatus("error");
         setMessage(`Couldn't read "${file.name}".`);
-        return;
+        return false;
       }
       // Trust the content, not the extension or MIME type: an HTML page or
       // image renamed to .pdf (or dropped with an empty MIME type) must be
@@ -732,9 +759,9 @@ export function App() {
       if (!looksLikePdf(bytes)) {
         setStatus("error");
         setMessage(`"${file.name}" isn't a PDF file. Please choose a .pdf document.`);
-        return;
+        return false;
       }
-      await openBytes(bytes, file.name);
+      return (await openBytes(bytes, file.name)) != null;
     },
     [openBytes],
   );
@@ -750,11 +777,35 @@ export function App() {
   /** Open several files, each in its own tab (a multi-select pick or a drop). */
   const openFiles = useCallback(
     async (files: FileList | File[] | null | undefined) => {
+      // A dialog (Organise, Compress, Finish…) acts on whatever document is in
+      // front when it's confirmed, and so does an operation still running (OCR,
+      // export). A file dropped then opens a tab that comes to the front *behind*
+      // it — and the dialog's result lands in, or is named after, the wrong
+      // document. So nothing opens until they're done.
+      if (aModalIsOpen() || busyRef.current) {
+        setMessage("Finish what's open first, then drop the file again.");
+        return;
+      }
       const list = [...(files ?? [])];
-      for (const f of list) await openFile(f);
+      const failed: string[] = [];
+      for (const f of list) if (!(await openFile(f))) failed.push(f.name);
       if (list.length > 1) {
-        setStatus((s) => (s === "error" ? s : "ready"));
-        setMessage((m) => (/^Loading|·/.test(m) ? `Opened ${plural(list.length, "document")} in tabs.` : m));
+        // Each open writes its own status over the last, so a failure early in
+        // the list was being covered by the next file's success — "Opened 2
+        // documents" with one tab on screen. Report the whole batch instead.
+        const opened = list.length - failed.length;
+        if (failed.length === 0) {
+          setStatus("ready");
+          setMessage(`Opened ${plural(opened, "document")} in tabs.`);
+        } else {
+          setStatus("error");
+          const names = failed.map((n) => `"${n}"`).join(", ");
+          setMessage(
+            opened > 0
+              ? `Opened ${plural(opened, "document")}; couldn't open ${names}.`
+              : `Couldn't open ${names}.`,
+          );
+        }
       }
     },
     [openFile],
@@ -780,19 +831,32 @@ export function App() {
       }
     }
     dismissRestore();
-    adoptSession(s.docs.map((d) => d.id));
     const opened: OpenDoc[] = [];
     for (const d of s.docs) {
       // Same ids as before, so their stored copies are updated in place rather
       // than duplicated alongside.
-      const t = await openBytes(d.bytes, d.fileName, undefined, d.doc, { id: d.id, quiet: true });
-      if (t) opened.push(t);
+      const t = await openBytes(d.bytes, d.fileName, undefined, d.doc, { id: d.id, quiet: true, baked: d.baked });
+      // Adopt only what actually opened. A slot adopted but not open looks
+      // like a closed tab to the next save, which deletes it — so a document
+      // past the tab cap, or one that failed to parse, was erased for good.
+      if (t) {
+        opened.push(t);
+        adoptSession([t.id]);
+      }
     }
+    const left = s.docs.length - opened.length;
     if (opened.length === 0) return;
-    setStatus("ready");
-    setMessage(
-      opened.length === 1 ? "Session restored." : `Session restored · ${plural(opened.length, "document")}.`,
-    );
+    if (left > 0) {
+      setStatus("error");
+      setMessage(
+        `Restored ${plural(opened.length, "document")}; ${plural(left, "other")} couldn't be opened and ${left === 1 ? "is" : "are"} still saved on this device.`,
+      );
+    } else {
+      setStatus("ready");
+      setMessage(
+        opened.length === 1 ? "Session restored." : `Session restored · ${plural(opened.length, "document")}.`,
+      );
+    }
     pendingActivate.current = s.activeId;
   }, [restorable, dismissRestore, adoptSession, openBytes]);
 
@@ -869,13 +933,17 @@ export function App() {
   // re-encodes images, so don't redo it each time "Keep text" is re-selected.
   const compressLossless = useRef<{ bytes: Uint8Array; size: number } | null>(null);
 
+  /** The file the compress dialog was opened on: the download is named after
+   * the document it baked, not whatever is in front when it's clicked. */
+  const compressName = useRef("document.pdf");
   const openCompress = useCallback(() => {
     setSelection(null);
+    compressName.current = fileName;
     compressBaked.current = null;
     compressOut.current = null;
     compressLossless.current = null;
     setCompressOpen(true);
-  }, []);
+  }, [fileName]);
 
   const estimateCompress = useCallback(
     async (preset: import("./components/CompressDialog").CompressPreset): Promise<import("./components/CompressDialog").CompressEstimate> => {
@@ -919,7 +987,7 @@ export function App() {
     const out = compressOut.current;
     if (!out) return;
     setCompressOpen(false);
-    const base = fileName.replace(/\.pdf$/i, "");
+    const base = compressName.current.replace(/\.pdf$/i, "");
     const suffix = out.lossless ? "-optimized.pdf" : out.helped ? "-compressed.pdf" : ".pdf";
     downloadBytes(out.bytes, base + suffix);
     setStatus("ready");
@@ -934,7 +1002,7 @@ export function App() {
     compressBaked.current = null;
     compressOut.current = null;
     compressLossless.current = null;
-  }, [fileName, downloadBytes]);
+  }, [downloadBytes]);
 
   // Digitally sign the finished document (adbe.pkcs7.detached). Bakes current
   // edits first — signing is the last step, since any later change invalidates
@@ -982,7 +1050,10 @@ export function App() {
         const kept = pg.fragments.filter((f) => !f.id.startsWith("ocr:"));
         return { ...pg, fragments: [...kept, ...extra] };
       });
-      setPdf({ ...pdf, pages });
+      // Into the document that was read, even if another is in front by now:
+      // the pages are that file's, not whichever tab finished first.
+      setPdf((cur) => (cur && cur.bytes === pdf.bytes ? { ...cur, pages } : cur));
+      setTabs((list) => list.map((t) => (t.pdf.bytes === pdf.bytes && t.id !== liveTabs.current.activeId ? { ...t, pdf: { ...t.pdf, pages } } : t)));
       setStatus("ready");
       const partial = pagesFailed > 0 ? ` (${plural(pagesFailed, "page")} couldn't be read)` : "";
       setMessage(
@@ -2058,12 +2129,14 @@ export function App() {
   /** Back to the start screen, with nothing open. */
   const closeAll = useCallback(() => {
     setMenuOpen(false);
+    flushSave.current = true;
     for (const t of tabs) releaseDoc(t.pdf.bytes);
     if (pdf) releaseDoc(pdf.bytes);
     setTabs([]);
     setActiveId(null);
     setPdf(null);
     setFileName("document.pdf");
+    setBaked(0);
     doc.reset(EMPTY_DOC);
     resetDocUi();
     setNavOpen(false);
@@ -2087,6 +2160,7 @@ export function App() {
       }
       const closing = tabs[i];
       const rest = tabs.filter((t) => t.id !== id);
+      flushSave.current = true;
       if (id === activeId) {
         if (pdf) releaseDoc(pdf.bytes);
         setTabs(rest);
@@ -2118,6 +2192,21 @@ export function App() {
   const downloadAll = useCallback(async () => {
     setMenuOpen(false);
     if (tabs.length === 0 || busy) return;
+    // The single-file Download's whiteout check, for every document: a ZIP is
+    // no less a file someone else will read.
+    const unsafe = tabs.flatMap((t) => {
+      const live = t.id === activeId && pdf;
+      const state = live ? doc.state : t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
+      const w = findUnsafeCovers(live ? pdf : t.pdf, state.redactions);
+      return w.count > 0 ? [`${live ? fileName : t.fileName} (page ${w.pages.join(", ")})`] : [];
+    });
+    if (unsafe.length > 0) {
+      setStatus("error");
+      setMessage(
+        `Whiteout sits over live text that stays readable in ${unsafe.join("; ")}. Redact it instead, or download that document on its own.`,
+      );
+      return;
+    }
     setStatus("exporting");
     try {
       const { exportPdf } = await import("./pdf/exporter");
@@ -2134,9 +2223,10 @@ export function App() {
         // Two tabs can share a file name (the same file opened twice); a ZIP
         // with duplicate entries silently loses one on extraction.
         const base = name.replace(/\.pdf$/i, "") + "-edited";
+        // Case-blind: macOS and Windows extract "A.pdf" over "a.pdf".
         let entry = `${base}.pdf`;
-        for (let k = 2; used.has(entry); k++) entry = `${base}-${k}.pdf`;
-        used.add(entry);
+        for (let k = 2; used.has(entry.toLowerCase()); k++) entry = `${base}-${k}.pdf`;
+        used.add(entry.toLowerCase());
         entries.push({ name: entry, data: out });
       }
       downloadBytes(makeZip(entries), "documents-edited.zip", "application/zip");
@@ -2895,7 +2985,14 @@ export function App() {
             confirmLabel="Discard & close"
             danger
             onConfirm={() => closeTab(confirmCloseId)}
-            onCancel={() => setConfirmCloseId(null)}
+            onCancel={() => {
+              const id = confirmCloseId;
+              setConfirmCloseId(null);
+              // Back to the tab the close was asked from, not <body>.
+              requestAnimationFrame(() =>
+                document.querySelector<HTMLElement>(`[data-doc-tab="${CSS.escape(id)}"]`)?.focus(),
+              );
+            }}
           />
         );
       })()}
@@ -2994,7 +3091,9 @@ export function App() {
             hasEdits={changeCount > 0}
             onApply={(bytes, note) => {
               setOrganizeOpen(false);
-              void openBytes(bytes, fileName, note, undefined, { replace: true });
+              // The result *is* the edits, baked in: still unsaved work, so the
+              // tab stays dirty and autosaved, and closing it asks.
+              void openBytes(bytes, fileName, note, undefined, { replace: true, baked: Math.max(1, changeCount) });
             }}
             onExtract={(bytes) =>
               downloadBytes(bytes, fileName.replace(/\.pdf$/i, "") + "-extract.pdf")
@@ -3008,6 +3107,15 @@ export function App() {
                 bake: async () => {
                   const { exportPdf } = await import("./pdf/exporter");
                   const state = t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
+                  // The same guard as Download: a whiteout over live text would
+                  // be merged in looking redacted while the text stays readable.
+                  const warn = findUnsafeCovers(t.pdf, state.redactions);
+                  if (warn.count > 0) {
+                    throw Object.assign(
+                      new Error(`"${t.fileName}" has whiteout over live text (page ${warn.pages.join(", ")}). Redact it instead, then add its pages.`),
+                      { userFacing: true },
+                    );
+                  }
                   return toAB(await exportPdf(t.pdf, { ...EMPTY_DOC, ...state, losslessRaster }));
                 },
               }))}
