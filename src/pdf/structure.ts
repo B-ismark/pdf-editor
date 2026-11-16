@@ -1,4 +1,4 @@
-import { PDFArray, PDFDict, PDFName, PDFRef, PDFStream, type PDFDocument, type PDFObject } from "pdf-lib";
+import { PDFArray, PDFDict, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFStream, PDFString, decodePDFRawStream, type PDFDocument, type PDFObject } from "pdf-lib";
 
 /**
  * Whole-document bookkeeping for exporting *in place*.
@@ -232,4 +232,268 @@ export function collectGarbage(doc: PDFDocument): number {
     }
   }
   return removed;
+}
+
+/** The annotations listed in each old page's `/Annots`. */
+function annotsOf(doc: PDFDocument, pages: Iterable<PDFRef>): Set<PDFRef> {
+  const out = new Set<PDFRef>();
+  for (const pageRef of pages) {
+    const page = deref(doc, pageRef);
+    const annots = page instanceof PDFDict ? deref(doc, page.get(PDFName.of("Annots"))) : undefined;
+    if (!(annots instanceof PDFArray)) continue;
+    for (let i = 0; i < annots.size(); i++) {
+      const a = annots.get(i);
+      if (a instanceof PDFRef) out.add(a);
+    }
+  }
+  return out;
+}
+
+/**
+ * Cut the threads from a kept page's annotations back to a replaced page's.
+ *
+ * A reply (`/IRT`) on page 3 to a comment on redacted page 2 keeps that comment
+ * — and its `/Contents` — reachable; so does a popup on page 3 whose `/Parent`
+ * is a markup on page 2. The reply loses its "in reply to" and stays; the
+ * popup, which is only a window onto the comment that went, goes.
+ */
+export function detachAnnotsOfPages(doc: PDFDocument, oldPages: Set<PDFRef>): void {
+  const doomed = annotsOf(doc, oldPages);
+  if (doomed.size === 0) return;
+  for (const page of doc.getPages()) {
+    if (oldPages.has(page.ref)) continue;
+    const annots = deref(doc, page.node.get(PDFName.of("Annots")));
+    if (!(annots instanceof PDFArray)) continue;
+    for (let i = annots.size() - 1; i >= 0; i--) {
+      const a = deref(doc, annots.get(i));
+      if (!(a instanceof PDFDict)) continue;
+      const parent = a.get(PDFName.of("Parent"));
+      if (String(a.get(PDFName.of("Subtype"))) === "/Popup" && parent instanceof PDFRef && doomed.has(parent)) {
+        annots.remove(i);
+        continue;
+      }
+      const irt = a.get(PDFName.of("IRT"));
+      if (irt instanceof PDFRef && doomed.has(irt)) a.delete(PDFName.of("IRT"));
+    }
+  }
+}
+
+/** Resolve a destination — explicit array, named (`/Dests` dict) or string
+ * (`/Names /Dests` tree) — to the page it targets. */
+function destPage(doc: PDFDocument, dest: PDFObject | undefined, depth = 0): PDFRef | undefined {
+  const d = deref(doc, dest);
+  if (depth > 4 || d === undefined) return undefined;
+  if (d instanceof PDFArray) {
+    const p = d.get(0);
+    return p instanceof PDFRef ? p : undefined;
+  }
+  if (d instanceof PDFDict) return destPage(doc, d.get(PDFName.of("D")), depth + 1);
+  if (d instanceof PDFName) {
+    const dests = deref(doc, doc.catalog.get(PDFName.of("Dests")));
+    return dests instanceof PDFDict ? destPage(doc, dests.get(d), depth + 1) : undefined;
+  }
+  if (d instanceof PDFString || d instanceof PDFHexString) {
+    const names = deref(doc, doc.catalog.get(PDFName.of("Names")));
+    const tree = names instanceof PDFDict ? deref(doc, names.get(PDFName.of("Dests"))) : undefined;
+    const key = d.decodeText();
+    const look = (node: PDFObject | undefined, level: number): PDFObject | undefined => {
+      const n = deref(doc, node);
+      if (!(n instanceof PDFDict) || level > 32) return undefined;
+      const leaf = deref(doc, n.get(PDFName.of("Names")));
+      if (leaf instanceof PDFArray) {
+        for (let i = 0; i + 1 < leaf.size(); i += 2) {
+          const k = deref(doc, leaf.get(i));
+          if ((k instanceof PDFString || k instanceof PDFHexString) && k.decodeText() === key) return leaf.get(i + 1);
+        }
+      }
+      const kids = deref(doc, n.get(PDFName.of("Kids")));
+      if (kids instanceof PDFArray) {
+        for (let i = 0; i < kids.size(); i++) {
+          const hit = look(kids.get(i), level + 1);
+          if (hit) return hit;
+        }
+      }
+      return undefined;
+    };
+    return destPage(doc, look(tree, 0), depth + 1);
+  }
+  return undefined;
+}
+
+/**
+ * Retitle bookmarks that lead to a replaced page as "Page N".
+ *
+ * Bookmarks are very often the page's own headings ("create bookmarks from
+ * headings"), so a bookmark into a redacted page is likely to quote what was
+ * redacted — and the app shows no outline, so the user can neither see nor
+ * redact it. The bookmark keeps working; it just stops saying what it found.
+ * Call after {@link retargetPageRefs}, with the *replacement* page refs.
+ */
+export function retitleOutlinesInto(doc: PDFDocument, newPages: Set<PDFRef>): void {
+  const index = new Map(doc.getPages().map((p, i) => [p.ref, i] as const));
+  forEachOutlineItem(doc, (item) => {
+    let target = destPage(doc, item.get(PDFName.of("Dest")));
+    if (!target) {
+      const action = deref(doc, item.get(PDFName.of("A")));
+      if (action instanceof PDFDict && String(action.get(PDFName.of("S"))) === "/GoTo") {
+        target = destPage(doc, action.get(PDFName.of("D")));
+      }
+    }
+    if (target && newPages.has(target)) {
+      item.set(PDFName.of("Title"), PDFHexString.fromText(`Page ${(index.get(target) ?? 0) + 1}`));
+    }
+  });
+}
+
+/** A content stream's decoded bytes as text, or null if it can't be read. */
+function streamText(stream: PDFObject | undefined): string | null {
+  try {
+    let bytes: Uint8Array | undefined;
+    if (stream instanceof PDFRawStream) bytes = decodePDFRawStream(stream).decode();
+    else if (stream instanceof PDFStream) {
+      // pdf-lib's own content streams (what the exporter just drew).
+      const own = stream as unknown as { getUnencodedContents?: () => Uint8Array };
+      bytes = own.getUnencodedContents?.();
+    }
+    if (!bytes) return null;
+    let s = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    return s;
+  } catch {
+    return null;
+  }
+}
+
+/** Names painted with `Do` in some content, decoded (`#xx` escapes resolved). */
+function xobjectNamesIn(content: string, into: Set<string>): void {
+  for (const m of content.matchAll(/\/([^\s/[\]()<>{}%]+)\s*Do(?![A-Za-z0-9])/g)) {
+    into.add(m[1].replace(/#([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16))));
+  }
+}
+
+/**
+ * Give every page (and every form it draws) an `/XObject` resource list naming
+ * only what its content actually paints.
+ *
+ * Producers often share one resource dictionary between pages, or put it on
+ * `/Pages` for every page to inherit. An image or form used *only* by a page
+ * that was redacted is then still listed in the dictionary a kept page uses —
+ * so it is reachable, survives the garbage collection, and ships: the scanned
+ * page under the redaction, in full. Listing only what each page paints makes
+ * "used by a kept page" and "in the file" the same thing again.
+ *
+ * Content that can't be decoded is left alone (with its resources as they
+ * were), since cutting a resource it does use would break the page.
+ */
+export function isolatePageResources(doc: PDFDocument): void {
+  const ctx = doc.context;
+  const done = new Set<PDFObject>();
+
+  /** Return a copy of `res` whose /XObject holds only `used`; recurse into the
+   * forms it keeps. `inheritInto` collects names a form without resources of
+   * its own draws from its parent's. */
+  const narrowed = (res: PDFDict, used: Set<string>, depth: number): PDFDict => {
+    const xo = deref(doc, res.get(PDFName.of("XObject")));
+    const copy = ctx.obj({});
+    for (const [k, v] of res.entries()) copy.set(k, v);
+    if (!(xo instanceof PDFDict)) return copy;
+    const kept = ctx.obj({});
+    for (const [name, ref] of xo.entries()) {
+      if (!used.has(name.decodeText())) continue;
+      kept.set(name, ref);
+      narrowForm(deref(doc, ref), depth + 1);
+    }
+    copy.set(PDFName.of("XObject"), kept);
+    return copy;
+  };
+
+  const narrowForm = (form: PDFObject | undefined, depth: number): void => {
+    if (!(form instanceof PDFStream) || done.has(form) || depth > 16) return;
+    if (String(form.dict.get(PDFName.of("Subtype"))) !== "/Form") return;
+    done.add(form);
+    const res = deref(doc, form.dict.get(PDFName.of("Resources")));
+    if (!(res instanceof PDFDict)) return;
+    const text = streamText(form);
+    if (text === null) return;
+    const used = new Set<string>();
+    xobjectNamesIn(text, used);
+    form.dict.set(PDFName.of("Resources"), narrowed(res, used, depth));
+  };
+
+  /** Annotation appearances are forms too, and can name the shared dict. */
+  const narrowAppearances = (annot: PDFObject | undefined) => {
+    const a = deref(doc, annot);
+    const ap = a instanceof PDFDict ? deref(doc, a.get(PDFName.of("AP"))) : undefined;
+    if (!(ap instanceof PDFDict)) return;
+    for (const [, state] of ap.entries()) {
+      const s = deref(doc, state);
+      if (s instanceof PDFStream) narrowForm(s, 0);
+      else if (s instanceof PDFDict) for (const [, v] of s.entries()) narrowForm(deref(doc, v), 0);
+    }
+  };
+
+  for (const page of doc.getPages()) {
+    const node = page.node;
+    const res = deref(doc, node.get(PDFName.of("Resources")));
+    const contents = deref(doc, node.get(PDFName.of("Contents")));
+    const streams: (PDFObject | undefined)[] =
+      contents instanceof PDFArray ? Array.from({ length: contents.size() }, (_, i) => deref(doc, contents.get(i))) : [contents];
+    let text = "";
+    let readable = true;
+    for (const st of streams) {
+      if (st === undefined) continue;
+      const t = streamText(st);
+      if (t === null) readable = false;
+      else text += t + "\n";
+    }
+    if (res instanceof PDFDict && readable) {
+      const used = new Set<string>();
+      xobjectNamesIn(text, used);
+      // A form with no /Resources of its own paints from the page's; its
+      // names count as the page's.
+      const xo = deref(doc, res.get(PDFName.of("XObject")));
+      if (xo instanceof PDFDict) {
+        const pending = [...used];
+        while (pending.length) {
+          const f = deref(doc, xo.get(PDFName.of(pending.pop()!)));
+          if (f instanceof PDFStream && !f.dict.has(PDFName.of("Resources"))) {
+            const ft = streamText(f);
+            if (ft === null) continue;
+            const more = new Set<string>();
+            xobjectNamesIn(ft, more);
+            for (const n of more) if (!used.has(n)) (used.add(n), pending.push(n));
+          }
+        }
+      }
+      node.set(PDFName.of("Resources"), narrowed(res, used, 0));
+    }
+    const annots = deref(doc, node.get(PDFName.of("Annots")));
+    if (annots instanceof PDFArray) for (let i = 0; i < annots.size(); i++) narrowAppearances(annots.get(i));
+  }
+}
+
+/**
+ * Fail the export if any part of a tagged-PDF structure tree is still in the
+ * file after it was dropped. The routes into the tree are open-ended (`/SE` on
+ * a bookmark, `/SD` on a link, `/StructParent` lookups by producers that
+ * inline them), and the tree repeats page text — so rather than trust that
+ * every route was cut, check the result.
+ */
+export function assertNoStructureTree(doc: PDFDocument): void {
+  const seen = new Set<PDFObject>();
+  const check = (obj: PDFObject | undefined, depth: number) => {
+    if (!obj || seen.has(obj) || depth > 64) return;
+    seen.add(obj);
+    const dict = obj instanceof PDFStream ? obj.dict : obj;
+    if (dict instanceof PDFDict) {
+      const type = String(dict.get(PDFName.of("Type")));
+      if (type === "/StructElem" || type === "/StructTreeRoot") {
+        throw new Error("A redacted page's accessibility tags couldn't be removed, so the file wasn't exported.");
+      }
+    }
+    eachChild(obj, (child) => {
+      if (!(child instanceof PDFRef)) check(child, depth + 1);
+    });
+  };
+  for (const [, obj] of doc.context.enumerateIndirectObjects()) check(obj, 0);
 }

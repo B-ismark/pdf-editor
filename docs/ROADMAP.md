@@ -37,7 +37,7 @@ Read only the section a package points at, not the whole folder.
   - Slim `CLAUDE.md` into a short index (commands, architecture, the rules every session needs).
   - Move the long per-area gotchas into `docs/notes/<area>.md`, each linked from the index with a one-line "read this before touching X".
   - Lose no content; only move it.
-- [ ] **1. Export you can trust** (M). Files: `pdf/find.ts`, `pdf/exporter.ts`, `pdf/pageOps.ts`, `tests/export.spec.ts`.
+- [x] **1. Export you can trust** (M). Done in PR #45, after two adversarial reviews; limits accepted are listed there and in `docs/notes/privacy-and-export.md`. Files: `pdf/find.ts`, `pdf/exporter.ts`, `pdf/pageOps.ts`, `tests/export.spec.ts`.
   - **Search redaction leaks text.** Boxes are sized by character count and land about 2 characters right, so the leading characters survive in the export. Measure the boxes, and pad them. (UX #1, PRODUCT I-2)
   - **Document structure is dropped.** Keep outlines, page labels, the structure tree with `/Lang`, named destinations, optional-content config and `/AcroForm` on export, and keep internal links pointing at the right pages. (PRODUCT I-1)
   - **Shared resources are duplicated.** Batch `copyPages` so fonts and images are copied once per file, not once per page, and add a size spec. (TECH 2.1)

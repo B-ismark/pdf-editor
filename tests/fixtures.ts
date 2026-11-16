@@ -1,6 +1,7 @@
 import { PDFDict, PDFDocument, PDFName, PDFRawStream, PDFRef, PDFString, StandardFonts, degrees, rgb } from "pdf-lib";
 import { chromium } from "@playwright/test";
-import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import fontkit from "@pdf-lib/fontkit";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
@@ -38,6 +39,13 @@ export interface Fixtures {
   /** Three pages carrying every catalog-level structure export must keep — see
    * {@link STRUCTURED}. */
   structured: string;
+  /** One page per way a search box can be mis-estimated — see
+   * {@link SEARCH_HOSTILE}. Each target is painted pure red. */
+  searchHostile: string;
+  /** A page list pdf.js and pdf-lib read differently — see {@link damagedTreePdf}. */
+  damagedTree: string;
+  /** Two pages drawing through one shared resource list — see {@link sharedResourcesPdf}. */
+  sharedResources: string;
   /** Twelve pages that all draw the *same* image XObject. */
   sharedImage: string;
   /** HTML pretending to be a PDF. */
@@ -217,6 +225,9 @@ async function build(): Promise<Fixtures> {
     rotated: write("rotated.pdf", await rotatedPdf()),
     searchRedact: write("search-redact.pdf", await searchRedactPdf()),
     structured: write("structured.pdf", await structuredPdf()),
+    searchHostile: write("search-hostile.pdf", await searchHostilePdf()),
+    damagedTree: write("damaged-tree.pdf", damagedTreePdf()),
+    sharedResources: write("shared-resources.pdf", await sharedResourcesPdf()),
     sharedImage: write("shared-image.pdf", await sharedImagePdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
@@ -248,6 +259,129 @@ async function searchRedactPdf(): Promise<Uint8Array> {
   const page = doc.addPage([SEARCH_REDACT.page.width, SEARCH_REDACT.page.height]);
   for (const run of SEARCH_REDACT.runs) {
     page.drawText(run.text, { x: SEARCH_REDACT.x, y: run.baseline, size: SEARCH_REDACT.size, font });
+  }
+  return doc.save();
+}
+
+/**
+ * Text set in ways that make a search match's box easy to get wrong, one case
+ * per page, each drawn in one `BT` block as black prefix + pure-red target +
+ * black suffix, so pdf.js reports one fragment and the target's ink is the only
+ * red on the page. After "Redact all" and export, any red pixel left is a leak.
+ *
+ * `Tz`/`Tc`/`Tw` stretch the run in ways the fragment's width absorbs but a
+ * measured stand-in font doesn't; a rotated `Tm` and a `/Rotate` page break the
+ * left-to-right assumption; the Turkish dotted İ changes length when lower-
+ * cased; Hebrew runs right to left; and the last page is far enough down that
+ * its fonts haven't been read when the search runs. The two non-Latin cases
+ * need a real TTF; they're left out (and the spec says so) where DejaVu isn't
+ * installed.
+ */
+export const SEARCH_HOSTILE_FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+export const SEARCH_HOSTILE = {
+  query: "SECRET",
+  hebrewQuery: "דוס",
+  fillerPages: 20,
+};
+
+async function searchHostilePdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  const helv = await doc.embedFont(StandardFonts.Helvetica);
+  const dejavu = existsSync(SEARCH_HOSTILE_FONT)
+    ? await doc.embedFont(readFileSync(SEARCH_HOSTILE_FONT), { subset: false })
+    : null;
+  type Line = { pre: string; t: string; post: string; size?: number; x?: number; y?: number; m?: number[]; ops?: string };
+  const add = (font: typeof helv, line: Line, opts: { rotate?: number; h?: number } = {}) => {
+    const page = doc.addPage([600, opts.h ?? 300]);
+    if (opts.rotate) page.setRotation(degrees(opts.rotate));
+    const f = page.node.newFontDictionary("F", font.ref).asString();
+    const enc = (s: string) => (s ? `${font.encodeText(s).toString()} Tj` : "");
+    const tm = (line.m ?? [1, 0, 0, 1, line.x ?? 40, line.y ?? 150]).join(" ");
+    const ops = `BT ${f} ${line.size ?? 20} Tf ${line.ops ?? ""} ${tm} Tm 0 g ${enc(line.pre)} 1 0 0 rg ${enc(line.t)} 0 g ${enc(line.post)} ET`;
+    page.node.set(PDFName.of("Contents"), doc.context.register(doc.context.flateStream(ops)));
+  };
+  const T = SEARCH_HOSTILE.query;
+  add(helv, { pre: "Line one has words ", t: T, post: " and a tail", ops: "50 Tz" });
+  add(helv, { pre: "iiiiiiiiiiiiiiiiiiiiiiiiiiiiii ", t: T, post: " WWWWWWWWWWWWWWW", size: 14, x: 20, ops: "1.2 Tc" });
+  add(helv, { pre: "a b c d e f g h i j k l m n o p q r ", t: T, post: " WWWWWWWWWW", size: 14, x: 20, ops: "6 Tw" });
+  add(helv, { pre: "Line one has words ", t: T, post: " and a tail", m: [0, 1, -1, 0, 300, 20] }, { h: 400 });
+  add(helv, { pre: "Line one has words ", t: T, post: " and a tail" }, { rotate: 90 });
+  if (dejavu) {
+    add(dejavu, { pre: "İİİİİİİİİİİİ İSTANBUL ", t: T, post: " tail" });
+    // Drawn in visual order; pdf.js gives it back in logical order.
+    const rev = (s: string) => [...s].reverse().join("");
+    add(dejavu, { pre: rev(" בבבבבבבבבבבבבבבב"), t: rev("סוד"), post: rev("א ") });
+  }
+  for (let i = 0; i < SEARCH_HOSTILE.fillerPages; i++) add(helv, { pre: `filler page ${i + 1}`, t: "", post: "" });
+  add(dejavu ?? helv, { pre: "iiiiiiiiiiiiiiii llllllll WWWWWWWW mmmm ", t: T, post: " ...." });
+  return doc.save();
+}
+
+/**
+ * Three pages as a viewer shows them — "P1", "P2_SECRET", "P3" — in a page tree
+ * that's quietly wrong: page 2 has no `/Type`, and a fourth page ("P4_UNSEEN")
+ * sits in `/Kids` beyond what `/Count` admits. pdf.js shows pages 1–3; pdf-lib,
+ * left to itself, skipped the untyped page and counted the hidden one, so
+ * redacting page 2 rasterised page 3 and shipped page 2's text — plus a page the
+ * user never saw. Hand-written bytes, because pdf-lib won't write a broken tree.
+ */
+function damagedTreePdf(): string {
+  const page = (content: number, typed = true) =>
+    `<< ${typed ? "/Type /Page " : ""}/Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${content} 0 R >>`;
+  const stream = (t: string) => {
+    const c = `BT /F1 24 Tf 72 700 Td (${t}) Tj ET`;
+    return `<< /Length ${c.length} >>\nstream\n${c}\nendstream`;
+  };
+  const objs: Record<number, string> = {
+    1: "<< /Type /Catalog /Pages 2 0 R >>",
+    2: "<< /Type /Pages /Kids [6 0 R 7 0 R 8 0 R 12 0 R] /Count 3 >>",
+    3: "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    6: page(9),
+    7: page(10, false),
+    8: page(11),
+    12: page(13),
+    9: stream("P1"),
+    10: stream("P2_SECRET"),
+    11: stream("P3"),
+    13: stream("P4_UNSEEN"),
+  };
+  let s = "%PDF-1.7\n";
+  const off: Record<number, number> = {};
+  for (const [n, body] of Object.entries(objs)) {
+    off[+n] = s.length;
+    s += `${n} 0 obj\n${body}\nendobj\n`;
+  }
+  const xref = s.length;
+  s += "xref\n0 14\n0000000000 65535 f \n";
+  for (let i = 1; i <= 13; i++) s += off[i] != null ? `${String(off[i]).padStart(10, "0")} 00000 n \n` : "0000000000 65535 f \n";
+  return s + `trailer\n<< /Size 14 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+}
+
+/**
+ * Two pages sharing one `/Resources` dictionary, as many producers write them.
+ * Each page draws its text through a form XObject in it: page 1 through `/Fs`
+ * ("FORM_SECRET"), page 2 through `/Fk` ("FORM_KEPT"). Replacing page 1 with a
+ * raster leaves page 2's resources still naming `/Fs` — undrawn, but reachable,
+ * so garbage collection kept it and the redacted text shipped.
+ */
+async function sharedResourcesPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const form = (text: string) =>
+    doc.context.register(
+      doc.context.flateStream(`BT /F1 24 Tf 72 700 Td (${text}) Tj ET`, {
+        Type: "XObject",
+        Subtype: "Form",
+        BBox: [0, 0, 612, 792],
+        Resources: { Font: { F1: font.ref } },
+      }),
+    );
+  const res = doc.context.register(doc.context.obj({ Font: { F1: font.ref }, XObject: { Fs: form("FORM_SECRET"), Fk: form("FORM_KEPT") } }));
+  for (const name of ["Fs", "Fk"]) {
+    const page = doc.addPage([612, 792]);
+    page.node.set(PDFName.of("Resources"), res);
+    page.node.set(PDFName.of("Contents"), doc.context.register(doc.context.flateStream(`/${name} Do`)));
   }
   return doc.save();
 }

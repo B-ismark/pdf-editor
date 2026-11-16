@@ -1,7 +1,17 @@
 import { LineCapStyle, PDFCheckBox, PDFDocument, PDFRef, PDFString, PDFTextField, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
-import { collectGarbage, dropStructureTree, pruneFieldsOnPages, retargetPageRefs } from "./structure";
+import {
+  assertNoStructureTree,
+  collectGarbage,
+  detachAnnotsOfPages,
+  dropStructureTree,
+  isolatePageResources,
+  pruneFieldsOnPages,
+  retargetPageRefs,
+  retitleOutlinesInto,
+} from "./structure";
+import { alignPageTree } from "./pageTree";
 import { safeLinkUrl } from "./url";
 import { markPolylines, markStroke } from "./marks";
 import { createSourceFontEmbedder, type SourceFontEmbedder } from "./fontEmbed";
@@ -449,6 +459,10 @@ export async function exportPdf(
   // CreationDate / ModDate on load; sanitizeDocument() then clears anything
   // else before save (see below).
   const out = await PDFDocument.load(loaded.bytes.slice(0), { updateMetadata: false });
+  // Before anything asks pdf-lib for a page: make its page *i* the object the
+  // preview showed at *i*. On a malformed tree they differ, and the raster
+  // would replace the wrong page.
+  alignPageTree(out, loaded.pages.map((p) => p.ref));
   fillAndFlattenForm(out, formValues);
   // Pages replaced by a raster: old page ref → its replacement. Everything that
   // pointed at the old page is moved over, and nothing of the old one survives.
@@ -616,13 +630,18 @@ export async function exportPdf(
 
   await embedder?.destroy();
 
-  // Order matters. Fields are found by the *old* page refs, so they go before
-  // the refs move; the sanitiser unhooks things from the catalog, so it goes
-  // before the sweep; and the sweep needs pdf-lib's lazily-embedded fonts and
-  // images to exist as objects, so it goes after `flush()`.
-  if (replaced.size > 0) {
-    pruneFieldsOnPages(out, new Set(replaced.keys()));
+  // Order matters. Fields and annotations are found by the *old* page refs, so
+  // they go before the refs move; bookmarks are matched to the *new* refs, so
+  // after. The sanitiser unhooks things from the catalog, so it goes before the
+  // sweep; and resource narrowing and the sweep need pdf-lib's lazily-embedded
+  // fonts and images to exist as objects, so they go after `flush()`.
+  const anyReplaced = replaced.size > 0;
+  if (anyReplaced) {
+    const oldPages = new Set(replaced.keys());
+    pruneFieldsOnPages(out, oldPages);
+    detachAnnotsOfPages(out, oldPages);
     retargetPageRefs(out, replaced);
+    retitleOutlinesInto(out, new Set(replaced.values()));
     dropStructureTree(out);
   }
   // Privacy: strip metadata / timestamps / active content before handing the
@@ -630,7 +649,9 @@ export async function exportPdf(
   // leaves the device — it should carry nothing identifying).
   sanitizeDocument(out);
   await out.flush();
+  if (anyReplaced) isolatePageResources(out);
   collectGarbage(out);
+  if (anyReplaced) assertNoStructureTree(out);
   // Appearances were generated when (and if) the form was flattened; asking
   // pdf-lib to regenerate every field's on save would rewrite the untouched
   // ones and throws on fields whose /DA it can't parse.

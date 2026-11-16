@@ -8,8 +8,13 @@
  * to at least 4 ms, so a long vector export (where a page takes well under a
  * millisecond) spent most of its time asleep: ~4 ms × pages of pure waiting.
  * Now it only yields once the current burst has run for {@link SLICE_MS}, and
- * when it does it uses `scheduler.yield()` (which resumes ahead of other queued
- * tasks) or a `MessageChannel` message — neither of which is clamped.
+ * when it does it posts a `MessageChannel` message, which isn't clamped.
+ *
+ * Not `scheduler.yield()`, though it looks like the better tool: it resumes
+ * *ahead* of tasks already queued, and React schedules its renders as exactly
+ * such a task (a `MessageChannel` post) — so a loop yielding that way never let
+ * the progress update render (measured: one frame in 300 ms of work, against
+ * twenty with a plain post). A message queues behind React's, so it renders.
  */
 
 /** How long a burst may run before giving the browser a turn — under one
@@ -18,11 +23,7 @@ export const SLICE_MS = 12;
 
 let sliceStart = -Infinity;
 
-type Scheduler = { yield?: () => Promise<void> };
-
 function nextTask(): Promise<void> {
-  const scheduler = (globalThis as { scheduler?: Scheduler }).scheduler;
-  if (typeof scheduler?.yield === "function") return scheduler.yield();
   if (typeof MessageChannel === "function") {
     return new Promise((resolve) => {
       const { port1, port2 } = new MessageChannel();

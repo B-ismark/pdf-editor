@@ -24,5 +24,6 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
 - **Long loops yield through `yieldToUI` (`pdf/yield.ts`), never `setTimeout(0)`.**
   Nested timeouts clamp to ≥4 ms, which made a 150-page export spend most of
   its time asleep. `yieldToUI` only gives the browser a turn once ~12 ms of work
-  has run, and uses `scheduler.yield` / `MessageChannel`, which aren't clamped.
-  Call it as often as you like; most calls return immediately.
+  has run, and posts a `MessageChannel` message, which isn't clamped. Not
+  `scheduler.yield`: it resumes ahead of React's queued render, so progress
+  never painted. Call it as often as you like; most calls return immediately.

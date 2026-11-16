@@ -29,17 +29,12 @@ function loadSource(bytes: ArrayBuffer): Promise<PDFDocument> {
  * each page's existing rotation. Handles reorder, delete (omit), merge
  * (multiple sources), and extract (a subset plan).
  *
- * Copies in as few `copyPages` calls as possible. Each call has its own object
+ * Copies with one `copyPages` call per source. Each call has its own object
  * copier, and the copier is what notices that two pages share a font or an
  * image — so one call per page deep-copied every shared resource once *per
- * page* (a twelve-page file sharing one image came out with twelve). One call
- * per source copies each shared object once.
- *
- * A page the plan uses twice can't come from the same call, though: the copier
- * caches by object, so it would hand back the *same* page both times, and one
- * page object in two slots of the page tree is a broken file (rotating one
- * would rotate both). Repeats go into a second (third, …) round, which is the
- * only case that copies shared resources more than once.
+ * page* (a twelve-page file sharing one image came out with twelve). A page
+ * the plan uses twice is fine in one call: the copier clones the page itself
+ * each time it's asked, and only its resources are shared.
  */
 export async function buildFromPlan(
   plan: PlanEntry[],
@@ -55,26 +50,17 @@ export async function buildFromPlan(
     docs.set(key, await loadSource(bytes));
   }
 
-  // Group plan slots into rounds per source: a page's first use goes in round
-  // 0, its second in round 1, and so on — so no round asks for a page twice.
-  const rounds = new Map<string, number[][]>(); // source -> round -> plan slots
-  const uses = new Map<string, number>(); // "source\0index" -> uses so far
+  const slotsBySource = new Map<string, number[]>();
   plan.forEach((entry, slot) => {
-    const id = `${entry.sourceKey}\0${entry.index}`;
-    const round = uses.get(id) ?? 0;
-    uses.set(id, round + 1);
-    const perSource = rounds.get(entry.sourceKey) ?? [];
-    (perSource[round] ??= []).push(slot);
-    rounds.set(entry.sourceKey, perSource);
+    const slots = slotsBySource.get(entry.sourceKey) ?? [];
+    slots.push(slot);
+    slotsBySource.set(entry.sourceKey, slots);
   });
 
   const pages = new Array<PDFPage>(plan.length);
-  for (const [key, perSource] of rounds) {
-    const src = docs.get(key)!;
-    for (const slots of perSource) {
-      const copied = await out.copyPages(src, slots.map((s) => plan[s].index));
-      slots.forEach((slot, i) => (pages[slot] = copied[i]));
-    }
+  for (const [key, slots] of slotsBySource) {
+    const copied = await out.copyPages(docs.get(key)!, slots.map((s) => plan[s].index));
+    slots.forEach((slot, i) => (pages[slot] = copied[i]));
   }
 
   plan.forEach((entry, slot) => {

@@ -1,9 +1,9 @@
 import { test, expect } from "@playwright/test";
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFString, decodePDFRawStream, type PDFObject } from "pdf-lib";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fixtures, PHOTO_CAPTION, SEARCH_REDACT, STRUCTURED } from "./fixtures";
+import { fixtures, PHOTO_CAPTION, SEARCH_HOSTILE, SEARCH_HOSTILE_FONT, SEARCH_REDACT, STRUCTURED } from "./fixtures";
 import { open, watch, pickTool, dragOnPage, pageTexts } from "./helpers";
 import type { Page } from "@playwright/test";
 import { buildFromPlan, type PlanEntry } from "../src/pdf/pageOps";
@@ -300,6 +300,109 @@ test.describe("export integrity", () => {
     await view.close();
   });
 });
+
+/**
+ * The adversarial review's cases for search redaction, kept: every way the
+ * match box was found to fall short of the ink (stretched, spaced, rotated,
+ * case-folded to a different length, right-to-left, or on a page whose fonts
+ * hadn't been read yet). Each target is the only red on its page, so the
+ * assertion is just "no red survives the export" — no geometry to argue with.
+ */
+test("Redact all leaves no trace of the match however the text is set", async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  const file = (await fixtures()).searchHostile;
+  const nonLatin = existsSync(SEARCH_HOSTILE_FONT);
+  // Pages carrying a target: five Latin cases, two non-Latin if the font was
+  // there, then the far page after the fillers.
+  const targets = [0, 1, 2, 3, 4, ...(nonLatin ? [5, 6] : [])];
+  targets.push(targets.length + SEARCH_HOSTILE.fillerPages);
+  if (!nonLatin) test.info().annotations.push({ type: "note", description: "DejaVu not installed: Turkish and Hebrew cases skipped" });
+
+  await open(page, file);
+  await page.click('[aria-label="More actions"]');
+  await page.locator('[role="menuitemcheckbox"]', { hasText: "Lossless redacted pages" }).click();
+  await page.keyboard.press("Escape");
+  // The fixture is honest: there is red to remove (the first page is in view).
+  expect(await redPixels(page, 0), "the target is drawn in red").toBeGreaterThan(50);
+
+  let found = 0;
+  for (const q of [SEARCH_HOSTILE.query, ...(nonLatin ? [SEARCH_HOSTILE.hebrewQuery] : [])]) {
+    await page.keyboard.press("Control+f");
+    await page.locator(".findbar input").fill(q);
+    await page.waitForTimeout(500);
+    found += Number((await page.locator(".findbar__count").textContent())?.match(/\/(\d+)/)?.[1] ?? 0);
+    await page.locator(".findbar button", { hasText: "Redact all" }).click();
+    await page.waitForTimeout(200);
+  }
+  // Overlays mount only near the viewport, so count matches, not boxes.
+  expect(found, "every case is found").toBe(targets.length);
+
+  const bytes = await downloadFrom(page, ".appbar__download");
+  const out = join(mkdtempSync(join(tmpdir(), "search-hostile-")), "out.pdf");
+  writeFileSync(out, bytes);
+  const view = await browser.newPage();
+  await open(view, out);
+  for (const n of targets) {
+    expect(await redPixels(view, n), `page ${n + 1}: no red left after export`).toBe(0);
+  }
+  await view.close();
+});
+
+/**
+ * The first adversarial review's worst find: on a page tree pdf.js and pdf-lib
+ * walk differently, export redacted the *wrong* page and shipped the one the
+ * user had redacted, text intact. The exporter now lines pdf-lib's pages up
+ * with the ones pdf.js showed before touching anything.
+ */
+test("a damaged page list still redacts the page the user saw", async ({ page }) => {
+  await open(page, (await fixtures()).damagedTree);
+  await expect(page.locator(".page")).toHaveCount(3);
+  await page.keyboard.press("Control+f");
+  await page.locator(".findbar input").fill("SECRET");
+  await page.waitForTimeout(500);
+  await page.locator(".findbar button", { hasText: "Redact all" }).click();
+  const bytes = await downloadFrom(page, ".appbar__download");
+
+  expect((await pageTexts(bytes, [1, 2, 3])).map((t) => t.trim()), "page 2, and only page 2, is rasterised").toEqual(["P1", "", "P3"]);
+  const doc = await PDFDocument.load(bytes, { updateMetadata: false });
+  expect(doc.getPageCount(), "the pages the user saw, no more").toBe(3);
+  const text = allText(doc);
+  expect(text, "the redacted text is gone").not.toContain("SECRET");
+  expect(text, "the page the viewer never showed isn't shipped").not.toContain("UNSEEN");
+});
+
+/**
+ * A kept page that shares its resource list with a redacted one must not carry
+ * the redacted page's drawings along by name — and must still draw its own.
+ */
+test("a redacted page's drawings don't ride out on a page that shares its resources", async ({ page }) => {
+  await open(page, (await fixtures()).sharedResources);
+  await page.keyboard.press("Control+f");
+  await page.locator(".findbar input").fill("SECRET");
+  await page.waitForTimeout(500);
+  await page.locator(".findbar button", { hasText: "Redact all" }).click();
+  const bytes = await downloadFrom(page, ".appbar__download");
+
+  expect((await pageTexts(bytes, [1, 2])).map((t) => t.trim())).toEqual(["", "FORM_KEPT"]);
+  expect(allText(await PDFDocument.load(bytes, { updateMetadata: false })), "the redacted page's form is gone").not.toContain("SECRET");
+});
+
+/** Strongly red pixels on page `n`'s canvas, once it has scrolled in and painted. */
+async function redPixels(page: Page, n: number): Promise<number> {
+  await page.evaluate((n) => document.querySelectorAll(".page")[n].scrollIntoView(), n);
+  await page.waitForFunction((n) => {
+    const c = document.querySelectorAll(".page")[n]?.querySelector("canvas");
+    return !!c && c.width > 1;
+  }, n);
+  await page.waitForTimeout(600);
+  return page.evaluate((n) => {
+    const c = document.querySelectorAll(".page")[n].querySelector("canvas")!;
+    const d = c.getContext("2d")!.getImageData(0, 0, c.width, c.height).data;
+    let red = 0;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 150 && d[i + 1] < 110 && d[i + 2] < 110) red++;
+    return red;
+  }, n);
+}
 
 /**
  * Everything a document carries at catalog level, through an export.

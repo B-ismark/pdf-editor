@@ -1,4 +1,4 @@
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFString, PDFHexString } from "pdf-lib";
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFStream, PDFString, PDFHexString } from "pdf-lib";
 import { isSafeExistingUri } from "./url";
 
 /**
@@ -51,8 +51,27 @@ const CATALOG_KEEP = new Set([
 const NAMES_KEEP = new Set(["Dests"]);
 
 /** Page entries that are hidden data rather than the page: a producer's private
- * dictionary and the page's own XMP packet. */
-const PAGE_DROP = ["AA", "PieceInfo", "Metadata"];
+ * dictionary, the page's own XMP packet and modification time, its associated
+ * files (`/AF` — embedded files by another name), and article beads (`/B`, whose
+ * thread carries its own info dictionary). */
+const PAGE_DROP = ["AA", "PieceInfo", "Metadata", "LastModified", "AF", "B"];
+
+/** Same idea for image and form XObjects, which carry their own copies. */
+const XOBJECT_DROP = ["PieceInfo", "Metadata", "LastModified", "AF"];
+
+/** Annotations that *are* a payload or a player rather than a mark on the page:
+ * an attached file, embedded media, 3D (whose stream can carry JavaScript). */
+const ANNOT_DROP = new Set(["/FileAttachment", "/RichMedia", "/3D", "/Movie", "/Sound", "/Screen"]);
+
+/** `/Named` actions that only move around the document. Viewers also accept
+ * menu items here (Print, SaveAs, …), which is not something a link should do. */
+const SAFE_NAMED = new Set(["/NextPage", "/PrevPage", "/FirstPage", "/LastPage"]);
+
+/** What a form may carry: its fields and the defaults for drawing them. `/DR`
+ * is cut down to fonts and encodings, since an XObject parked in it is reachable
+ * from the catalog without being on any page. */
+const ACROFORM_KEEP = new Set(["Fields", "DR", "DA", "Q", "NeedAppearances", "SigFlags", "CO"]);
+const DR_KEEP = new Set(["Font", "Encoding"]);
 
 /**
  * Strip identifying and potentially-active hidden data from a document before
@@ -115,7 +134,16 @@ export function sanitizeDocument(doc: PDFDocument): void {
   try {
     const acro = deref(catalog.get(PDFName.of("AcroForm")));
     if (acro instanceof PDFDict) {
-      acro.delete(PDFName.of("XFA"));
+      // XFA (active content) goes with everything else not on the list.
+      for (const key of acro.keys()) {
+        if (!ACROFORM_KEEP.has(key.decodeText())) acro.delete(key);
+      }
+      const dr = deref(acro.get(PDFName.of("DR")));
+      if (dr instanceof PDFDict) {
+        const kept = ctx.obj({});
+        for (const [key, value] of dr.entries()) if (DR_KEEP.has(key.decodeText())) kept.set(key, value);
+        acro.set(PDFName.of("DR"), kept);
+      }
       // Field-level actions: format/keystroke/calculate scripts live in /AA on
       // the *field*, which for a non-terminal field is not an annotation and so
       // not reached by step 4.
@@ -171,7 +199,7 @@ export function sanitizeDocument(doc: PDFDocument): void {
       annots = undefined;
     }
     if (!(annots instanceof PDFArray)) continue;
-    for (let i = 0; i < annots.size(); i++) {
+    for (let i = annots.size() - 1; i >= 0; i--) {
       let annot: unknown;
       try {
         annot = ctx.lookup(annots.get(i));
@@ -179,8 +207,20 @@ export function sanitizeDocument(doc: PDFDocument): void {
         continue;
       }
       if (!(annot instanceof PDFDict)) continue;
+      if (ANNOT_DROP.has(String(annot.get(PDFName.of("Subtype"))))) {
+        annots.remove(i);
+        continue;
+      }
       scrubActions(annot, deref);
     }
+  }
+
+  // 5) Private data riding on images and forms.
+  for (const [, obj] of ctx.enumerateIndirectObjects()) {
+    if (!(obj instanceof PDFStream)) continue;
+    const subtype = String(obj.dict.get(PDFName.of("Subtype")));
+    if (subtype !== "/Image" && subtype !== "/Form") continue;
+    for (const key of XOBJECT_DROP) obj.dict.delete(PDFName.of(key));
   }
 }
 
@@ -219,6 +259,17 @@ function isSafeAction(
 
   const s = action.get(PDFName.of("S"));
   if (!(s instanceof PDFName) || !ALLOWED_ACTIONS.has(s.toString())) return false;
+
+  if (s.toString() === "/Named") {
+    const n = action.get(PDFName.of("N"));
+    if (!(n instanceof PDFName) || !SAFE_NAMED.has(n.toString())) return false;
+  }
+  // A /GoTo's structure destination (/SD) points into the tagged-PDF tree,
+  // which would keep the whole tree — and its /ActualText for every page —
+  // reachable after the exporter dropped it. /D is the destination that
+  // matters; /SD only refines it. (A side effect in a predicate, but the
+  // alternative is a second walk of the same /Next chain.)
+  if (s.toString() === "/GoTo") action.delete(PDFName.of("SD"));
 
   // A kept /URI must also point somewhere harmless.
   if (s.toString() === "/URI") {

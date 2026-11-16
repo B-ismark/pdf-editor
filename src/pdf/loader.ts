@@ -59,6 +59,7 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
         width: item.width,
         height: item.height,
         fontFamily: style?.fontFamily ?? "sans-serif",
+        ...(item.dir === "rtl" ? { rtl: true } : {}),
       });
     });
 
@@ -94,6 +95,7 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
       rotation: ((page.rotate % 360) + 360) % 360,
       fragments,
       fields,
+      ref: page.ref ? { num: page.ref.num, gen: page.ref.gen } : null,
     });
   }
 
