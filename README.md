@@ -55,6 +55,12 @@ and is **mobile- and tablet-first**:
   merge in another PDF, or extract selected pages to a new file.
 - **Finishing touches** — add page numbers, stamp a diagonal watermark, or
   export every page as a PNG image.
+- **Several PDFs at once** — open more files (pick several, drop them on the
+  page, <kbd>Ctrl/⌘</kbd>+<kbd>O</kbd>, or the **+** on the tab strip) and each
+  gets its own tab with its own edits and undo history. Switching never costs a
+  document its changes; a dot marks the tabs with unsaved work, closing one asks
+  first, Organise can pull pages in from another open tab, and **Download all**
+  (⋯ menu) bundles every tab into one ZIP.
 - **Undo / redo** — full history with <kbd>Ctrl/⌘</kbd>+<kbd>Z</kbd> and
   <kbd>Ctrl/⌘</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> (continuous gestures like
   dragging, resizing, and typing collapse into single steps).
@@ -157,7 +163,7 @@ Two things are stored locally, both under your control:
 
 - **Preferences** (`localStorage`) — theme, last text style, draw tool, saved
   signatures.
-- **A session copy** (IndexedDB) — the open PDF and your edits, so a crash or an
+- **A session copy** (IndexedDB) — each open PDF that has edits, and those edits (unedited tabs are never stored), so a crash or an
   accidental reload doesn't lose your work. Because that's a real copy of your
   document on the device, the overflow menu has a **Save session on this device**
   toggle; switching it off deletes what's already stored. The restore prompt also

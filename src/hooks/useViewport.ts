@@ -110,6 +110,44 @@ export function useViewport() {
   const zoomOut = useCallback(() => zoomBy(1 / 1.25), [zoomBy]);
   const resetZoom = useCallback(() => setZoom(1), []);
 
+  /** Where a document was left — its zoom, and how far down it was scrolled as
+   * a fraction of the scroll extent. A fraction, not pixels, because the fit
+   * scale can be different by the time the document comes back (a resize while
+   * another tab was on screen), and "a third of the way through" survives that
+   * where "1840px" does not. */
+  const captureView = useCallback(() => {
+    const node = elRef.current;
+    return {
+      zoom,
+      ry: node && node.scrollHeight ? node.scrollTop / node.scrollHeight : 0,
+    };
+  }, [zoom]);
+
+  // A restored position is re-applied for a few frames rather than once: the
+  // incoming document lays out, then its fit-width is measured, then (perhaps)
+  // its zoom changes — three commits, any of which moves the scroll extent.
+  const pendingView = useRef<{ ry: number; until: number } | null>(null);
+  const restoreView = useCallback((view: { zoom: number; ry: number }) => {
+    setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, view.zoom)));
+    pendingView.current = { ry: view.ry, until: performance.now() + 250 };
+  }, []);
+  useLayoutEffect(() => {
+    const p = pendingView.current;
+    const node = elRef.current;
+    if (!p || !node) return;
+    if (performance.now() > p.until) {
+      pendingView.current = null;
+      return;
+    }
+    node.scrollTop = p.ry * node.scrollHeight;
+    const settle = requestAnimationFrame(() => {
+      if (pendingView.current !== p) return;
+      node.scrollTop = p.ry * node.scrollHeight;
+      pendingView.current = null;
+    });
+    return () => cancelAnimationFrame(settle);
+  });
+
   // --- Pinch + double-tap (touch) and ctrl/⌘+wheel (desktop) ---
   const pointers = useRef(new Map<number, { x: number; y: number }>());
   const pinchStart = useRef<{ dist: number; zoom: number } | null>(null);
@@ -280,6 +318,8 @@ export function useViewport() {
     zoomIn,
     zoomOut,
     resetZoom,
+    captureView,
+    restoreView,
     handlers: {
       onPointerDown,
       onPointerMove,

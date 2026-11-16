@@ -100,7 +100,9 @@ test("no chrome geometry reaches the document", async ({ page }) => {
   });
 
   for (const [sel, shape] of Object.entries(shapes)) {
-    expect(shape, `${sel} keeps an honest corner`).toBe("round");
+    // Newer Chromium serialises the initial value as its superellipse
+    // equivalent: `round` *is* `superellipse(1)`, so both mean "untouched".
+    expect(["round", "superellipse(1)"], `${sel} keeps an honest corner`).toContain(shape);
   }
   expectClean(w);
 });
