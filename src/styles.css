@@ -976,7 +976,7 @@ body {
   animation: panel-in var(--dur-med2) var(--ease-emphasized-decelerate);
 }
 /* Focus moving up through a long panel stops below the sticky heading. */
-.inspector { scroll-padding-top: 56px; }
+.inspector { scroll-padding-top: 72px; }
 .inspector .props { padding-top: 0; }
 .inspector .props::before { display: none; }
 /* The heading carries "Hide panel", so it stays put while a long panel scrolls. */

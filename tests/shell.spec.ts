@@ -1,4 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import { fixtures } from "./fixtures";
 import { open, watch, expectClean, pickTool, dragOnPage } from "./helpers";
 
@@ -198,6 +202,9 @@ test.describe("inspector", () => {
 
     await panel.getByRole("button", { name: "Remove page numbers" }).click();
     await expect(layer("Page numbers")).toContainText("Off");
+    // The button that had focus is gone; focus lands on the one replacing it,
+    // not on the page body.
+    await expect(panel.getByRole("button", { name: "Add page numbers" })).toBeFocused();
     await page.keyboard.press("Control+z");
     await expect(layer("Page numbers")).toContainText("Bottom centre");
 
@@ -216,14 +223,27 @@ test.describe("inspector", () => {
     await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toBeVisible();
   });
 
-  test("lossless is a document setting on a desktop, and a ⋯ item only on a phone", async ({ browser }) => {
+  test("lossless is an app setting: one switch, in the ⋯ menu on every screen and mirrored in the Inspector", async ({ browser }) => {
     const desk = await browser.newPage({ viewport: { width: 1280, height: 860 } });
     await open(desk, (await fixtures()).sample);
     const box = desk.getByRole("checkbox", { name: /Lossless redacted pages/ });
     await expect(box).not.toBeChecked();
+    // Says what it is: a device-wide setting, not this file's.
+    await expect(box).toHaveAccessibleDescription(/every document you export on this device/);
+    await expect(desk.locator("#docpanel-device")).toContainText("this device");
     await box.check();
+    // Reachable on a desktop from the ⋯ menu too (the Inspector can be hidden),
+    // and it is the same switch.
     await desk.getByRole("button", { name: "More actions" }).click();
-    await expect(desk.getByRole("menuitemcheckbox", { name: /Lossless/ })).toHaveCount(0);
+    const item = desk.getByRole("menuitemcheckbox", { name: /Lossless/ });
+    await expect(item).toHaveAttribute("aria-checked", "true");
+    await item.click();
+    await expect(box).not.toBeChecked();
+    // And from the command palette.
+    await desk.keyboard.press("Control+k");
+    await desk.keyboard.type("lossless");
+    await desk.getByRole("option", { name: /Turn on lossless redacted pages/ }).click();
+    await expect(box).toBeChecked();
     await desk.close();
 
     const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true });
@@ -232,6 +252,108 @@ test.describe("inspector", () => {
     await phone.getByRole("button", { name: "More actions" }).click();
     await expect(phone.getByRole("menuitemcheckbox", { name: /Lossless/ })).toHaveCount(1);
     await ctx.close();
+  });
+
+  test("pages that differ only in orientation are one size, and a one-page file reads in the singular", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    doc.addPage([595.28, 841.89]).drawText("Portrait page", { x: 72, y: 700, size: 14, font });
+    doc.addPage([841.89, 595.28]).drawText("Landscape page", { x: 72, y: 500, size: 14, font });
+    const dir = mkdtempSync(join(tmpdir(), "inspector-"));
+    const turned = join(dir, "turned.pdf");
+    writeFileSync(turned, await doc.save());
+    await open(page, turned);
+    const panel = page.locator("aside.inspector");
+    const fact = (name: string) => panel.locator(".docpanel__fact", { has: page.locator(`dt:text-is("${name}")`) }).locator("dd");
+    await expect(fact("Page size")).toHaveText("A4, portrait and landscape · 210 × 297 mm");
+
+    await page.setInputFiles('input[accept="application/pdf,.pdf"]', (await fixtures()).typeset);
+    await expect(fact("Pages")).toHaveText("1");
+    await expect(fact("Text")).toHaveText("Searchable");
+  });
+
+  test("the Document heading is a heading, and the file name has a tooltip rather than a native title", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    const panel = page.locator("aside.inspector");
+    await expect(panel.getByRole("heading", { level: 2, name: "Document" })).toBeVisible();
+    const file = panel.locator(".docpanel__file");
+    await expect(file).toHaveAttribute("data-tip", "sample.pdf");
+    await expect(file).not.toHaveAttribute("title", /./);
+    // The privacy note lines up with every other row.
+    const [note, facts] = await Promise.all([
+      panel.locator(".docpanel__note").boundingBox(),
+      panel.locator(".docpanel__facts").boundingBox(),
+    ]);
+    expect(Math.abs(note!.x - facts!.x)).toBeLessThan(1);
+    expect(Math.abs(note!.width - facts!.width)).toBeLessThan(1);
+  });
+
+  test("focus moving up a long panel stops below the sticky heading", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 500 });
+    await open(page, (await fixtures()).sample);
+    await pickTool(page, "Add text");
+    const box = (await page.locator(".page").first().boundingBox())!;
+    await page.mouse.click(box.x + 150, box.y + 200);
+    await expect(page.locator(".props__title")).toHaveText("Text box");
+    const inspector = page.locator("aside.inspector");
+    const controls = inspector.locator("button:visible, input:visible, select:visible");
+    // Start at the bottom, then walk focus up through every control.
+    await controls.last().focus();
+    const n = await controls.count();
+    for (let i = 0; i < n - 1; i++) {
+      await page.keyboard.press("Shift+Tab");
+      const inside = await inspector.evaluate((el) => el.contains(document.activeElement));
+      if (!inside) break;
+      const [header, focused] = await Promise.all([
+        inspector.locator(".props__header").boundingBox(),
+        page.evaluate(() => {
+          const r = document.activeElement!.getBoundingClientRect();
+          return { top: r.top, sticky: !!document.activeElement!.closest(".props__header") };
+        }),
+      ]);
+      if (focused.sticky) continue;
+      expect(focused.top).toBeGreaterThanOrEqual(header!.y + header!.height - 0.5);
+    }
+  });
+
+  test("OCR reads only pages without text, and stops being offered once it has", async ({ page }) => {
+    test.slow();
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await page.goto("/");
+    const ready = await page.evaluate(async () => {
+      try {
+        const res = await fetch("./tessdata/eng.traineddata.gz", { method: "HEAD" });
+        return res.ok && !(res.headers.get("content-type") ?? "").includes("text/html");
+      } catch {
+        return false;
+      }
+    });
+    test.skip(!ready, "OCR assets not installed (npm run setup-ocr)");
+    const f = await fixtures();
+    // A scan, then a page that already has its own text.
+    const out = await PDFDocument.create();
+    const scan = await PDFDocument.load(readFileSync(f.scanned));
+    const text = await PDFDocument.load(readFileSync(f.typeset));
+    out.addPage((await out.copyPages(scan, [0]))[0]);
+    out.addPage((await out.copyPages(text, [0]))[0]);
+    const mixed = join(mkdtempSync(join(tmpdir(), "inspector-")), "mixed.pdf");
+    writeFileSync(mixed, await out.save());
+    await open(page, mixed);
+    const panel = page.locator("aside.inspector");
+    const textPage = page.locator(".page").nth(1);
+    await textPage.scrollIntoViewIfNeeded();
+    const before = await textPage.locator(".fragment").count();
+    expect(before).toBeGreaterThan(0);
+
+    await panel.getByRole("button", { name: "Recognise text (OCR)" }).click();
+    await expect(page.locator(".snackbar__msg")).toContainText(/OCR added \d+ words/, { timeout: 180_000 });
+    // Page 2 keeps its own text and gains no second, recognised copy of it.
+    await expect(textPage.locator(".fragment")).toHaveCount(before);
+    await expect(textPage.locator('.fragment[data-id^="ocr:"]')).toHaveCount(0);
+    // Nothing left to read: the offer goes.
+    await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toHaveCount(0);
   });
 
   test("clicking an image says what it is", async ({ page }) => {
