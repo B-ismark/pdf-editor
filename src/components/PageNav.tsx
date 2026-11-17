@@ -58,7 +58,12 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
   const [picked, setPicked] = useState<Set<number>>(() => new Set());
   const anchor = useRef<number | null>(null);
   const [focusKey, setFocusKey] = useState<number | null>(null);
-  const wantFocus = useRef(false);
+  // Bumped to put keyboard focus back on the roving row after this render. A
+  // counter, not a flag: a flag set by a key that changed nothing would linger
+  // and steal focus on some later, unrelated render.
+  const [refocusTick, setRefocusTick] = useState(0);
+  const refocus = () => setRefocusTick((t) => t + 1);
+  const navRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
   const posOf = useMemo(() => new Map(pages.map((p, i) => [p.index, i])), [pages]);
@@ -73,13 +78,36 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
 
   const rovingKey = focusKey != null && posOf.has(focusKey) ? focusKey : pages[active]?.index ?? pages[0]?.index;
 
+  // A page an undo or redo takes out of the document is let go of for good:
+  // it mustn't come back already picked when a later undo restores it.
+  useEffect(() => {
+    setPicked((s) => {
+      const kept = [...s].filter((k) => posOf.has(k));
+      return kept.length === s.size ? s : new Set(kept);
+    });
+  }, [posOf]);
+
   // Keep keyboard focus on the page it was on across a re-order or delete: the
   // row moves (or goes) under it.
   useLayoutEffect(() => {
-    if (!wantFocus.current) return;
-    wantFocus.current = false;
+    if (refocusTick === 0) return;
     listRef.current?.querySelector<HTMLElement>(`[data-page-key="${rovingKey}"]`)?.focus();
-  });
+    // Only the tick: rovingKey is read as of the render the tick came with.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refocusTick]);
+
+  // Working on the document hands the keyboard back to it. Canvas objects take
+  // their pointer presses without moving focus, so a row would otherwise keep
+  // it, and Delete meant for a selected box would delete a page instead.
+  useEffect(() => {
+    const leave = (e: PointerEvent) => {
+      const nav = navRef.current;
+      const at = document.activeElement;
+      if (nav && at instanceof HTMLElement && nav.contains(at) && !nav.contains(e.target as Node)) at.blur();
+    };
+    window.addEventListener("pointerdown", leave, true);
+    return () => window.removeEventListener("pointerdown", leave, true);
+  }, []);
 
   const jump = (pos: number) => {
     scrollToPage(pos);
@@ -101,8 +129,10 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
     if (keys.size === 0) return;
     onArrange(turnPages(pages, keys), `Turned ${pageWord(keys)}.`);
   };
-  const remove = (keys = targets()) => {
-    if (keys.size === 0 || keys.size >= pageCount) return;
+  /** Deletes only what was picked, never just the row that has focus: a
+   * stray Backspace must not cost a page. Returns whether anything went. */
+  const remove = (keys = new Set(selected)): boolean => {
+    if (keys.size === 0 || keys.size >= pageCount) return false;
     const first = Math.min(...[...keys].map((k) => posOf.get(k) ?? 0));
     const next = dropPages(pages, keys);
     const note = `Deleted ${pageWord(keys)}.`;
@@ -112,13 +142,19 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
     const land = next[Math.min(first, next.length - 1)];
     setFocusKey(land?.index ?? null);
     onArrange(next, note);
+    return true;
   };
-  const move = (keys: Set<number>, gap: number) => {
+  const move = (keys: Set<number>, gap: number): boolean => {
     const next = movePages(pages, keys, gap);
-    if (next.every((p, i) => p.index === pages[i].index)) return;
+    if (next.every((p, i) => p.index === pages[i].index)) return false;
     const to = Math.min(...[...keys].map((k) => next.findIndex((p) => p.index === k))) + 1;
     onArrange(next, `Moved ${pageWord(keys)} to position ${to}.`);
+    return true;
   };
+  // A press outlives the render it started in: what it acts on when it ends
+  // has to be read then, not from the closure it was made in.
+  const live = useRef({ move, selected });
+  live.current = { move, selected };
 
   // ---- pointer: click to pick, drag to move, hold first on touch ----
   const [drag, setDragState] = useState<{ keys: Set<number>; gap: number | null } | null>(null);
@@ -138,6 +174,7 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
     armed: boolean;
     dragging: boolean;
     timer: number;
+    cancel: () => void;
   } | null>(null);
   // The click the browser sends after a drag or a hold, on the page it
   // started on. It can come well after the pointer is up (a touch waits to
@@ -157,7 +194,15 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
     return () => list.removeEventListener("touchmove", stop);
   }, []);
 
-  const gapAt = (clientY: number): number => {
+  // The page plan changing under a drag (an undo, a redo) calls the drag off:
+  // its gap was measured against rows that have since moved.
+  useEffect(() => () => press.current?.cancel(), [pages]);
+
+  /** The gap the pointer is over, or null when it is off the list: letting go
+   * there puts the pages back where they were. */
+  const gapAt = (clientX: number, clientY: number): number | null => {
+    const box = listRef.current?.getBoundingClientRect();
+    if (!box || clientX < box.left || clientX > box.right) return null;
     const rows = Array.from(listRef.current?.querySelectorAll<HTMLElement>("[data-page-key]") ?? []);
     for (let i = 0; i < rows.length; i++) {
       const r = rows[i].getBoundingClientRect();
@@ -178,6 +223,7 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
       armed: !touch,
       dragging: false,
       timer: 0,
+      cancel: () => end(false),
     };
     if (touch) {
       p.timer = window.setTimeout(() => {
@@ -191,11 +237,19 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
+      window.removeEventListener("keydown", onKey, true);
       window.clearTimeout(p.timer);
-      press.current = null;
+      if (press.current === p) press.current = null;
       const d = dragRef.current;
       setDrag(null);
-      if (commit && d && d.gap != null) move(d.keys, d.gap);
+      if (commit && d && d.gap != null) live.current.move(d.keys, d.gap);
+    };
+    // Escape puts a dragged page back; nothing else hears it.
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key !== "Escape" || !p.dragging) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      end(false);
     };
     const onMove = (ev: PointerEvent) => {
       if (ev.pointerId !== p.id) return;
@@ -208,7 +262,8 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
           return;
         }
         p.dragging = true;
-        const keys = selected.has(p.key) ? new Set(selected) : new Set([p.key]);
+        const sel = live.current.selected;
+        const keys = sel.has(p.key) ? new Set(sel) : new Set([p.key]);
         setDrag({ keys, gap: null });
       }
       const list = listRef.current;
@@ -217,7 +272,7 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
         if (ev.clientY < r.top + 32) list.scrollTop -= 12;
         else if (ev.clientY > r.bottom - 32) list.scrollTop += 12;
       }
-      const gap = gapAt(ev.clientY);
+      const gap = gapAt(ev.clientX, ev.clientY);
       const d = dragRef.current;
       if (d && d.gap !== gap) setDrag({ ...d, gap });
     };
@@ -241,6 +296,7 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
+    window.addEventListener("keydown", onKey, true);
   };
 
   const onClick = (e: ReactMouseEvent, key: number, pos: number) => {
@@ -289,7 +345,7 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
         if (!compact) pick([key]);
       }
       setFocusKey(key);
-      wantFocus.current = true;
+      refocus();
       jump(t);
     };
     if (e.altKey && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
@@ -299,9 +355,9 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
       const at = [...keys].map((k) => posOf.get(k) ?? 0);
       const gap = e.key === "ArrowUp" ? Math.min(...at) - 1 : Math.max(...at) + 2;
       if (gap < 0 || gap > pageCount) return;
+      if (!move(keys, gap)) return;
       if (n === 0 && rovingKey != null) pick([rovingKey]);
-      wantFocus.current = true;
-      move(keys, gap);
+      refocus();
       return;
     }
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
@@ -312,8 +368,7 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
       go(e.key === "Home" ? 0 : pageCount - 1);
     } else if (e.key === "Delete" || e.key === "Backspace") {
       handled();
-      wantFocus.current = true;
-      remove();
+      if (remove()) refocus();
     } else if (mod && e.key.toLowerCase() === "a") {
       handled();
       pick(pages.map((p) => p.index));
@@ -333,9 +388,15 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
       pick([]);
     }
   };
+  /** The bar goes with the selection, and the focused button with it: send
+   * focus back to the page the keyboard was on. */
+  const fromBar = (e: ReactMouseEvent, act: () => boolean) => {
+    const hadFocus = e.currentTarget === document.activeElement;
+    if (act() && hadFocus) refocus();
+  };
 
   return (
-    <nav id="page-rail" className="pagenav" aria-label="Pages">
+    <nav ref={navRef} id="page-rail" className="pagenav" aria-label="Pages">
       <div className="pagenav__head">
         <span className="pagenav__title title-small">Pages</span>
         <span className="pagenav__count label-medium">{pageCount}</span>
@@ -409,27 +470,36 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
           );
         })}
       </div>
+      {/* Mounted before there is anything to say, so the first count is read. */}
+      <span className="sr-only" aria-live="polite">
+        {n > 0 ? `${plural(n, "page")} selected` : ""}
+      </span>
       {n > 0 && (
         <div className="pagenav__bar" role="toolbar" aria-label="Selected pages">
           {/* The rail is narrow: a tick and the number, read out in full. */}
-          <span className="pagenav__picked label-large" aria-live="polite">
+          <span className="pagenav__picked label-large" aria-hidden="true">
             <Icon name="check" size={16} />
-            <span aria-hidden="true">{n}</span>
-            <span className="sr-only">{plural(n, "page")} selected</span>
+            {n}
           </span>
           <button className="icon-btn icon-btn--sm" onClick={() => turn()} aria-label="Rotate selected pages" data-tip="Rotate">
             <Icon name="rotate" size={18} />
           </button>
           <button
             className="icon-btn icon-btn--sm"
-            onClick={() => remove()}
+            onClick={(e) => fromBar(e, remove)}
             disabled={all}
             aria-label="Delete selected pages"
             data-tip={all ? "A document keeps at least one page" : "Delete"}
           >
             <Icon name="delete" size={18} />
           </button>
-          <button className="icon-btn icon-btn--sm" onClick={() => pick([])} aria-label="Clear page selection" data-tip="Clear selection">
+          <button className="icon-btn icon-btn--sm" onClick={(e) =>
+              fromBar(e, () => {
+                pick([]);
+                return true;
+              })
+            }
+            aria-label="Clear page selection" data-tip="Clear selection">
             <Icon name="close" size={18} />
           </button>
         </div>

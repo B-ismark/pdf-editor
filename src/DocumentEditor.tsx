@@ -5,6 +5,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -590,7 +591,22 @@ export const DocumentEditor = memo(function DocumentEditor({
     }
     return m;
   }, [matches]);
-  const activeMatch = matches[findActive] ?? null;
+  // The active match is a hit, not a slot in the list: when the list is rebuilt
+  // under it (a page moved, turned or deleted in the sidebar) it stays on the
+  // same hit wherever that now sorts, and only falls back to the slot when the
+  // hit itself has gone.
+  const findSeen = useRef<{ matches: FindMatch[]; id: string | null }>({ matches, id: null });
+  const activeIndex = useMemo(() => {
+    const seen = findSeen.current;
+    if (seen.matches === matches || seen.id == null) return findActive;
+    const i = matches.findIndex((m) => m.id === seen.id);
+    return i >= 0 ? i : findActive;
+  }, [matches, findActive]);
+  const activeMatch = matches[activeIndex] ?? null;
+  useLayoutEffect(() => {
+    findSeen.current = { matches, id: activeMatch?.id ?? null };
+    if (activeIndex !== findActive) setFindActive(activeIndex);
+  }, [matches, activeMatch, activeIndex, findActive]);
 
   // Keep the active index in range as the result set changes.
   useEffect(() => {
@@ -610,8 +626,16 @@ export const DocumentEditor = memo(function DocumentEditor({
   // highlight element, because the overlay for a far-off page isn't mounted
   // (rendering is windowed) — but the page *frame* always is, since layout stays
   // eager, so its rect is reliable.
+  // Only when the active match becomes a different hit: the list being rebuilt
+  // around the same one — a page turned or moved in the sidebar — mustn't throw
+  // the view back to it from wherever you are working.
+  const scrolledTo = useRef<string | null>(null);
   useEffect(() => {
-    if (!activeMatch || !pdf) return;
+    if (!activeMatch || !pdf) {
+      scrolledTo.current = null;
+      return;
+    }
+    if (activeMatch.id === scrolledTo.current) return;
     const scroller = document.querySelector<HTMLElement>(".viewer__scroll");
     const pageEl = document.querySelector<HTMLElement>(
       `[data-page-index="${activeMatch.pageIndex}"]`,
@@ -627,6 +651,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     const yInPage = Math.min(corners[0].y, corners[1].y) * vp.scale;
     const offsetFromScrollTop =
       pageEl.getBoundingClientRect().top - scroller.getBoundingClientRect().top + yInPage;
+    scrolledTo.current = activeMatch.id;
     scroller.scrollTo({
       top: scroller.scrollTop + offsetFromScrollTop - scroller.clientHeight / 3,
       behavior: "smooth",
@@ -2508,7 +2533,7 @@ export const DocumentEditor = memo(function DocumentEditor({
             <FindBar
               query={findQuery}
               count={matches.length}
-              active={matches.length ? findActive + 1 : 0}
+              active={matches.length ? activeIndex + 1 : 0}
               onQuery={(q) => {
                 setFindQuery(q);
                 setFindActive(0);

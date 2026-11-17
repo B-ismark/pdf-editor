@@ -116,7 +116,12 @@ type-checking can't see, and each exists because it broke once:
   run; a document always keeps one page (Delete off with every page picked);
   Ctrl+A and Escape in the sidebar act on pages, not the canvas; keyboard focus
   stays on the page through a move or delete; on a phone a tap goes to the page
-  and a press-and-hold picks it;
+  and a press-and-hold picks it. From review: a click on the canvas hands the
+  keyboard back (Delete removes the selected box, not a page); a row with only
+  focus isn't deleted; Escape / letting go off the list cancel a drag, and an
+  undo mid-drag isn't redone by the drop; a blocked Delete doesn't steal focus
+  later; picks don't survive their page's removal; with Find open the view and
+  the active hit stay put through page work and text loading;
 - `saved.spec.ts` — a download is a save: it clears the counter, the tab's
   dot and the leave prompt, and turns the close prompt into a plain "Close";
   a download the browser didn't finish still can't lose the work (close asks,

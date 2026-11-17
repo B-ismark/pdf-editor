@@ -63,6 +63,22 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
   `pointerup`.
 - The grid view is Organise, opened from the sidebar header. Merge and Extract
   live there: they make a different file rather than change this one.
+- **Focus and keys.** Canvas objects take pointer presses without moving focus,
+  so the sidebar blurs its own focus on any `pointerdown` outside it; otherwise
+  Delete meant for a selected box would delete a picked page. Delete/Backspace
+  act only on *picked* pages, never on a row that merely has focus. Refocusing a
+  row after an action is a counter (`refocus()`), not a flag: a flag set by a
+  key that changed nothing lingered and stole focus on a later render.
+- **A drag reads the present, not the press.** The drop uses `live.current`
+  (this render's `move` and selection). A plan change mid-drag (Ctrl+Z) calls the
+  drag off; so do Escape and letting go off the list (`gapAt` returns null).
+- Picks are pruned when an undo/redo removes their page, so they don't come back
+  pre-selected. The "N pages selected" live region is always mounted, so the
+  first count is announced.
+- **Find**: the active match is held by hit id, not list slot, so a reorder
+  keeps it on the same hit; and the view scrolls only when the active hit
+  *changes*. Before, any rebuild of the match list (a sidebar action, or just
+  text arriving for newly rendered pages) threw the view back to it.
 
 ## Export
 
