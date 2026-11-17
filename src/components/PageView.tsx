@@ -557,7 +557,7 @@ function PageViewInner(props: Props) {
                 backdrop={colors?.fill}
                 // How far it may run before the next run on its line — only
                 // needed while it's drawn (a scan of the page's runs each).
-                room={modified || selected ? roomAfter(fragment, page.fragments) : null}
+                room={modified || selected ? roomAfter(fragment, page.fragments, edits) : null}
                 modified={modified}
                 selected={selected}
                 interactive={tool === "select"}

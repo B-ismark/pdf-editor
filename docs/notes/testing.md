@@ -100,7 +100,9 @@ type-checking can't see, and each exists because it broke once:
   edited run keeps to the room before the next run, less the word space, and is
   condensed when it needs more — on screen and in both export paths (vector,
   and raster under a redaction) — so it never covers the next word; a run with
-  a tab-stop gap or nothing after it still grows freely;
+  a tab-stop gap or nothing after it still grows freely; on a turned page the
+  preview condenses as the file does; a very long edit stops at the 0.7 floor;
+  an emptied neighbour frees its room; a raised footnote marker still bounds it;
 - `chrome.spec.ts` — the draw sub-toolbar opens with its tool, folds away when a
   sub-tool is picked and comes back from its handle; the colour popover stays on
   screen and covers neither the toolbar it lives in nor the tool dock, at three

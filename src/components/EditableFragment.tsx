@@ -145,7 +145,15 @@ function EditableFragmentImpl({
     const fit = () => {
       el.style.transform = "";
       if (!show) return;
-      const k = fitScale(el.getBoundingClientRect().width / scale, fragment.width, room);
+      // On a turned page the overlay is rotated, and the bounding rect is the
+      // rotated box: at 90°/270° its width is the line's *height*, which read
+      // as a short run and skipped the condensing the file gets. The text's
+      // own width is whichever side of that box matches its (whole-pixel)
+      // layout width — the rect only supplies the sub-pixel precision.
+      const r = el.getBoundingClientRect();
+      const ow = el.offsetWidth;
+      const w = Math.abs(r.height - ow) < Math.abs(r.width - ow) ? r.height : r.width;
+      const k = fitScale(w / scale, fragment.width, room);
       if (k < 1) el.style.transform = `scaleX(${k})`;
     };
     fit();

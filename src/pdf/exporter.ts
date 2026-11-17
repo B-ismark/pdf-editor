@@ -606,7 +606,7 @@ export async function exportPdf(
 
       const text = sanitize(edit!.text, font);
       // Kept to the room before the next run on its line — see lineFit.ts.
-      const k = fitScale(font.widthOfTextAtSize(text, style.size), fragment.width, roomAfter(fragment, pageData.fragments));
+      const k = fitScale(font.widthOfTextAtSize(text, style.size), fragment.width, roomAfter(fragment, pageData.fragments, edits));
       const textWidth = font.widthOfTextAtSize(text, style.size) * k;
       // Cover the original glyphs (and the new text if it's longer), then redraw.
       page.drawRectangle({
@@ -810,7 +810,7 @@ async function rasterisePage(
     const k = fitScale(
       Math.max(...lines.map((line) => ctx.measureText(line).width / S)),
       fragment.width,
-      roomAfter(fragment, pageData.fragments),
+      roomAfter(fragment, pageData.fragments, edits),
     );
     const widest = Math.max(...lines.map((line) => ctx.measureText(line).width / S)) * k;
     // Extra lines step downward from the baseline, so the cover has to grow with

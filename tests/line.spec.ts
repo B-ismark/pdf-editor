@@ -19,6 +19,8 @@ import { dragOnPage, expectClean, open, pageTexts, pickTool, watch } from "./hel
  */
 
 const { size, baseline, runs, tab, page: PAGE } = SPLIT_LINE;
+/** The reported edit, "both" → "bothy", a letter longer: condensed, comfortably above the floor. */
+const EDIT = `${runs[1]}ys`;
 
 /** Where each run of the split line starts, and where the middle one ends. */
 async function geometry() {
@@ -69,7 +71,7 @@ test("an edited run stops short of the next run on its line, on screen", async (
 
   const next = page.locator(".fragment", { hasText: runs[2] }).first();
   const nextLeft = (await next.boundingBox())!.x;
-  const el = await retype(page, runs[1], `${runs[1]}y and a good deal more`);
+  const el = await retype(page, runs[1], EDIT);
   await page.waitForTimeout(200);
 
   // The rendered box — after any condensing — ends before the next run, and
@@ -121,7 +123,7 @@ for (const path of ["vector", "raster"] as const) {
     expect(letterBefore, "the fixture's next run has no ink where expected").toBeGreaterThan(5);
     expect(await inkIn(page, wordSpace)).toBe(0);
 
-    await retype(page, runs[1], `${runs[1]}y and a good deal more`);
+    await retype(page, runs[1], EDIT);
     if (path === "raster") {
       // A redaction anywhere on the page sends it down the raster path. On
       // bare paper at the top left, clear of every run.
@@ -151,3 +153,85 @@ for (const path of ["vector", "raster"] as const) {
     expectClean(w);
   });
 }
+
+/** The horizontal condensing an overlay is drawn at (1 when none). */
+const squeeze = (el: ReturnType<Page["locator"]>) =>
+  el.evaluate((n: HTMLElement) => {
+    const m = /scaleX\(([\d.]+)\)/.exec(n.style.transform);
+    return m ? Number(m[1]) : 1;
+  });
+
+test("a turned page condenses an edit on screen as the file does", async ({ page }) => {
+  // The overlay is rotated on a turned page, so the text's bounding rect is the
+  // rotated box: its width was the line's height, read as "fits", and the
+  // preview ran over the next run while the file was condensed.
+  const w = watch(page);
+  await open(page, (await fixtures()).splitLine);
+  const control = await squeeze(await retype(page, runs[1], EDIT));
+  expect(control).toBeLessThan(1);
+  // Afresh, then turned a quarter.
+  await open(page, (await fixtures()).splitLine);
+
+  await page.getByRole("button", { name: /Organise pages/ }).first().click();
+  const org = page.locator(".organize");
+  await org.locator(".pcard").nth(0).locator('[aria-label="Rotate"]').click();
+  await org.locator(".btn--filled").click();
+  await expect(org).toHaveCount(0);
+  await expect(page.locator(".page").first()).toHaveAttribute("data-turn", "90");
+
+  const el = await retype(page, runs[1], EDIT);
+  await page.waitForTimeout(200);
+  expect(await squeeze(el)).toBeCloseTo(control, 2);
+  expectClean(w);
+});
+
+test("a very long edit isn't squeezed past reading", async ({ page }) => {
+  const w = watch(page);
+  await open(page, (await fixtures()).splitLine);
+  const el = await retype(page, runs[1], "and a lot more text than fits on this line ".repeat(4).trim());
+  await page.waitForTimeout(200);
+  // Condensed as far as letters still read as letters (lineFit's MIN_FIT), no further.
+  expect(await squeeze(el)).toBeCloseTo(0.7, 3);
+  expectClean(w);
+});
+
+test("a neighbour the user emptied leaves its room to the edit", async ({ page }) => {
+  const w = watch(page);
+  await open(page, (await fixtures()).splitLine);
+  const id = await page.locator(".fragment", { hasText: runs[2] }).first().getAttribute("data-id");
+  const last = page.locator(`.fragment[data-id="${id}"]`);
+  await last.click();
+  await page.keyboard.press("ControlOrMeta+a");
+  await page.keyboard.press("Backspace");
+  await expect(last).toHaveText("");
+  await page.keyboard.press("Escape");
+  // Merging the two runs into the middle one: the third's place is free paper.
+  const el = await retype(page, runs[1], `${runs[1]} ${runs[2]}`);
+  await page.waitForTimeout(200);
+  expect(await squeeze(el)).toBe(1);
+  expectClean(w);
+});
+
+test("a raised footnote marker after the run still bounds the edit", async ({ page }) => {
+  const w = watch(page);
+  const doc = await PDFDocument.create();
+  const p = doc.addPage([640, 400]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const rw = font.widthOfTextAtSize("Revenue", 14);
+  p.drawText("Revenue", { x: 40, y: 300, size: 14, font });
+  p.drawText("1", { x: 40 + rw, y: 305, size: 8, font });
+  p.drawText("grew strongly", { x: 40 + rw + font.widthOfTextAtSize("1", 8) + 4, y: 300, size: 14, font });
+  const file = join(mkdtempSync(join(tmpdir(), "line-")), "footnote.pdf");
+  writeFileSync(file, await doc.save());
+  await open(page, file);
+
+  // The marker sits right against the word, so the edit has no room beyond
+  // the word's own end: it is condensed into it rather than drawn over the
+  // marker, which vanished under the edit's opaque cover.
+  const before = await page.locator(".fragment", { hasText: /^Revenue$/ }).first().evaluate((n) => n.getBoundingClientRect().right);
+  const el = await retype(page, "Revenue", "Revenues");
+  await page.waitForTimeout(200);
+  expect(await squeeze(el)).toBeLessThan(1);
+  expect(await el.evaluate((n) => n.getBoundingClientRect().right)).toBeLessThanOrEqual(before + 0.5);
+  expectClean(w);
+});

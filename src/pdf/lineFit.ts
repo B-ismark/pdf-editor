@@ -1,4 +1,4 @@
-import type { TextFragment } from "./types";
+import type { Edits, TextFragment } from "./types";
 
 /**
  * How an edited run fits on its line — shared by the overlay and both export
@@ -23,14 +23,24 @@ import type { TextFragment } from "./types";
 /** Is this run set horizontally (no rotation or skew)? */
 const upright = (t: number[]) => Math.abs(t[1]) < 1e-3 && Math.abs(t[2]) < 1e-3 && t[0] > 0 && t[3] > 0;
 
+/** The vertical band a run's glyphs occupy, in PDF units: descent to cap/ascent. */
+const band = (y: number, size: number) => [y - 0.25 * size, y + 0.8 * size] as const;
+
 /**
  * The room an edited run has on its line, in PDF units, measured from its own
- * x: up to the nearest run that starts after it on the same baseline, less the
+ * x: up to the nearest run that starts after it on the same line, less the
  * word space between them.
  * `null` when nothing follows it on the line (or it isn't set upright, where
  * "the next run along" has no simple meaning) — it can grow freely.
+ *
+ * `edits` (optional) lets a neighbour the user has emptied stop counting: its
+ * glyphs are gone, so the space it held is free paper.
  */
-export function roomAfter(fragment: TextFragment, fragments: readonly TextFragment[]): number | null {
+export function roomAfter(
+  fragment: TextFragment,
+  fragments: readonly TextFragment[],
+  edits?: Readonly<Edits>,
+): number | null {
   const t = fragment.transform;
   if (!upright(t)) return null;
   const x = t[4];
@@ -41,10 +51,19 @@ export function roomAfter(fragment: TextFragment, fragments: readonly TextFragme
     if (o === fragment || o.id === fragment.id) continue;
     const u = o.transform;
     if (!upright(u)) continue;
-    // Same line: baselines within a fraction of the smaller size, so a
-    // superscript or a run on the next line never counts.
-    const tol = 0.3 * Math.min(size, Math.abs(u[3]));
-    if (Math.abs(u[5] - y) > tol) continue;
+    // Emptied by the user: nothing is drawn there any more.
+    const e = edits?.[o.id];
+    if (e && e.text.trim() === "") continue;
+    // Same line: the two runs' glyph bands overlap by a fair share of the
+    // smaller one. A superscript or footnote marker ("Revenue¹") sits on its
+    // own raised baseline but inside this line's band, so it still bounds the
+    // edit — drawn over, it vanished under the opaque cover. A run on the line
+    // above or below shares little or none of the band, even at tight leading.
+    const ou = Math.abs(u[3]);
+    const [a0, a1] = band(y, size);
+    const [b0, b1] = band(u[5], ou);
+    const overlap = Math.min(a1, b1) - Math.max(a0, b0);
+    if (overlap < 0.5 * 1.05 * Math.min(size, ou)) continue;
     const gap = u[4] - x;
     // Starts after this run's own start (a run at the same x is an overprint,
     // not the next one along).
@@ -65,14 +84,23 @@ export function roomAfter(fragment: TextFragment, fragments: readonly TextFragme
 const WORD_SPACE = 0.3;
 
 /**
+ * The narrowest an edit is condensed to. Past it the letters stop reading as
+ * letters (a 170-character edit squeezed into a 13-character run drew at 9%:
+ * a smear, on screen and in the file), so a longer edit keeps this width and
+ * runs on past the next run instead — visibly, so the user can shorten it.
+ */
+export const MIN_FIT = 0.7;
+
+/**
  * The horizontal scale to draw `textWidth` of replacement at: 1 when it fits in
  * the run's own width or in the room before the next run, less when it would
- * run into it. Never above 1 — a short edit isn't stretched.
+ * run into it, never below `MIN_FIT`. Never above 1 — a short edit isn't
+ * stretched.
  */
 export function fitScale(textWidth: number, fragmentWidth: number, room: number | null): number {
   if (room === null || !(textWidth > 0)) return 1;
   // Runs can overlap a little (kerning across a split): the run's own width is
   // always available, since the original glyphs already occupied it.
   const avail = Math.max(room, fragmentWidth);
-  return textWidth > avail ? avail / textWidth : 1;
+  return textWidth > avail ? Math.max(MIN_FIT, avail / textWidth) : 1;
 }
