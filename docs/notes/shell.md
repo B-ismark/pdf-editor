@@ -59,9 +59,18 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   design tool does with nothing selected. A stamp still counts as a selection:
   it has no controls here, so the panel names it "Image" and says how it is
   edited on the canvas. Both views carry "Hide panel" in their heading, which is
-  sticky so it stays reachable in a long panel. "Lossless redacted pages" lives
-  in the Inspector on a desktop and in ⋯ → View only on a phone (no Inspector
-  there); one home per width, never two. The document actions also live in the
+  sticky so it stays reachable in a long panel. Every title is an `h2`, so
+  heading navigation finds the panel whatever it shows; a marquee of several
+  objects gets its own short panel ("2 objects selected"), not the document's.
+  "Lossless redacted pages" is an *app* setting (`pref.losslessRaster`, every
+  export on the device), so it lives with the other settings in the ⋯ menu at
+  every width and in the palette; the Inspector mirrors it under "Export setting ·
+  this device", labelled and described as such, because it changes what this
+  file exports. OCR from the panel reads only shown pages with no text of their
+  own (a second, recognised copy over real text doubles every word) and marks
+  each page it read (`PageData.ocrRead`), so the offer goes once nothing is left
+  — a page OCR *failed* on stays offered. The Text fact never says "scanned": a
+  blank or vector-only page has no text either. The document actions also live in the
   ⋯ menu — on a phone the panel is a selection-driven sheet and the palette
   needs a keyboard — read from `docActions` and `DOC_GROUPS`.
 - **Download is a split button; Export holds every output.** Actions that make

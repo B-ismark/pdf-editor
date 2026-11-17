@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { fixtures } from "./fixtures";
-import { open, watch, expectClean, pickTool, dragOnPage } from "./helpers";
+import { open, watch, expectClean, pickTool, pickSubTool, dragOnPage, openOrganise } from "./helpers";
 
 /**
  * The app shell — app bar, page rail, Inspector, overflow menu.
@@ -15,6 +15,31 @@ import { open, watch, expectClean, pickTool, dragOnPage } from "./helpers";
  * 14px wide, a menu whose last group was painted past the bottom of the window, a
  * panel that swapped its contents without saying so.
  */
+
+/** True when `npm run setup-ocr` has been run, so OCR can actually execute. */
+async function ocrReady(page: Page): Promise<boolean> {
+  await page.goto("/");
+  return page.evaluate(async () => {
+    try {
+      const res = await fetch("./tessdata/eng.traineddata.gz", { method: "HEAD" });
+      return res.ok && !(res.headers.get("content-type") ?? "").includes("text/html");
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** The first page of each file, in order, as one new PDF on disk. */
+async function merge(paths: string[]): Promise<string> {
+  const out = await PDFDocument.create();
+  for (const p of paths) {
+    const src = await PDFDocument.load(readFileSync(p));
+    out.addPage((await out.copyPages(src, [0]))[0]);
+  }
+  const path = join(mkdtempSync(join(tmpdir(), "inspector-")), "merged.pdf");
+  writeFileSync(path, await out.save());
+  return path;
+}
 
 /** Widths and content-widths of the app bar's children. */
 function barMetrics(page: Page) {
@@ -220,6 +245,8 @@ test.describe("inspector", () => {
     await open(page, (await fixtures()).scanned);
     const panel = page.locator("aside.inspector");
     await expect(panel.locator(".docpanel__fact", { hasText: "Text" })).toContainText("No text layer");
+    // Never "scanned": a blank or vector-only page has no text either.
+    await expect(panel.locator(".docpanel__fact", { hasText: "Text" })).not.toContainText(/scan/i);
     await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toBeVisible();
   });
 
@@ -318,42 +345,108 @@ test.describe("inspector", () => {
     }
   });
 
-  test("OCR reads only pages without text, and stops being offered once it has", async ({ page }) => {
+  test("OCR reads only shown pages without text, keeps focus, and stops being offered once it has", async ({ page }) => {
     test.slow();
     await page.setViewportSize({ width: 1280, height: 860 });
-    await page.goto("/");
-    const ready = await page.evaluate(async () => {
-      try {
-        const res = await fetch("./tessdata/eng.traineddata.gz", { method: "HEAD" });
-        return res.ok && !(res.headers.get("content-type") ?? "").includes("text/html");
-      } catch {
-        return false;
-      }
-    });
-    test.skip(!ready, "OCR assets not installed (npm run setup-ocr)");
+    test.skip(!(await ocrReady(page)), "OCR assets not installed (npm run setup-ocr)");
     const f = await fixtures();
-    // A scan, then a page that already has its own text.
-    const out = await PDFDocument.create();
-    const scan = await PDFDocument.load(readFileSync(f.scanned));
-    const text = await PDFDocument.load(readFileSync(f.typeset));
-    out.addPage((await out.copyPages(scan, [0]))[0]);
-    out.addPage((await out.copyPages(text, [0]))[0]);
-    const mixed = join(mkdtempSync(join(tmpdir(), "inspector-")), "mixed.pdf");
-    writeFileSync(mixed, await out.save());
+    // A scan, a page with its own text, and a second scan.
+    const mixed = await merge([f.scanned, f.typeset, f.scanned]);
     await open(page, mixed);
     const panel = page.locator("aside.inspector");
     const textPage = page.locator(".page").nth(1);
-    await textPage.scrollIntoViewIfNeeded();
     const before = await textPage.locator(".fragment").count();
     expect(before).toBeGreaterThan(0);
 
-    await panel.getByRole("button", { name: "Recognise text (OCR)" }).click();
+    // The second scan is deleted: OCR has no business reading it.
+    await openOrganise(page);
+    const org = page.locator(".organize");
+    await org.locator(".pcard").nth(2).locator('[aria-label="Delete page"]').click();
+    await org.locator(".btn--filled").click();
+    await expect(page.locator(".page")).toHaveCount(2);
+
+    // From the keyboard, so focus is what's being checked.
+    await panel.getByRole("button", { name: "Recognise text (OCR)" }).focus();
+    await page.keyboard.press("Enter");
     await expect(page.locator(".snackbar__msg")).toContainText(/OCR added \d+ words/, { timeout: 180_000 });
     // Page 2 keeps its own text and gains no second, recognised copy of it.
     await expect(textPage.locator(".fragment")).toHaveCount(before);
     await expect(textPage.locator('.fragment[data-id^="ocr:"]')).toHaveCount(0);
-    // Nothing left to read: the offer goes.
+    // Nothing left to read: the offer goes, and focus goes to the panel's
+    // heading rather than falling to the page body.
     await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toHaveCount(0);
+    await expect(panel.getByRole("heading", { name: "Document" })).toBeFocused();
+
+    // The deleted page comes back unread, so the offer comes back with it.
+    await page.keyboard.press("Control+z");
+    await expect(page.locator(".page")).toHaveCount(3);
+    await expect(page.locator(".page").nth(2).locator('.fragment[data-id^="ocr:"]')).toHaveCount(0);
+    await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toBeVisible();
+  });
+
+  test("a page OCR couldn't read stays offered; a page OCR found nothing on says so", async ({ page }) => {
+    test.slow();
+    await page.setViewportSize({ width: 1280, height: 860 });
+    test.skip(!(await ocrReady(page)), "OCR assets not installed (npm run setup-ocr)");
+    // The engine is handed an unreadable image for the second page it reads.
+    await page.addInitScript(() => {
+      const post = Worker.prototype.postMessage;
+      let n = 0;
+      Worker.prototype.postMessage = function (this: Worker, msg: unknown, ...rest: unknown[]) {
+        const m = msg as { action?: string; payload?: Record<string, unknown> } | null;
+        if (m && m.action === "recognize" && ++n === 2) {
+          msg = { ...m, payload: { ...m.payload, image: "data:image/png;base64,AAAA" } };
+        }
+        return (post as (...a: unknown[]) => void).call(this, msg, ...rest);
+      } as typeof Worker.prototype.postMessage;
+    });
+    const f = await fixtures();
+    await open(page, await merge([f.scanned, f.scanned]));
+    const panel = page.locator("aside.inspector");
+    const fact = panel.locator(".docpanel__fact", { hasText: "Text" });
+    await panel.getByRole("button", { name: "Recognise text (OCR)" }).click();
+    await expect(page.locator(".snackbar__msg")).toContainText("couldn't be read", { timeout: 180_000 });
+    await expect(fact).toContainText("Searchable on 1 of 2 pages");
+    await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toBeVisible();
+
+    // A blank page: OCR runs, finds nothing, and the panel says so — not
+    // "no text layer", as if OCR were still worth a try.
+    const blank = await PDFDocument.create();
+    blank.addPage([595.28, 841.89]);
+    const path = join(mkdtempSync(join(tmpdir(), "inspector-")), "blank.pdf");
+    writeFileSync(path, await blank.save());
+    await page.setInputFiles('input[accept="application/pdf,.pdf"]', path);
+    await expect(fact).toContainText("No text layer");
+    await panel.getByRole("button", { name: "Recognise text (OCR)" }).click();
+    await expect(page.locator(".snackbar__msg")).toContainText("No recognisable text found", { timeout: 180_000 });
+    await expect(fact.locator("dd")).toHaveText("No text found, even by OCR");
+    await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toHaveCount(0);
+  });
+
+  test("several objects selected is a selection, not the document, and every panel title is a heading", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    const panel = page.locator("aside.inspector");
+    await pickSubTool(page, "Pen");
+    const box = (await page.locator(".page").first().boundingBox())!;
+    for (const y of [200, 260]) {
+      await page.mouse.move(box.x + 80, box.y + y);
+      await page.mouse.down();
+      await page.mouse.move(box.x + 200, box.y + y + 16, { steps: 8 });
+      await page.mouse.up();
+    }
+    await pickTool(page, "Select");
+    await page.mouse.move(box.x + 40, box.y + 170);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 280, box.y + 300, { steps: 12 });
+    await page.mouse.up();
+    await expect(page.locator(".multisel")).toHaveCount(2);
+    await expect(panel).toHaveAccessibleName("Properties");
+    await expect(panel.getByRole("heading", { level: 2 })).toHaveText("2 objects selected");
+
+    await page.keyboard.press("Escape");
+    await page.locator(".fragment").first().click();
+    await expect(panel.getByRole("heading", { level: 2 })).toHaveText("Text");
   });
 
   test("clicking an image says what it is", async ({ page }) => {

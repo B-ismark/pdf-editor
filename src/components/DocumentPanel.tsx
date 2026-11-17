@@ -125,6 +125,8 @@ export function DocumentPanel({
   // Pages OCR could still help: no text, and not already read.
   const unread = pages.filter((p) => p.text + p.ocr === 0 && !p.ocrRead).length;
   const one = count === 1;
+  // No claim that a page is a scan: a blank page, or one drawn only in
+  // vector shapes, has no text either (the same rule as the picture hint).
   const textStatus =
     count === 0
       ? "—"
@@ -133,15 +135,36 @@ export function DocumentPanel({
           ? "Searchable"
           : "Searchable on every page"
         : withText === 0
-          ? one
-            ? "No text layer — the page looks scanned"
-            : "No text layer — the pages look scanned"
+          ? unread === 0
+            ? "No text found, even by OCR"
+            : one
+              ? "No text layer"
+              : "No text layer on any page"
           : `Searchable on ${withText} of ${count} pages`;
+  // Running OCR from here takes away the button that had focus (it goes once
+  // nothing is left to read); the heading takes focus instead of <body>.
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const ocrFrom = useRef(false);
+  const busyNow = useRef(busy);
+  busyNow.current = busy;
+  useEffect(() => {
+    if (ocrFrom.current && unread === 0) {
+      ocrFrom.current = false;
+      headingRef.current?.focus();
+    }
+  }, [unread]);
+  // OCR finished with pages still unread (some failed): the button stayed, and
+  // so did focus on it — nothing to move.
+  useEffect(() => {
+    if (!busy && unread > 0) ocrFrom.current = false;
+  }, [busy, unread]);
 
   return (
     <div className="props docpanel">
       <div className="props__header">
-        <h2 className="props__title title-medium">Document</h2>
+        <h2 className="props__title title-medium" ref={headingRef} tabIndex={-1}>
+          Document
+        </h2>
         {headerAction}
       </div>
 
@@ -169,7 +192,17 @@ export function DocumentPanel({
         </div>
       </dl>
       {unread > 0 && (
-        <button className="btn btn--tonal docpanel__ocr" onClick={onOcr} disabled={busy}>
+        // aria-disabled, not disabled: disabling the focused button would
+        // drop focus to <body> while OCR runs.
+        <button
+          className="btn btn--tonal docpanel__ocr"
+          aria-disabled={busy || undefined}
+          onClick={() => {
+            if (busyNow.current) return;
+            ocrFrom.current = true;
+            onOcr();
+          }}
+        >
           <Icon name="scan_text" size={16} /> Recognise text (OCR)
         </button>
       )}

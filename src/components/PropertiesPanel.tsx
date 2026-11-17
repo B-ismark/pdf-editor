@@ -94,7 +94,7 @@ export function PropertiesPanel({
   return (
     <div className="props">
       <div className="props__header">
-        <span className="props__title title-medium">{title}</span>
+        <h2 className="props__title title-medium">{title}</h2>
         {headerAction ??
           (onClose && (
             <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">

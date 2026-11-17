@@ -949,7 +949,11 @@ export const DocumentEditor = memo(function DocumentEditor({
     try {
       // Only pages with no text of their own: OCR on a page that already has
       // a text layer lays a second copy of every word over the first.
-      const unread = pdf.pages.filter((pg) => !pg.fragments.some((f) => !f.id.startsWith("ocr:")));
+      // And only pages still in the document: one deleted in the page plan
+      // isn't shown, so reading it is work (and a progress count) for nothing.
+      const unread = pdf.pages.filter(
+        (pg) => shownBySource.has(pg.pageIndex) && !pg.fragments.some((f) => !f.id.startsWith("ocr:")),
+      );
       if (unread.length === 0) {
         setStatus("ready");
         setMessage("Every page already has text — nothing to recognise.");
@@ -967,7 +971,9 @@ export const DocumentEditor = memo(function DocumentEditor({
         { cacheEngine: autosaveOn },
       );
       let added = 0;
-      const read = new Set(unread.map((pg) => pg.pageIndex));
+      // Pages OCR actually read (with or without words). One that failed isn't
+      // marked, so the Inspector goes on offering it.
+      const read = new Set(perPage.keys());
       const pages = pdf.pages.map((pg) => {
         if (!read.has(pg.pageIndex)) return pg;
         const extra = perPage.get(pg.pageIndex) ?? [];
@@ -1015,7 +1021,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     // `autosaveOn` is read for `cacheEngine`, so it has to be a dependency —
     // without it the callback keeps whatever value was current when `pdf` last
     // changed, and OCR goes on caching the engine after the switch is off.
-  }, [pdf, autosaveOn]);
+  }, [pdf, autosaveOn, shownBySource]);
 
   const exportImages = useCallback(async () => {
     if (!pdf) return;
@@ -2449,6 +2455,22 @@ export const DocumentEditor = memo(function DocumentEditor({
     />
   );
 
+  // Several objects selected (a marquee): they share no one set of
+  // properties, so the panel says what is selected and where the actions are,
+  // rather than falling back to the document as if nothing were.
+  const multiPanel = (
+    <div className="props">
+      <div className="props__header">
+        <h2 className="props__title title-medium">{multi.length} objects selected</h2>
+        {hidePanel}
+      </div>
+      <p className="props__empty body-medium">
+        Move them together by dragging, or use the bar above the page to arrange, duplicate or delete them. Select
+        one to change its properties.
+      </p>
+    </div>
+  );
+
   // Nothing selected: the document's own properties. See DocumentPanel.
   const documentPanel = (
     <DocumentPanel
@@ -2749,18 +2771,18 @@ export const DocumentEditor = memo(function DocumentEditor({
         </div>
 
         {/* Adaptive Inspector. Desktop: a persistent right column that
-            collapses to an edge tab; never empty (properties when something is
-            selected, document/finishing actions otherwise). Mobile: keeps the
+            collapses to an edge tab; never empty (the selection's properties,
+            or the document's own when nothing is selected). Mobile: keeps the
             on-demand bottom sheet driven by the contextual SelectionBar. */}
         {isWide ? (
           inspectorOpen ? (
-            <aside className="inspector" aria-label={selection ? "Properties" : "Document"}>
+            <aside className="inspector" aria-label={selection || multi.length >= 2 ? "Properties" : "Document"}>
               {/* One job: describe what is selected, or the document when
                   nothing is. It used to be two tabs (document actions /
                   properties); the actions now live where they act — Export,
                   the Pages sidebar, the ⋯ menu — so there is nothing left to
                   switch between, and deselecting is the way back. */}
-              {selection ? propertiesPanel : documentPanel}
+              {selection ? propertiesPanel : multi.length >= 2 ? multiPanel : documentPanel}
             </aside>
           ) : (
             <button

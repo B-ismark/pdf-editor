@@ -997,6 +997,9 @@ body {
 .docpanel__file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block !important; }
 .docpanel__sub { color: var(--on-surface-variant); }
 .docpanel__ocr { margin-top: 14px; width: 100%; }
+.docpanel__ocr[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+/* Takes focus only from script (after the OCR button goes); no ring for that. */
+.props__title[tabindex="-1"]:focus { outline: none; }
 .docpanel__group { display: flex; flex-direction: column; gap: 2px; margin-top: 20px; }
 .docpanel__label {
   margin: 0 0 6px;
