@@ -119,13 +119,13 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     never reach; `PageView` now samples in a layout effect gated on a selected or
     edited fragment (before the frame, so there's no white-then-correct flash).
     `colors.spec.ts` asserts scrolling reads back no pixels at all.
-  - **A rotated page is refused outright.** `viewBox` is the rotated viewport but
-    a fragment's `transform` is unrotated text space, and nothing reconciles them
-    — so sampling reads mis-mapped coordinates and reports them with full
-    confidence. On a `/Rotate 90` test page, black-on-white text came back with a
-    *black* background, which would paint a black rectangle over white paper.
-    Rotated text is already not repositioned in the overlay; declining keeps the
-    colours wrong in the same way, and no worse.
+  - **A turned raster is refused; the page is sampled unturned instead.**
+    Fragment transforms are in user space and a turned canvas isn't. On a
+    `/Rotate 90` test page, reading one at fragment coordinates reported a
+    *black* background for black-on-white text. `sampleColors` still refuses
+    `turn !== 0`; on a turned page `PageView` calls `readPageColors`, which
+    renders the page unturned, and the exporter's raster is unturned too. See
+    `pages.md`.
   - **`resolveFragmentStyle` takes the ink as `baseColor`**, so the overlay, the
     properties panel, and both export paths cannot disagree about what colour the
     text is. A memo that reads it needs it as a dependency (`activeStyle` in

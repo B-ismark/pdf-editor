@@ -20,7 +20,11 @@ export function placedSize(
   img: { w: number; h: number },
   pageW: number,
   pageH: number,
+  /** The turn the stamp will be given (upright on a turned page). A quarter
+   * turn lays its width along the page's height, so fit it to that. */
+  rotation = 0,
 ): { width: number; height: number } {
+  if (rotation % 180 !== 0) [pageW, pageH] = [pageH, pageW];
   let width = Math.min(220, img.w * 0.75, pageW * 0.9);
   let height = width * (img.h / img.w);
   if (height > pageH * 0.9) {
@@ -49,8 +53,12 @@ export function placeAt(
   cy: number,
   pageW: number,
   pageH: number,
-): Placement {
-  return clampToPage({ x: cx - size.width / 2, y: cy - size.height / 2, ...size }, pageW, pageH);
+  /** Clockwise turn about the centre, for a stamp placed on a turned page. */
+  rotation = 0,
+): Placement & { rotation?: number } {
+  if (!rotation) return clampToPage({ x: cx - size.width / 2, y: cy - size.height / 2, ...size }, pageW, pageH);
+  const b = { x: cx - size.width / 2, y: cy - size.height / 2, ...size, rotation };
+  return { ...b, ...keepOnPage(b, pageW, pageH) };
 }
 
 /** The width and height a box occupies once rotated about its centre. */

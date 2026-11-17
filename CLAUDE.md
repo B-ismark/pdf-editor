@@ -55,7 +55,7 @@ invariant it protects (and why it exists) is in
 when a spec fails or before you add one. Specs: `app`, `privacy`, `rendering`,
 `export`, `ocr`, `font`, `baseline`, `colors`, `find`, `phone`, `shell`,
 `icons`, `marks`, `affordance`, `shape`, `fragment`, `chrome`, `tabs`,
-`overlays`, `placement`, `edge`, `keyboard`, `saved`, `password`. If you add a feature that touches privacy, the export bytes, or
+`overlays`, `placement`, `edge`, `keyboard`, `saved`, `password`, `sign`, `pages`. If you add a feature that touches privacy, the export bytes, or
 per-page rendering, add a spec for it.
 
 ## Architecture
@@ -66,6 +66,10 @@ per-page rendering, add a spec for it.
   `GlobalWorkerOptions.workerSrc`. The document's real per-fragment fonts come
   from `pdf/fontInfo.ts` after the page paints — see `docs/notes/text-fidelity.md`.
 - **Write path** — `pdf/exporter.ts` uses **pdf-lib** to produce the output.
+  "pdf-lib" here means the maintained fork **`@cantoo/pdf-lib`**: import it by
+  that name, never `"pdf-lib"` (upstream 1.17 is a devDependency only, the
+  tests' independent reader). Vite aliases `pdf-lib` to the fork so
+  `@signpdf`'s own import gets the same engine — see `rendering.md`.
   Non-redacted pages keep vector content (edits/text/annotations/stamps drawn on
   top); **redacted pages are rasterized to an image** so content is truly
   removed. `pageOps.ts` (reorder/rotate/merge/extract) and `finishOps.ts` (page
@@ -78,7 +82,8 @@ per-page rendering, add a spec for it.
   (`useViewport().captureView()` / `restoreView()`), and their change count.
   See `docs/notes/tabs.md` before touching `openBytes`.
 - **State** — `hooks/useHistory.ts` holds a single `DocState`
-  (`edits, textBoxes, redactions, annotations, stamps`) with undo/redo and
+  (`edits, textBoxes, redactions, annotations, stamps`, and the page plan
+  `pages` — see `docs/notes/pages.md`) with undo/redo and
   gesture coalescing (pass a stable `key` to `doc.set` to collapse a continuous
   drag/type into one history step). A `revision` counter re-seeds
   `contentEditable` overlays on undo/redo. `App.tsx` is the orchestrator.
@@ -126,6 +131,7 @@ linked note.
 | [`docs/notes/tabs.md`](docs/notes/tabs.md) | `openBytes`, parking/unparking documents, `resetDocUi`, `releaseDoc`, autosave keys |
 | [`docs/notes/shell.md`](docs/notes/shell.md) | icons, the app bar, the Inspector, floating chrome, `corner-shape`, motion tokens, `opens` marks, native-UI replacements, prefs, theme, finishing ops |
 | [`docs/notes/canvas-tools.md`](docs/notes/canvas-tools.md) | the Draw tool and drawbar, `AnnotationLayer`, stacking order, multi-select drag, tick/cross marks, touch select-first |
+| [`docs/notes/pages.md`](docs/notes/pages.md) | the page plan (`DocState.pages`, `pagePlan.ts`), turned pages and pointer maths (`toLocal`), Organise's apply, page order/deletion in export |
 | [`docs/notes/ocr.md`](docs/notes/ocr.md) | tesseract.js, `setup-ocr`, OCR fragments, the engine-cache service worker |
 
 ## Deployment

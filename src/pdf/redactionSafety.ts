@@ -1,5 +1,6 @@
 import { intersects, redactionBox, type Box } from "./bbox";
-import type { LoadedPdf, Redaction, TextFragment } from "./types";
+import type { LoadedPdf, PageRef, Redaction, TextFragment } from "./types";
+import { resolvePlan } from "./pagePlan";
 
 /** Approximate glyph box for a text fragment in PDF units (bottom-left origin).
  * The transform's translation is the baseline; text rises ~one glyph-height
@@ -27,20 +28,25 @@ export interface CoverWarning {
  * True redactions are NOT flagged: the exporter rasterises any page carrying
  * one, so the underlying text is genuinely removed.
  */
-export function findUnsafeCovers(loaded: LoadedPdf, redactions: Redaction[]): CoverWarning {
+export function findUnsafeCovers(loaded: LoadedPdf, redactions: Redaction[], plan?: PageRef[]): CoverWarning {
   const pages = new Set<number>();
   let count = 0;
   const byPage = new Map<number, TextFragment[]>();
   for (const p of loaded.pages) byPage.set(p.pageIndex, p.fragments);
+  // Pages are named by where they now sit, and a deleted page's cover doesn't
+  // ship, so it can't leak.
+  const position = new Map(resolvePlan(plan, loaded.pages.length).map((p, pos) => [p.index, pos] as const));
 
   for (const r of redactions) {
     if (!r.cover) continue; // true redaction → destructive → safe
+    const pos = position.get(r.pageIndex);
+    if (pos === undefined) continue;
     const frags = byPage.get(r.pageIndex);
     if (!frags || frags.length === 0) continue;
     const rb = redactionBox(r);
     if (frags.some((f) => intersects(rb, fragmentBox(f)))) {
       count++;
-      pages.add(r.pageIndex + 1);
+      pages.add(pos + 1);
     }
   }
   return { pages: [...pages].sort((a, b) => a - b), count };

@@ -1,4 +1,4 @@
-import { StandardFonts } from "pdf-lib";
+import { StandardFonts } from "@cantoo/pdf-lib";
 import type { FontKey, FragmentFont, TextFragment, TextStyle } from "./types";
 
 /** CSS font stacks for each abstract font key, used in the DOM overlay. */

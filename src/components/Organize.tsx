@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { plural } from "../plural";
 import { Thumbnail } from "./Thumbnail";
@@ -6,12 +6,24 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import { useModal } from "../hooks/useModal";
 import { buildFromPlan, pageCount, type PlanEntry } from "../pdf/pageOps";
 import { looksLikePdf } from "../pdf/loader";
+import type { PageRef } from "../pdf/types";
 
 interface Props {
   mainBytes: ArrayBuffer;
   fileName: string;
   hasEdits: boolean;
-  /** Apply the plan as the new working document. */
+  /** The document's current page plan (source index + extra turn, in order). */
+  pages: PageRef[];
+  /** Apply a plan that only rearranges this document's own pages: an ordinary,
+   *  undoable edit that keeps every overlay with its page. */
+  onArrange: (pages: PageRef[]) => void;
+  /** This document as shown: its edits drawn in and its page plan applied
+   *  (deleted pages cut out, not just unlisted). Page numbers and the
+   *  watermark are drawn too only when `finishing`; a merge leaves them live,
+   *  to number the merged document. Rejects (user-facing) on whiteout over
+   *  live text, as Download does. */
+  bakeMain: (finishing: boolean) => Promise<ArrayBuffer>;
+  /** Apply a merged plan as the new working document. */
   onApply: (bytes: ArrayBuffer, note: string) => void;
   /** Download the given bytes without changing the working document. */
   onExtract: (bytes: Uint8Array) => void;
@@ -27,6 +39,9 @@ export function Organize({
   mainBytes,
   fileName,
   hasEdits,
+  pages,
+  onArrange,
+  bakeMain,
   onApply,
   onExtract,
   onClose,
@@ -35,7 +50,6 @@ export function Organize({
   const [sources, setSources] = useState<Map<string, ArrayBuffer>>(
     () => new Map([["main", mainBytes]]),
   );
-  const [plan, setPlan] = useState<PlanEntry[] | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -44,19 +58,11 @@ export function Organize({
   const addCounter = useRef(0);
   const modalRef = useModal<HTMLDivElement>(onClose);
 
-  // Seed the plan from the main document's page count.
-  useEffect(() => {
-    let cancelled = false;
-    pageCount(mainBytes).then((n) => {
-      if (cancelled) return;
-      setPlan(
-        Array.from({ length: n }, (_, i) => ({ sourceKey: "main", index: i, rotation: 0 })),
-      );
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [mainBytes]);
+  // Seed from the document's current plan: what Organise shows is what the
+  // viewer shows, in the same order and turned the same way.
+  const [plan, setPlan] = useState<PlanEntry[] | null>(() =>
+    pages.map((p) => ({ sourceKey: "main", index: p.index, rotation: p.rotate })),
+  );
 
   const update = (next: PlanEntry[]) => {
     setPlan(next);
@@ -129,18 +135,52 @@ export function Organize({
     }
   };
 
+  /** True when the plan only uses this document's own pages — the common case,
+   *  applied as an undoable edit rather than a rebuild. */
+  const ownPagesOnly = !!plan && plan.every((e) => e.sourceKey === "main");
+
+  /**
+   * This document's pages for a rebuild: the original bytes when it has no
+   * edits, otherwise the baked copy, with the plan's entries moved onto it.
+   * The baked copy has the plan applied, so a card's source page becomes its
+   * position in `pages`, and the turn the plan already drew is taken off.
+   */
+  const mainAsShown = async (entries: PlanEntry[], finishing: boolean) => {
+    if (!hasEdits) return { entries, bytes: mainBytes };
+    const bytes = await bakeMain(finishing);
+    const at = new Map(pages.map((p, i) => [p.index, { pos: i, rotate: p.rotate }]));
+    return {
+      bytes,
+      entries: entries.map((e) => {
+        if (e.sourceKey !== "main") return e;
+        const was = at.get(e.index);
+        if (!was) throw new Error("A page isn't in the document any more.");
+        return { ...e, index: was.pos, rotation: (((e.rotation - was.rotate) % 360) + 360) % 360 };
+      }),
+    };
+  };
+  const failure = (e: unknown, fallback: string) =>
+    (e as { userFacing?: boolean })?.userFacing ? (e as Error).message : fallback;
+
   const doApply = async () => {
     if (!plan || plan.length === 0) return;
     setConfirmApply(false);
     setErr(null);
+    if (ownPagesOnly) {
+      onArrange(plan.map((e) => ({ index: e.index, rotate: e.rotation })));
+      return;
+    }
     setBusy("Applying…");
     try {
-      const bytes = await buildFromPlan(plan, sources);
+      // Merging rebuilds the file, so this document's edits are drawn into its
+      // pages first.
+      const main = await mainAsShown(plan, false);
+      const bytes = await buildFromPlan(main.entries, new Map(sources).set("main", main.bytes));
       const ab = new ArrayBuffer(bytes.byteLength);
       new Uint8Array(ab).set(bytes);
       onApply(ab, `${plural(plan.length, "page")} after organising`);
-    } catch {
-      setErr("Couldn't rebuild the document. Please try again.");
+    } catch (e) {
+      setErr(failure(e, "Couldn't rebuild the document. Please try again."));
     } finally {
       setBusy(null);
     }
@@ -148,7 +188,7 @@ export function Organize({
 
   const apply = () => {
     if (!plan || plan.length === 0) return;
-    if (hasEdits) setConfirmApply(true);
+    if (hasEdits && !ownPagesOnly) setConfirmApply(true);
     else void doApply();
   };
 
@@ -159,9 +199,12 @@ export function Organize({
     setErr(null);
     setBusy("Extracting…");
     try {
-      onExtract(await buildFromPlan(subset, sources));
-    } catch {
-      setErr("Couldn't extract those pages. Please try again.");
+      // The pages as you see them: an extract of the original bytes would hand
+      // back text you redacted.
+      const main = await mainAsShown(subset, true);
+      onExtract(await buildFromPlan(main.entries, new Map(sources).set("main", main.bytes)));
+    } catch (e) {
+      setErr(failure(e, "Couldn't extract those pages. Please try again."));
     } finally {
       setBusy(null);
     }
@@ -275,7 +318,7 @@ export function Organize({
       {confirmApply && (
         <ConfirmDialog
           title="Apply page changes?"
-          message="This rebuilds the document and discards your current text edits, annotations, and redactions."
+          message="Adding pages from another document rebuilds this one: your text edits, annotations and redactions are drawn into the pages and can no longer be changed, and undo starts over."
           confirmLabel="Apply"
           danger
           onConfirm={doApply}

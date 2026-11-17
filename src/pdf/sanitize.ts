@@ -1,4 +1,4 @@
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFStream, PDFString, PDFHexString } from "pdf-lib";
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFStream, PDFString, PDFHexString } from "@cantoo/pdf-lib";
 import { isSafeExistingUri } from "./url";
 
 /**

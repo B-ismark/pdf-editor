@@ -114,6 +114,11 @@ type-checking can't see, and each exists because it broke once:
   travels with a tab to the background; Download all saves every tab it
   zipped; and a signature is stored on the device only when "Remember this
   signature" is ticked, and can be removed;
+- `sign.spec.ts` — "Sign with certificate" output verifies the way a reader
+  checks it: the `/ByteRange` spans the file except the signature, the PKCS#7
+  digest matches those bytes, and the signature checks out against the
+  embedded certificate. Exists because the engine swap could break signing
+  silently (two copies of pdf-lib → no file at all);
 - `password.spec.ts` — a password-protected PDF asks in-app, says a wrong
   password is wrong without losing what was typed, opens with the right one,
   and downloads as a plain PDF with its text (no `/Encrypt`); cancel opens
@@ -123,6 +128,16 @@ type-checking can't see, and each exists because it broke once:
   owner-locked file with a 30,000-item outline opens (the unlocker's recursive
   walk overflowed); and Cancel during "Checking…" opens nothing. Fixtures are
   encrypted with `@cantoo/pdf-lib`;
+- `pages.spec.ts` — reorder, turn and delete in Organise keep a text box with
+  its page, take one undo, and export exactly the planned pages in order and
+  turned, with no page object left for the deleted one; on a `/Rotate` page new
+  text lands where it was placed and reads upright; on a turned page a drag
+  moves the way the pointer went, Align and Duplicate work as the page is
+  shown, the view refits, the thumbnail fits and the tick preview is upright.
+  Merge and Extract start from the document as shown (a deleted page doesn't
+  come back through a link, whiteout over text is refused, page numbers follow
+  the new order, an extracted redacted page stays redacted); page labels follow
+  their pages; markup on a deleted page can't be selected, pasted or counted;
 - `overlays.spec.ts` — a marquee'd group moves as one (one undo step) and
   survives the drag, a plain click on a member selects just that one, arrows
   nudge the group, and a buried stroke can be raised — in the overlay's paint

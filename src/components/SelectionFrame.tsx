@@ -137,6 +137,10 @@ export function SelectionFrame({
         if (Math.abs(snapped - deg) < ROT_SNAP_TOL) deg = snapped;
         onTransform({ ...g0, rot: deg }, gk);
       },
+      // Measured as an angle about a centre read off the screen, so it needs
+      // the pointer's screen positions; a turn of the page doesn't change an
+      // angle *difference*, so nothing else here has to know about it.
+      screen: true,
     });
   };
 

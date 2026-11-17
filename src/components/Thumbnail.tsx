@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { renderPageToCanvas } from "../pdf/loader";
 import { useRenderWindow } from "../hooks/useRenderWindow";
 
@@ -38,6 +38,21 @@ export function Thumbnail({ bytes, index, rotation }: Props) {
   // Thumbnails visible on arrival (opening the rail, an Organize card remounted
   // by a move) render at once; only ones reached by scrolling wait to settle.
   const mountedAt = useRef(performance.now());
+  // A quarter turn swaps the image's width and height, but the canvas is sized
+  // to fit its slot unturned, so turned it would spill over the sides (and be
+  // cropped where the slot clips). Scaled down until the turned image fits.
+  const [painted, setPainted] = useState(0);
+  const [fit, setFit] = useState(1);
+  useLayoutEffect(() => {
+    const c = host.current?.querySelector("canvas");
+    const slot = host.current?.parentElement?.parentElement;
+    if (!c || !slot || ((rotation % 180) + 180) % 180 === 0 || !c.offsetWidth || !c.offsetHeight) {
+      setFit(1);
+      return;
+    }
+    // A couple of pixels spare: the frame centres to the half pixel.
+    setFit(Math.min(1, (slot.clientWidth - 2) / c.offsetHeight, (slot.clientHeight - 2) / c.offsetWidth));
+  }, [rotation, painted]);
 
   useEffect(() => {
     if (!near) return;
@@ -56,6 +71,7 @@ export function Thumbnail({ bytes, index, rotation }: Props) {
           releaseCanvases(host.current);
           host.current.append(c);
           setFailed(false);
+          setPainted((n) => n + 1);
         })
         .catch((err) => {
           if (!ctrl.signal.aborted && (err as Error)?.name !== "AbortError") setFailed(true);
@@ -83,7 +99,7 @@ export function Thumbnail({ bytes, index, rotation }: Props) {
     <div
       ref={ref}
       className="thumb__frame"
-      style={{ transform: `rotate(${rotation}deg)` }}
+      style={{ transform: `rotate(${rotation}deg)${fit < 1 ? ` scale(${fit})` : ""}` }}
     >
       <span ref={host} className="thumb__host" />
       {failed && <span className="thumb__err">!</span>}

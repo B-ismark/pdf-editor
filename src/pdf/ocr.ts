@@ -163,7 +163,11 @@ export async function ocrPages(
       let canvas: HTMLCanvasElement | null = null;
       try {
         const scale = safeOcrScale(page.viewBox.width, page.viewBox.height);
-        canvas = await renderPageToCanvas(bytes, page.pageIndex, scale);
+        // In user space (unturned), the space every fragment is stored in, so
+        // a word lands where it was read. On a page whose own /Rotate turns
+        // sideways-scanned text upright this reads it sideways — fewer words,
+        // but never a word (and so a search redaction) in the wrong place.
+        canvas = await renderPageToCanvas(bytes, page.pageIndex, scale, undefined, 0);
         const { data } = await withTimeout(
           worker.recognize(canvas, {}, { blocks: true }),
           PAGE_TIMEOUT,

@@ -1,4 +1,5 @@
-import { PDFDocument, degrees, type PDFPage } from "pdf-lib";
+import { PDFDict, PDFDocument, PDFName, PDFRef, degrees, type PDFPage } from "@cantoo/pdf-lib";
+import { collectGarbage, cutDeletedPages } from "./structure";
 
 /** One page slot in an organize plan: which source document, which page in it,
  * and how much extra rotation the user applied (added to the page's own). */
@@ -71,6 +72,19 @@ export async function buildFromPlan(
     }
     out.addPage(page);
   });
+
+  // The copier follows every reference on a page, so a link to a page the plan
+  // left out copies that page too (contents and all), reachable through the
+  // link. Cut it like a deleted page: the link goes, and nothing reaches it.
+  const inTree = new Set(out.getPages().map((p) => p.ref));
+  const stray = new Set<PDFRef>();
+  for (const [ref, obj] of out.context.enumerateIndirectObjects()) {
+    if (obj instanceof PDFDict && obj.get(PDFName.of("Type")) === PDFName.of("Page") && !inTree.has(ref)) stray.add(ref);
+  }
+  if (stray.size > 0) {
+    cutDeletedPages(out, stray);
+    collectGarbage(out);
+  }
 
   return out.save();
 }

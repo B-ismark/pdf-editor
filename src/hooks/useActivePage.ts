@@ -13,13 +13,15 @@ export function useActivePage(pageCount: number, docKey: unknown): number {
   const [active, setActive] = useState(0);
   useEffect(() => {
     setActive(0);
-    const els = Array.from(document.querySelectorAll<HTMLElement>(".page[data-page-index]"));
+    // By position in the shown order, not source page: after a reorder the
+    // two differ, and the rail and page chip count positions.
+    const els = Array.from(document.querySelectorAll<HTMLElement>(".page[data-page-pos]"));
     if (els.length === 0) return;
     const ratios = new Map<number, number>();
     const io = new IntersectionObserver(
       (entries) => {
         for (const e of entries) {
-          const idx = Number((e.target as HTMLElement).dataset.pageIndex);
+          const idx = Number((e.target as HTMLElement).dataset.pagePos);
           ratios.set(idx, e.intersectionRatio);
         }
         let best = 0;
@@ -40,9 +42,10 @@ export function useActivePage(pageCount: number, docKey: unknown): number {
   return active;
 }
 
-/** Bring page `index` (0-based) to the top of the scroll surface. */
+/** Bring the page at position `index` (0-based, shown order) to the top of
+ * the scroll surface. */
 export function scrollToPage(index: number, smooth = true): void {
   document
-    .querySelector<HTMLElement>(`.page[data-page-index="${index}"]`)
+    .querySelector<HTMLElement>(`.page[data-page-pos="${index}"]`)
     ?.scrollIntoView({ block: "start", behavior: smooth ? "smooth" : "auto" });
 }

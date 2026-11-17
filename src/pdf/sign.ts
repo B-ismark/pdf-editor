@@ -68,7 +68,7 @@ export async function signPdf(pdfBytes: ArrayBuffer, identity: SignIdentity, met
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const forgeMod: any = await import("node-forge");
   const forge = forgeMod.default ?? forgeMod;
-  const { PDFDocument } = await import("pdf-lib");
+  const { PDFDocument } = await import("@cantoo/pdf-lib");
   const { pdflibAddPlaceholder } = await import("@signpdf/placeholder-pdf-lib");
   const { P12Signer } = await import("@signpdf/signer-p12");
   const { SignPdf } = await import("@signpdf/signpdf");
@@ -98,7 +98,9 @@ export async function signPdf(pdfBytes: ArrayBuffer, identity: SignIdentity, met
 
   const doc = await PDFDocument.load(pdfBytes, { updateMetadata: false });
   pdflibAddPlaceholder({
-    pdfDoc: doc,
+    // @signpdf is typed against upstream pdf-lib; the build aliases its
+    // import to the fork (vite.config.ts), so at runtime they are one library.
+    pdfDoc: doc as unknown as import("pdf-lib").PDFDocument,
     reason: metaOut.reason || "Signed",
     contactInfo: metaOut.contactInfo || "",
     name: metaOut.name || "",

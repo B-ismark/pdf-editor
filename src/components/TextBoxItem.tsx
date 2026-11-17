@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 import { CSS_FONT, TEXTBOX_LINE_HEIGHT } from "../pdf/style";
-import { elementTap, lastEditPoint, startPointerDrag } from "../hooks/useDrag";
+import { elementTap, lastEditPoint, startPointerDrag, unturn } from "../hooks/useDrag";
 import { clearGuides, setGuides, snapBox } from "../hooks/useSnap";
 import { focusEditable, placeCaretEnd } from "../caret";
 import { baselineOffset, fontShorthand } from "../textBaseline";
@@ -81,7 +81,11 @@ function TextBoxItemImpl({
     fontPx,
     CSS_FONT[box.style.font],
   );
-  const top = (H - box.y) * scale - baselineOffset(shorthand, TEXTBOX_LINE_HEIGHT, fontPx);
+  const lead = baselineOffset(shorthand, TEXTBOX_LINE_HEIGHT, fontPx);
+  const top = (H - box.y) * scale - lead;
+  // Turned about the baseline anchor — the point the exporter turns the text
+  // about — so the first line's start stays put whatever the angle.
+  const rot = box.rotation ?? 0;
 
   const beginMove = (e: React.PointerEvent) => {
     onSelect(box.id);
@@ -93,6 +97,15 @@ function TextBoxItemImpl({
       onMove: (dx, dy) => {
         const px = s.x + dx / scale;
         const py = s.y - dy / scale;
+        if (rot) {
+          // A turned box (one added on a turned page) reaches past its anchor
+          // along turned axes; the snap and edge stops below assume upright
+          // text, so it just keeps its anchor on the page.
+          const x = Math.max(0, Math.min(pageWidth, px));
+          const y = Math.max(0, Math.min(H, py));
+          onChange(box.id, { x, y }, key);
+          return;
+        }
         const sn = snapBox(px, py, wPdf, hPdf, pageWidth, H, 6 / scale);
         // Stop at the page edge: the exported page cuts off whatever hangs
         // past it. `y` is the first line's baseline, so the box reaches
@@ -111,7 +124,9 @@ function TextBoxItemImpl({
     const key = `resize-tb-${box.id}-${++gesture.current}`;
     const startPx = fontPx;
     startPointerDrag(e, {
-      onMove: (dx, dy) => {
+      onMove: (pdx, pdy) => {
+        // In the box's own frame, so "outward" is outward however it's turned.
+        const { x: dx, y: dy } = unturn(pdx, pdy, rot);
         // Bottom-right corner handle: dragging outward (down/right) grows the
         // text, inward (up/left) shrinks it. Averaging both axes lets the size
         // follow a natural diagonal drag instead of only vertical motion —
@@ -131,7 +146,11 @@ function TextBoxItemImpl({
       <div
         className={`tb-wrap${selected ? " tb-wrap--selected" : ""}`}
         data-el-id={box.id}
-        style={{ left: `${left}px`, top: `${top}px` }}
+        style={{
+          left: `${left}px`,
+          top: `${top}px`,
+          ...(rot ? { transform: `rotate(${rot}deg)`, transformOrigin: `0px ${lead}px` } : null),
+        }}
       >
         <div
           ref={ref}

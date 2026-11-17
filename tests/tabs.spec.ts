@@ -1,8 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
-import type { DocState } from "../src/pdf/types";
 import { readFileSync } from "node:fs";
 import { fixtures } from "./fixtures";
-import { open, watch } from "./helpers";
+import { open, watch, seedStore, docRecord, EMPTY } from "./helpers";
 
 /**
  * Several documents open at once, one tab each.
@@ -53,41 +52,6 @@ function storeKeys(page: Page): Promise<string[]> {
       }),
   );
 }
-
-/** Write records straight into the autosave store, as a previous visit would
- * have left them. `bytes` values are PDF files read from disk. */
-async function seedStore(page: Page, records: [string, unknown][], bytes: [string, string][]) {
-  const files = bytes.map(([k, path]) => [k, [...readFileSync(path)]] as const);
-  await page.evaluate(
-    ({ records, files }) =>
-      new Promise<void>((resolve) => {
-        const req = indexedDB.open("pdf-editor", 1);
-        req.onupgradeneeded = () => req.result.createObjectStore("session");
-        req.onsuccess = () => {
-          const tx = req.result.transaction("session", "readwrite");
-          const st = tx.objectStore("session");
-          for (const [k, v] of records) st.put(v, k);
-          for (const [k, arr] of files) st.put(new Uint8Array(arr).buffer, k);
-          tx.oncomplete = () => {
-            req.result.close();
-            resolve();
-          };
-        };
-      }),
-    { records, files },
-  );
-}
-
-const EMPTY: DocState = { edits: {}, textBoxes: [], redactions: [], annotations: [], stamps: [] };
-const docRecord = (id: string, fileName: string, order: number, extra: Partial<{ doc: DocState; baked: number }> = {}) => ({
-  id,
-  fileName,
-  doc: EMPTY,
-  savedAt: Date.now(),
-  order,
-  active: false,
-  ...extra,
-});
 
 test.describe("document tabs", () => {
   test.beforeEach(async ({ page }) => {
@@ -234,7 +198,7 @@ test.describe("document tabs", () => {
     await page.locator('.organize [aria-label="Rotate"]').first().click();
     await page.locator(".organize .btn--filled").click();
     await expect(page.locator(".organize")).toHaveCount(0);
-    // Its doc state is empty — the rotation is in the bytes — but it's a change.
+    // The turn is a page plan in the doc state now, not new bytes, and still a change.
     await expect(activeTab(page).locator(".doctab__dirty")).toHaveCount(1);
     await expect.poll(async () => (await storeKeys(page)).length, { timeout: 15_000 }).toBe(2);
   });

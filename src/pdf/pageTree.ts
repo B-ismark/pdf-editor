@@ -1,4 +1,4 @@
-import { PDFDict, PDFName, PDFNumber, PDFPageLeaf, PDFPageTree, PDFRef, type PDFDocument, type PDFObject } from "pdf-lib";
+import { PDFDict, PDFName, PDFNumber, PDFPageLeaf, PDFPageTree, PDFRef, type PDFDocument, type PDFObject, type PDFPage } from "@cantoo/pdf-lib";
 
 /**
  * Make the file's page list exactly the pages the preview showed, in order.
@@ -88,3 +88,46 @@ export function alignPageTree(doc: PDFDocument, refs: ({ num: number; gen: numbe
   }
 }
 
+
+/**
+ * Make the document's pages exactly `pages`, in this order — reordering,
+ * dropping and swapping in replacement pages in one step.
+ *
+ * Done by rewriting the flat root `alignPageTree` left, rather than with
+ * pdf-lib's `removePage`/`insertPage`: the fork's `removePage` deletes the
+ * page *object* as well as its slot, so a page moved that way is gone, and a
+ * page removed that way can no longer be read to find the form fields and
+ * comment threads that have to go with it. Here, a page left out simply stops
+ * being reachable, and the exporter's structure pass cuts it loose and sweeps
+ * it.
+ *
+ * pdf-lib caches its page list, and nothing public refreshes it without
+ * deleting an object, so the cache is reset directly — then checked, so a
+ * change in the library's internals fails the export instead of shipping the
+ * wrong pages.
+ */
+export function setPageList(doc: PDFDocument, pages: PDFPage[]): void {
+  const ctx = doc.context;
+  const rootRef = doc.catalog.get(PDFName.of("Pages"));
+  const root = rootRef instanceof PDFRef ? ctx.lookup(rootRef) : undefined;
+  if (!(rootRef instanceof PDFRef) || !(root instanceof PDFPageTree)) {
+    throw new Error("The pages couldn't be put in order, so the file wasn't exported.");
+  }
+  root.set(PDFName.of("Kids"), ctx.obj(pages.map((p) => p.ref)));
+  root.set(PDFName.of("Count"), PDFNumber.of(pages.length));
+  for (const page of pages) page.node.setParent(rootRef);
+
+  const internals = doc as unknown as {
+    pageMap?: Map<unknown, PDFPage>;
+    pageCache?: { invalidate(): void };
+    pageCount?: number;
+  };
+  for (const page of pages) internals.pageMap?.set(page.node, page);
+  internals.pageCache?.invalidate();
+  internals.pageCount = undefined;
+
+  const seen = doc.getPages();
+  if (doc.getPageCount() !== pages.length || seen.length !== pages.length || seen.some((p, i) => p.ref !== pages[i].ref)) {
+    throw new Error("The pages couldn't be put in order, so the file wasn't exported.");
+  }
+}

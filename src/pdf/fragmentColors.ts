@@ -171,11 +171,14 @@ export function offerPageCanvas(
   bytes: ArrayBuffer,
   pageData: PageData,
   canvas: HTMLCanvasElement,
+  /** The turn this canvas was rendered at. Defaults to the page's shown turn,
+   * which is what the on-screen canvas is. */
+  turn: number = pageData.rotation,
 ): void {
   const d = entry(bytes);
   if (d.ready.has(pageData.pageIndex) || !canvas.width) return;
   const scale = canvas.width / pageData.viewBox.width;
-  const found = sampleColors(canvas, pageData, scale);
+  const found = sampleColors(canvas, pageData, scale, turn);
   if (found) publish(bytes, pageData.pageIndex, found);
 }
 
@@ -193,7 +196,7 @@ export function readPageColors(bytes: ArrayBuffer, pageData: PageData): Promise<
   if (done) return Promise.resolve(done);
   let p = d.pending.get(pageData.pageIndex);
   if (!p) {
-    p = renderPageToCanvas(bytes, pageData.pageIndex, SAMPLE_SCALE)
+    p = renderPageToCanvas(bytes, pageData.pageIndex, SAMPLE_SCALE, undefined, 0)
       .then((canvas) => {
         // Hand the backing store back; this raster is never shown.
         const release = () => {
@@ -211,7 +214,7 @@ export function readPageColors(bytes: ArrayBuffer, pageData: PageData): Promise<
           release();
           return already;
         }
-        const found = sampleColors(canvas, pageData, SAMPLE_SCALE) ?? NO_COLORS;
+        const found = sampleColors(canvas, pageData, SAMPLE_SCALE, 0) ?? NO_COLORS;
         release();
         return publish(bytes, pageData.pageIndex, found);
       })
@@ -245,16 +248,16 @@ export function sampleColors(
   canvas: HTMLCanvasElement,
   pageData: PageData,
   scale: number,
+  /** The turn the canvas was rendered at. */
+  turn: number,
 ): PageColors | null {
-  // A rotated page's raster is rotated but its fragment transforms are not, and
-  // nothing in this app reconciles the two. Sampling one reads whatever happens
-  // to be at the mis-mapped coordinates and reports it with full confidence: on
-  // a /Rotate 90 or 180 test page, black text on white paper came back with a
-  // *black* background, so an edit would have painted a black rectangle over
-  // white paper and drawn black text on it. Declining leaves white and black,
-  // which is wrong in the same way the overlay position is already wrong there,
-  // and no worse.
-  if (pageData.rotation !== 0) return null;
+  // Fragment transforms are in the page's unturned user space, so only an
+  // unturned raster can be read at them. Sampling a turned one reads whatever
+  // happens to be at the mis-mapped coordinates and reports it with full
+  // confidence: on a /Rotate 90 or 180 test page, black text on white paper
+  // came back with a *black* background. A turned page is sampled from its own
+  // unturned render instead (`readPageColors`, which `PageView` asks for).
+  if (turn !== 0) return null;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx || !canvas.width || !canvas.height) return null;
   let image: ImageData;

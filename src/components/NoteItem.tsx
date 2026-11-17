@@ -6,6 +6,8 @@ import { EditDoneButton } from "./EditDoneButton";
 interface Props {
   id: string;
   x: number;
+  /** Clockwise degrees about the top-left anchor. */
+  rotation?: number;
   y: number;
   text: string;
   color: string;
@@ -44,6 +46,7 @@ function readableText(hex: string): string {
 function NoteItemImpl({
   id,
   x,
+  rotation,
   y,
   text,
   color,
@@ -90,6 +93,7 @@ function NoteItemImpl({
         style={{
           left: `${x * scale}px`,
           top: `${(pageHeight - y) * scale}px`,
+          ...(rotation ? { transform: `rotate(${rotation}deg)`, transformOrigin: "0 0" } : null),
           background: color,
           color: readableText(color),
           pointerEvents: interactive ? "auto" : "none",
