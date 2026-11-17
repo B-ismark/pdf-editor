@@ -42,7 +42,7 @@ test("opens a valid PDF", async ({ page }) => {
 
 test("page numbers are an undoable, previewed layer", async ({ page }) => {
   await openSample(page);
-  await page.getByRole("button", { name: /Page numbers/ }).first().click();
+  await page.getByRole("button", { name: "Add page numbers" }).click();
   await page.waitForSelector('[aria-modal="true"]');
   await page.getByRole("button", { name: /^Apply$/ }).click();
   await expect(page.locator(".finishlayer__num").first()).toBeVisible();
