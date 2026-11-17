@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { fixtures } from "./fixtures";
-import { open, watch, expectClean } from "./helpers";
+import { open, watch, expectClean, pickTool, dragOnPage } from "./helpers";
 
 /**
  * The app shell — app bar, page rail, Inspector, overflow menu.
@@ -355,4 +355,187 @@ test("user-facing counts are written as English", async ({ page }) => {
   await open(page, (await fixtures()).sample);
   // "1 page(s) · 9 text fragments" — a placeholder for copy, not copy.
   await expect(page.locator(".snackbar__msg")).toHaveText(/^12 pages · \d+ text fragments$/);
+});
+
+/**
+ * Download is a split button. The main half is the one-click download it always
+ * was; the caret opens Export, which holds every action that makes a file
+ * without changing the document. Those used to be scattered across "Text" and
+ * "Finish" in the ⋯ menu and the Inspector, filed beside actions that edit the
+ * document, so "make me a file" had no one place to look.
+ */
+test.describe("Export split button", () => {
+  const OUTPUTS = ["Compress PDF", "Sign with certificate", "Export as images", "Export text (.txt)"];
+
+  test("the caret opens Export, which holds every way to make a file", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    const w = watch(page);
+    const f = await fixtures();
+    await open(page, f.sample);
+    const caret = page.getByRole("button", { name: "Export options" });
+    await expect(caret).toHaveAttribute("aria-haspopup", "menu");
+    await caret.click();
+    await expect(caret).toHaveAttribute("aria-expanded", "true");
+    const menu = page.getByRole("menu", { name: "Export" });
+    const items = menu.getByRole("menuitem");
+    await expect(items).toHaveText(["Download PDF", ...OUTPUTS]);
+    // Focus goes in, the arrows walk it, Escape gives it back to the caret.
+    await expect(items.first()).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(items.nth(1)).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    await expect(items.last()).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(caret).toBeFocused();
+
+    // Each output has one home: not the ⋯ menu, not the Inspector.
+    for (const label of OUTPUTS) {
+      await expect(page.locator(".doclist__item", { hasText: label })).toHaveCount(0);
+    }
+    await page.getByRole("button", { name: "More actions" }).click();
+    for (const label of OUTPUTS) {
+      await expect(page.locator(".menu__item", { hasText: label })).toHaveCount(0);
+    }
+    await page.keyboard.press("Escape");
+    await caret.click();
+
+    // "Download PDF" in the menu is the main half's action.
+    await Promise.all([page.waitForEvent("download"), menu.getByRole("menuitem", { name: "Download PDF" }).click()]);
+    await expect(menu).toHaveCount(0);
+    expectClean(w);
+  });
+
+  test("with several documents open, Download all is an export too", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    const f = await fixtures();
+    await open(page, f.sample);
+    await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', f.typeset);
+    await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+    await page.getByRole("button", { name: "More actions" }).click();
+    await expect(page.locator(".menu__item", { hasText: "Download all" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Export options" }).click();
+    await expect(page.getByRole("menu", { name: "Export" }).getByRole("menuitem").last()).toHaveText("Download all (2) as ZIP");
+  });
+
+  test("on a phone there's no second control: Export heads the ⋯ menu", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    await open(page, (await fixtures()).sample);
+    await expect(page.getByRole("button", { name: "Export options" })).toHaveCount(0);
+    await page.getByRole("button", { name: "More actions" }).click();
+    const group = page.getByRole("group", { name: "Export" });
+    await expect(group.getByRole("menuitem")).toHaveText(OUTPUTS);
+    await expect(page.locator('[role="menu"] [role="group"]').first()).toHaveAccessibleName("Export");
+    await ctx.close();
+  });
+
+  test("on a phone, Download all is in the Export group, not File", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    const f = await fixtures();
+    await open(page, f.sample);
+    await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', f.typeset);
+    await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+    await page.getByRole("button", { name: "More actions" }).click();
+    await expect(page.getByRole("group", { name: "Export" }).getByRole("menuitem").last()).toHaveText("Download all (2) as ZIP");
+    await expect(page.getByRole("group", { name: "File" }).getByRole("menuitem", { name: /Download all/ })).toHaveCount(0);
+    await ctx.close();
+  });
+
+  test("an open Export menu keeps the keyboard: nothing reaches the page under it", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    await pickTool(page, "Redact");
+    await dragOnPage(page, { x: 60, y: 400 }, { x: 420, y: 445 });
+    const box = page.locator(".redaction");
+    await expect(box).toHaveCount(1);
+    const at = await box.boundingBox();
+    await page.getByRole("button", { name: "Export options" }).click();
+    await expect(page.getByRole("menu", { name: "Export" })).toBeVisible();
+    // Delete and the arrows mean "remove / nudge the selection" on the canvas.
+    await page.keyboard.press("Delete");
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("ArrowLeft");
+    await expect(box).toHaveCount(1);
+    expect(await box.boundingBox()).toEqual(at);
+  });
+
+  test("the zoom pill doesn't sit over the open Export menu", async ({ page }) => {
+    // Narrow enough that the menu's left edge drops over the pill's right end.
+    await page.setViewportSize({ width: 700, height: 860 });
+    await open(page, (await fixtures()).sample);
+    await page.getByRole("button", { name: "Export options" }).click();
+    const items = page.getByRole("menu", { name: "Export" }).getByRole("menuitem");
+    for (const item of await items.all()) {
+      const hit = await item.evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        const pts = [[r.left + 4, r.top + r.height / 2], [r.right - 4, r.top + r.height / 2], [r.left + r.width / 2, r.top + r.height / 2]];
+        return pts.every(([x, y]) => el.contains(document.elementFromPoint(x, y)));
+      });
+      expect(hit, `${await item.textContent()} is on top`).toBe(true);
+    }
+  });
+
+  test("picking an item gives focus back to the caret", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    const caret = page.getByRole("button", { name: "Export options" });
+    const menu = page.getByRole("menu", { name: "Export" });
+    // A dialog it opens hands focus back to where it came from on close.
+    await caret.click();
+    await menu.getByRole("menuitem", { name: "Compress PDF" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(caret).toBeFocused();
+    // A download keeps it too, though nothing can be exported while it runs.
+    await page.keyboard.press("Enter");
+    await expect(menu.getByRole("menuitem").first()).toBeFocused();
+    await Promise.all([page.waitForEvent("download"), page.keyboard.press("Enter")]);
+    await expect(caret).toBeFocused();
+    await expect(caret).not.toHaveAttribute("aria-disabled", "true");
+  });
+
+  test("while a file is being made, the caret won't open a menu of dead items", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).long);
+    const caret = page.getByRole("button", { name: "Export options" });
+    await caret.click();
+    const done = page.waitForEvent("download", { timeout: 120_000 });
+    await page.getByRole("menu", { name: "Export" }).getByRole("menuitem", { name: "Export as images" }).click();
+    await expect(caret).toHaveAttribute("aria-disabled", "true");
+    // Click and read back within a frame: the export is quick enough that a
+    // second round trip can land after it finishes.
+    const opened = await caret.evaluate(async (el) => {
+      if (el.getAttribute("aria-disabled") !== "true") return "finished first";
+      (el as HTMLElement).click();
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 0)));
+      return el.getAttribute("aria-expanded");
+    });
+    expect(["false", "finished first"]).toContain(opened);
+    await done;
+  });
+
+  test("the menu doesn't outlive the palette or the breakpoint", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    const caret = page.getByRole("button", { name: "Export options" });
+    const menu = page.getByRole("menu", { name: "Export" });
+    await caret.click();
+    await expect(menu).toBeVisible();
+    await page.keyboard.press("Control+k");
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await expect(menu).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await caret.click();
+    await expect(menu).toBeVisible();
+    await page.setViewportSize({ width: 500, height: 860 });
+    await expect(caret).toHaveCount(0);
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await expect(caret).toHaveAttribute("aria-expanded", "false");
+    await expect(menu).toHaveCount(0);
+  });
 });

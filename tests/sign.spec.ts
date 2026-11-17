@@ -20,7 +20,7 @@ test("a certificate signature verifies against the downloaded bytes", async ({ p
   const f = await fixtures();
   await open(page, f.sample);
 
-  await page.locator('.icon-btn[aria-label="More actions"]').click();
+  await page.locator('[aria-label="Export options"]').click();
   await page.locator(".menu__item", { hasText: "Sign with certificate" }).click();
   const dialog = page.getByRole("dialog", { name: "Sign document" });
   await dialog.getByPlaceholder("e.g. Ada Lovelace").fill("Test Signer");

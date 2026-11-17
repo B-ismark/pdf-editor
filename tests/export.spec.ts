@@ -142,7 +142,7 @@ test.describe("export integrity", () => {
     const before = statSync(photo).size;
     await open(page, photo);
 
-    await page.click('[aria-label="More actions"]');
+    await page.click('[aria-label="Export options"]');
     await page.locator('[role="menuitem"]', { hasText: "Compress PDF" }).click();
     await page.locator(".compress__preset", { hasText: "Keep text" }).click();
     // The estimate is computed by actually running the optimisation, so waiting
@@ -169,7 +169,7 @@ test.describe("export integrity", () => {
   test("Keep text never rewrites a soft mask", async ({ page }) => {
     await open(page, (await fixtures()).masked);
 
-    await page.click('[aria-label="More actions"]');
+    await page.click('[aria-label="Export options"]');
     await page.locator('[role="menuitem"]', { hasText: "Compress PDF" }).click();
     await page.locator(".compress__preset", { hasText: "Keep text" }).click();
     await expect(page.locator(".compress__estimate")).toContainText("text stays selectable", {
@@ -205,7 +205,7 @@ test.describe("export integrity", () => {
   test("an unreadable /DecodeParms leaves the image untouched", async ({ page }) => {
     await open(page, (await fixtures()).brokenParms);
 
-    await page.click('[aria-label="More actions"]');
+    await page.click('[aria-label="Export options"]');
     await page.locator('[role="menuitem"]', { hasText: "Compress PDF" }).click();
     await page.locator(".compress__preset", { hasText: "Keep text" }).click();
     await expect(page.locator(".compress__estimate")).toContainText("text stays selectable", {

@@ -119,7 +119,7 @@ test.describe("saved means saved", () => {
     await addText(page, "Beta");
     await expect(page.locator(".doctab__dirty")).toHaveCount(2);
 
-    await page.locator('.icon-btn[aria-label="More actions"]').click();
+    await page.locator('[aria-label="Export options"]').click();
     await Promise.all([
       page.waitForEvent("download"),
       page.locator(".menu__item", { hasText: "Download all (2) as ZIP" }).click(),

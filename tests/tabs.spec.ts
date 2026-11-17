@@ -158,7 +158,7 @@ test.describe("document tabs", () => {
     await addText(page, "Alpha");
     await openMore(page, f.typeset);
 
-    await page.locator('.icon-btn[aria-label="More actions"]').click();
+    await page.locator('[aria-label="Export options"]').click();
     const [download] = await Promise.all([
       page.waitForEvent("download"),
       page.locator(".menu__item", { hasText: "Download all (2) as ZIP" }).click(),
@@ -279,7 +279,7 @@ test.describe("document tabs", () => {
 
     let downloaded = false;
     page.on("download", () => (downloaded = true));
-    await page.locator('.icon-btn[aria-label="More actions"]').click();
+    await page.locator('[aria-label="Export options"]').click();
     await page.locator(".menu__item", { hasText: "Download all (2) as ZIP" }).click();
     await expect(page.locator(".snackbar")).toContainText("covered.pdf");
     await page.waitForTimeout(500);

@@ -69,7 +69,10 @@ type-checking can't see, and each exists because it broke once:
   primary action at full size and, on a pointer, sized to the bar it sits in with
   the ⋯ menu carrying a visible container, the overflow menu ends inside the
   window and every row is one line, the Inspector names both of its jobs and keeps them reachable,
-  a tooltip on an edge control stays on screen, and counts read as English;
+  a tooltip on an edge control stays on screen, and counts read as English; the
+  Export split button's caret opens every output (and only it lists them; Download
+  all joins with several tabs), keyboard-operable, and on a phone Export heads
+  the ⋯ menu instead of adding a control;
 - `icons.spec.ts` — every `name=` in `src/` is mapped (an unmapped one renders a
   blank square, silently) and every mapped name is used;
 - `marks.spec.ts` — a tick is placed by a *tap* (a checkbox is smaller than the
