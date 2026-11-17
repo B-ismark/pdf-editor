@@ -1,22 +1,59 @@
 # Workspace tabs and autosave
 
-_Read before touching `openBytes`, `DocTabs`, parking/restoring documents, `resetDocUi`, `releaseDoc`, or autosave storage keys._
+_Read before touching `openBytes`, `DocTabs`, parking/restoring documents, the `App` / `DocumentEditor` split, `releaseDoc`, or autosave storage keys._
 
 Moved verbatim from `CLAUDE.md`; the index there links here.
 
 ## Gotchas
 
+- **Two components: the workspace and the document.** `App.tsx` is the
+  workspace — the tab list, opening (`openBytes`, `unlock`, the password
+  prompt), closing, restore, autosave, prefs, the status line and the start
+  screen. `DocumentEditor.tsx` is the one document in front — its history,
+  view, tools, selection, find, Inspector and dialogs. The shared types are in
+  `workspace.ts`. The editor is mounted with `key={id + ":" + gen}`, and `gen`
+  goes up every time a document comes to the front (a switch, a new tab, a
+  rebuild in place), so **every document gets a fresh editor**: nothing
+  per-document can leak into the next file, and there is no reset list to keep
+  up to date (the old `resetDocUi` / `showDoc`).
+  - **Who owns what.** For the tab in front, `tabs` stays the truth for `pdf`,
+    `fileName`, `baked`, `saved` and `locked` (only the workspace changes
+    them). Its `history`, `view`, `changeCount` and `unsaved` are stale while it
+    is in front: the editor reports them through `onLive` (a `LiveDoc` tagged
+    with the tab id, so a late report is never read as another tab's) and
+    hands them over through its `park()` handle, read synchronously before it
+    unmounts.
+  - **The editor is `memo`'d, and the workspace re-renders on every edit it
+    reports.** Everything passed down must keep its identity: callbacks are
+    `useCallback` or `useStable`, and objects (the theme) are memoised. A new
+    prop identity per render re-renders every page of the document per
+    keystroke.
+  - Seeding: `useHistory(initial, limit, from)` resumes a parked history; the
+    editor calls `restoreView(entry.view)` once on mount, after it sets the page
+    width.
+  - **What a fresh editor must not re-learn: the fit and the focus.** The
+    fit-to-width measurement belongs to the workspace (the old single shell
+    measured it once), so the shell holds it in `fitRef` and each editor seeds
+    `useViewport(seed)` from it and keeps it current. Measured afresh, a
+    switch drew one frame at the unmeasured scale, restored the scroll position
+    against that height (half-way down came back a third of the way down), and
+    re-fitted a page the user had left at its size by hiding the panel. The tab
+    strip remounts with the editor too, so `DocTabs` carries keyboard focus
+    across the remount (`carry`): without it, Delete and the arrow keys dropped
+    focus to `<body>`. And anything the shell decides *at a moment* (the
+    `beforeunload` guard) asks the editor through its handle rather than reading
+    the last `onLive` report, which lands a render late.
 - **Tabs: park, then unpark — and `openBytes` reads live state.**
   `openBytes` opens a *new tab* by default; `{ replace: true }` is only for the
   operations that rebuild the document in front (Organise, page numbers,
   watermark), whose output is the same document with its edits baked in. It is
   called in loops (several dropped files, a restored workspace), so it reads
-  `activeId` / `tabs` / `parkActive` from the `liveTabs` ref *after* its await,
-  never from its closure: a stale closure parked nothing, so a restored document
-  went into the background counted as clean and autosave then deleted its copy.
-  Anything per-document that isn't in `DocState` (selection, find, an armed
-  tool, a pending stamp) must be cleared in `resetDocUi`, or an id from one file
-  lands on another. Object ids come from one counter across the whole workspace,
+  `activeId` / `tabs` from the `liveTabs` ref *after* its await, never from its
+  closure: a stale closure parked nothing, so a restored document went into the
+  background counted as clean and autosave then deleted its copy. It parks the
+  front editor (`parkActive`) right then, outside any state updater, and
+  `park()` carries the tab id so a handle from the wrong editor is ignored.
+  Object ids come from one counter across the whole workspace,
   which is why a restore bumps it past *every* restored document's ids.
   Closing a tab calls `releaseDoc(bytes)` (`pdf/loader.ts`): the caches are
   WeakMaps, but the pdf.js *worker* keeps every document it opened until told

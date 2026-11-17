@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type KeyboardEvent } from "react";
 import { Icon } from "./Icon";
 
 export interface DocTab {
@@ -31,6 +31,10 @@ interface Props {
  * is no hover, and a control that exists only under a mouse is a control a phone
  * user can't find.
  */
+/** When focus left a strip that was just unmounted (see below), as a
+ * `performance.now()` time, else 0. One strip is on screen at a time. */
+let carry = 0;
+
 export function DocTabs({ tabs, activeId, disabled, onSelect, onClose, onOpen }: Props) {
   const refocus = useRef(false);
   const onKeyDown = useCallback(
@@ -80,6 +84,23 @@ export function DocTabs({ tabs, activeId, disabled, onSelect, onClose, onOpen }:
     refocus.current = false;
     listRef.current?.querySelector<HTMLElement>(`[data-doc-tab="${CSS.escape(activeId)}"]`)?.focus();
   }, [activeId, tabs]);
+
+  // The strip belongs to the document editor, which is mounted fresh for every
+  // document brought to the front — so switching or closing a tab replaces the
+  // whole strip, focused button included. Focus that was in the old strip
+  // moves to the new one's tab in front, or the next arrow or Delete lands on
+  // <body>. Runs before the old strip's nodes leave the page.
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (carry && performance.now() - carry < 1000 && activeId) {
+      list?.querySelector<HTMLElement>(`[data-doc-tab="${CSS.escape(activeId)}"]`)?.focus();
+    }
+    carry = 0;
+    return () => {
+      if (list && list.contains(document.activeElement)) carry = performance.now();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <nav className="doctabs" aria-label="Open documents">

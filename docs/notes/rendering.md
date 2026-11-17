@@ -1,6 +1,6 @@
 # Rendering and bundle size
 
-_Read before touching `PageView`, `useRenderWindow`, thumbnails, props passed from `App` into memo'd pages, or imports that might pull pdf-lib into the initial bundle._
+_Read before touching `PageView`, `useRenderWindow`, thumbnails, props passed from `DocumentEditor` into memo'd pages, or imports that might pull pdf-lib into the initial bundle._
 
 Moved verbatim from `CLAUDE.md`; the index there links here.
 
@@ -12,7 +12,7 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   size, so scroll anchors are exact) — only the contents are windowed. Two
   traps: the observer's `root` must be the *scrolling ancestor*, since
   `rootMargin` doesn't expand an intervening clip; and `PageView` is `memo`'d,
-  so props passed from `App` must be referentially stable — see the next point.
+  so props passed from `DocumentEditor` must be referentially stable — see the next point.
 - **A page re-renders only when *its* props change. Keep it that way.** On a
   150-page file one stray prop means 150 page renders per keystroke, and
   `rendering.spec.ts` ("page memo") counts them. The rules:
@@ -25,7 +25,7 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   - **Selection-shaped props go only to their own page.** `selection`,
     `editingId`, `autoFocusId` and `activeFindId` are passed as `null` to every
     page but the one the id lives on (`pageOf`). Don't pass a global value.
-  - **`doc` in `App` is the history's verbs only, and is stable.** Callbacks that
+  - **`doc` in `DocumentEditor` is the history's verbs only, and is stable.** Callbacks that
     write the document depend on `[doc]`. Anything that *reads* it uses
     `docHistory.state` and lists that as a dependency, or goes stale. (`history`
     is taken: it's the browser's, used for the phone Back guard.)

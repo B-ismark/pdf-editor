@@ -75,18 +75,20 @@ per-page rendering, add a spec for it.
   removed. `pageOps.ts` (reorder/rotate/merge/extract) and `finishOps.ts` (page
   numbers/watermark/export-as-images) also use pdf-lib.
 - **Workspace (tabs)** — several PDFs can be open at once, one `DocTabs` tab
-  each. The document *in front* lives in `App`'s `pdf` / `fileName` / `doc`
-  exactly as when there was only one, so nothing that edits it knows tabs exist;
-  the others are *parked* in `tabs: OpenDoc[]` with their whole undo history
-  (`useHistory().snapshot()` / `restore()`), their scroll position and zoom
-  (`useViewport().captureView()` / `restoreView()`), and their change count.
-  See `docs/notes/tabs.md` before touching `openBytes`.
+  each. `App.tsx` is the *workspace shell*: the tab list, opening/closing,
+  password prompt, restore, autosave, prefs, the status line. The document *in
+  front* is a `DocumentEditor.tsx`, mounted fresh per document (keyed by tab id
+  and a load generation), so nothing that edits it knows tabs exist. The others
+  are *parked* in `tabs: OpenDoc[]` (`workspace.ts`) with their whole undo
+  history, their scroll position and zoom, and their change count. See
+  `docs/notes/tabs.md` before touching `openBytes` or the split.
 - **State** — `hooks/useHistory.ts` holds a single `DocState`
   (`edits, textBoxes, redactions, annotations, stamps`, and the page plan
   `pages` — see `docs/notes/pages.md`) with undo/redo and
   gesture coalescing (pass a stable `key` to `doc.set` to collapse a continuous
   drag/type into one history step). A `revision` counter re-seeds
-  `contentEditable` overlays on undo/redo. `App.tsx` is the orchestrator.
+  `contentEditable` overlays on undo/redo. `DocumentEditor.tsx` orchestrates
+  the document; `App.tsx` the workspace around it.
 - **Viewport** — `hooks/useViewport.ts`: fit-to-width base scale + zoom
   multiplier, app-managed pan/pinch/double-tap/⌘-wheel. The scroll surface is
   `.viewer__scroll` inside a non-scrolling `.viewer` frame so the zoom control
@@ -128,7 +130,7 @@ linked note.
 | [`docs/notes/privacy-and-export.md`](docs/notes/privacy-and-export.md) | the CSP / asset loading, `exporter.ts`, link/action sanitising, the redaction raster codec, `optimizeImages.ts`, `download.ts` |
 | [`docs/notes/rendering.md`](docs/notes/rendering.md) | `PageView`, `useRenderWindow`, thumbnails, memo'd props, and lazy-loading pdf-lib |
 | [`docs/notes/text-fidelity.md`](docs/notes/text-fidelity.md) | fonts (`fontInfo.ts`, `style.ts`), baselines (`textBaseline.ts`), overlay insets and the selection mark, sampled edit colours (`fragmentColors.ts`) |
-| [`docs/notes/tabs.md`](docs/notes/tabs.md) | `openBytes`, parking/unparking documents, `resetDocUi`, `releaseDoc`, autosave keys |
+| [`docs/notes/tabs.md`](docs/notes/tabs.md) | `openBytes`, parking/unparking documents, the `App` / `DocumentEditor` split, `releaseDoc`, autosave keys |
 | [`docs/notes/shell.md`](docs/notes/shell.md) | icons, the app bar, the Inspector, floating chrome, `corner-shape`, motion tokens, `opens` marks, native-UI replacements, prefs, theme, finishing ops |
 | [`docs/notes/canvas-tools.md`](docs/notes/canvas-tools.md) | the Draw tool and drawbar, `AnnotationLayer`, stacking order, multi-select drag, tick/cross marks, touch select-first |
 | [`docs/notes/pages.md`](docs/notes/pages.md) | the page plan (`DocState.pages`, `pagePlan.ts`), turned pages and pointer maths (`toLocal`), Organise's apply, page order/deletion in export |

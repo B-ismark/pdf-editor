@@ -105,7 +105,11 @@ type-checking can't see, and each exists because it broke once:
   in the new tab); an Organise result counts as unsaved (`baked`); restoring past
   the tab cap, Delete from a second window, and a discarded tab each leave the
   device holding exactly what they should; Download all refuses a whiteout over
-  live text in *any* tab; and closing a tab by keyboard keeps focus on the strip;
+  live text in *any* tab; closing or arrowing between tabs by keyboard keeps
+  focus on the strip; and since each document gets a fresh editor, coming back
+  lands at the scroll position it was left at, a switch keeps the page at the
+  size it was shown (no re-fit after hiding the panel), and Ctrl+O closes the
+  ⋯ menu;
 - `saved.spec.ts` — a download is a save: it clears the counter, the tab's
   dot and the leave prompt, and turns the close prompt into a plain "Close";
   a download the browser didn't finish still can't lose the work (close asks,

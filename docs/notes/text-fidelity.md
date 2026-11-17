@@ -129,4 +129,4 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   - **`resolveFragmentStyle` takes the ink as `baseColor`**, so the overlay, the
     properties panel, and both export paths cannot disagree about what colour the
     text is. A memo that reads it needs it as a dependency (`activeStyle` in
-    `App.tsx`) — it arrives after the page is sampled.
+    `DocumentEditor.tsx`) — it arrives after the page is sampled.

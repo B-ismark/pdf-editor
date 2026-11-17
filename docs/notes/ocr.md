@@ -72,7 +72,7 @@ Three things about it are load-bearing, so don't casually relax them:
 - **It's part of "Save session on this device."** The cache holds engine
   binaries, not anything of the user's, but a switch labelled "don't keep things
   on this device" that left 1.4 MB of wasm behind is a switch that lies. So
-  `ocrPages` takes `cacheEngine` (App passes `autosaveOn`), and `toggleAutosave`
+  `ocrPages` takes `cacheEngine` (the editor passes `autosaveOn`), and `toggleAutosave`
   calls `clearEngineCache()` beside `clearSession()`. Mechanism lives in
   `pdf/engineCache.ts`, which imports nothing from `ocr.ts` — that's what lets
   `App` reach `clearEngineCache` without pulling tesseract.js into the initial
