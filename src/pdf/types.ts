@@ -31,6 +31,10 @@ export interface TextFragment {
    * {@link FragmentFont}, harvested once the page has rendered, is the real
    * thing. */
   fontFamily: string;
+  /** Set when pdf.js reports the run as right-to-left (Hebrew, Arabic): its
+   * glyphs run from the far end, so a position measured from the origin is
+   * wrong, and search covers the whole fragment instead. */
+  rtl?: boolean;
 }
 
 /**
@@ -86,6 +90,11 @@ export interface PageData {
   fragments: TextFragment[];
   /** Interactive form fields on this page (empty if none). */
   fields: FormField[];
+  /** The page object pdf.js rendered for this slot — which is not always the
+   * one pdf-lib's own page walk finds at the same index (see `pageTree.ts`).
+   * Null when pdf.js has no reference for it (a page stored as a direct
+   * object), which the exporter refuses rather than guesses. */
+  ref: { num: number; gen: number } | null;
 }
 
 /** The parsed document plus its original bytes (needed to re-export). */

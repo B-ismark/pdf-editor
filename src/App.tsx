@@ -21,6 +21,7 @@ import { useHistory, type HistorySnapshot } from "./hooks/useHistory";
 import { DocTabs } from "./components/DocTabs";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useFragmentFont } from "./hooks/usePageFonts";
+import { peekPageFonts, subscribeFonts } from "./pdf/fontInfo";
 import { useFragmentColors } from "./hooks/usePageColors";
 import { usePersistentState, usePersistentFlag } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
@@ -425,9 +426,25 @@ export function App() {
   busyRef.current = busy;
 
   // ---- Find in document (Ctrl/⌘+F) ----
+  // The document's own face for a fragment, when its page has been harvested —
+  // match boxes are measured in it (see `findMatches`).
+  // Pages are harvested as they paint, so the faces change under the find bar;
+  // re-measure when they do (only while it's open — every page paint would
+  // otherwise re-render the app), so the highlight is the box "Redact all"
+  // will draw.
+  const [fontsVersion, setFontsVersion] = useState(0);
+  useEffect(() => {
+    if (!findOpen) return;
+    return subscribeFonts(() => setFontsVersion((v) => v + 1));
+  }, [findOpen]);
+  const fontFor = useCallback(
+    (f: TextFragment) => (pdf ? peekPageFonts(pdf.bytes, f.pageIndex).get(f.itemIndex) ?? null : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontsVersion is the store's version
+    [pdf, fontsVersion],
+  );
   const matches: FindMatch[] = useMemo(
-    () => (pdf && findOpen && findQuery ? findMatches(pdf.pages, edits, findQuery) : []),
-    [pdf, findOpen, findQuery, edits],
+    () => (pdf && findOpen && findQuery ? findMatches(pdf.pages, edits, findQuery, fontFor) : []),
+    [pdf, findOpen, findQuery, edits, fontFor],
   );
   const matchesByPage = useMemo(() => {
     const m = new Map<number, FindMatch[]>();
@@ -493,12 +510,15 @@ export function App() {
 
   /** Redact every current search match (one undo step). */
   const redactAllMatches = useCallback(() => {
-    if (matches.length === 0) return;
+    if (matches.length === 0 || !pdf) return;
+    // Exactly the boxes on screen: `matches` re-measures as the document's
+    // fonts are harvested, so what's highlighted is what gets redacted.
+    const hits = matches;
     doc.set((d) => ({
       ...d,
       redactions: [
         ...d.redactions,
-        ...matches.map((m) => ({
+        ...hits.map((m) => ({
           id: nextId("rd"),
           pageIndex: m.pageIndex,
           x: m.x,
@@ -509,11 +529,11 @@ export function App() {
         })),
       ],
     }));
-    const n = matches.length;
+    const n = hits.length;
     setMessage(`Redacted ${n} match${n === 1 ? "" : "es"} of “${findQuery}”.`);
     setStatus("ready");
     closeFind();
-  }, [matches, doc, findQuery, closeFind]);
+  }, [matches, pdf, doc, findQuery, closeFind]);
 
   /** Copy all document text to the clipboard. */
   const copyAllText = useCallback(async () => {

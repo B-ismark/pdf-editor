@@ -1,6 +1,17 @@
-import { LineCapStyle, PDFCheckBox, PDFDocument, PDFString, PDFTextField, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { LineCapStyle, PDFCheckBox, PDFDocument, PDFRef, PDFString, PDFTextField, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
+import {
+  assertNoStructureTree,
+  collectGarbage,
+  detachAnnotsOfPages,
+  dropStructureTree,
+  isolatePageResources,
+  pruneFieldsOnPages,
+  retargetPageRefs,
+  retitleOutlinesInto,
+} from "./structure";
+import { alignPageTree } from "./pageTree";
 import { safeLinkUrl } from "./url";
 import { markPolylines, markStroke } from "./marks";
 import { createSourceFontEmbedder, type SourceFontEmbedder } from "./fontEmbed";
@@ -430,6 +441,13 @@ function sanitize(text: string, font: PDFFont): string {
  * edits/new text drawn on top. Pages with redactions are rasterised to an
  * image with every edit, text box, and redaction baked in — this genuinely
  * removes the redacted content from the output (no recoverable text layer).
+ *
+ * The source document is edited **in place** and saved, rather than rebuilt by
+ * copying pages into a new one. A rebuild dropped everything at catalog level
+ * (outline, page labels, tags and `/Lang`, named destinations, layers, the
+ * form) and duplicated every shared font and image once per page; see
+ * `pdf/structure.ts` for what editing in place has to do instead to keep a
+ * redacted page from surviving by some other route.
  */
 export async function exportPdf(
   loaded: LoadedPdf,
@@ -437,12 +455,18 @@ export async function exportPdf(
   onProgress?: (page: number, total: number) => void,
 ): Promise<Uint8Array> {
   const { edits, textBoxes, redactions, annotations, stamps, links = [], formValues = {}, pageNumbers, watermark, losslessRaster = false } = input;
-  const src = await PDFDocument.load(loaded.bytes.slice(0));
-  fillAndFlattenForm(src, formValues);
   // updateMetadata: false stops pdf-lib stamping its own Producer / Creator /
-  // CreationDate / ModDate into the new document; sanitizeDocument() then
-  // clears anything else before save (see below).
-  const out = await PDFDocument.create({ updateMetadata: false });
+  // CreationDate / ModDate on load; sanitizeDocument() then clears anything
+  // else before save (see below).
+  const out = await PDFDocument.load(loaded.bytes.slice(0), { updateMetadata: false });
+  // Before anything asks pdf-lib for a page: make its page *i* the object the
+  // preview showed at *i*. On a malformed tree they differ, and the raster
+  // would replace the wrong page.
+  alignPageTree(out, loaded.pages.map((p) => p.ref));
+  fillAndFlattenForm(out, formValues);
+  // Pages replaced by a raster: old page ref → its replacement. Everything that
+  // pointed at the old page is moved over, and nothing of the old one survives.
+  const replaced = new Map<PDFRef, PDFRef>();
   const fontCache = new Map<string, PDFFont>();
 
   const getFont = async (key: keyof typeof StandardFonts): Promise<PDFFont> => {
@@ -513,14 +537,17 @@ export async function exportPdf(
     };
 
     if (needsRaster) {
-      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, pageEdited, await getJpegEncoder());
+      const oldRef = out.getPage(i).ref;
+      const rasterPage = await rasterisePage(out, i, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, pageEdited, await getJpegEncoder());
+      // The raster went in at `i`, pushing the original to `i + 1`.
+      out.removePage(i + 1);
+      replaced.set(oldRef, rasterPage.ref);
       applyPageLayers(rasterPage);
       continue;
     }
 
-    // Vector path: copy the original page and draw edits + text boxes on top.
-    const [page] = await out.copyPages(src, [i]);
-    out.addPage(page);
+    // Vector path: draw edits + text boxes on top of the original page.
+    const page = out.getPage(i);
 
     for (const fragment of pageData.fragments) {
       const edit = edits[fragment.id];
@@ -603,17 +630,40 @@ export async function exportPdf(
 
   await embedder?.destroy();
 
+  // Order matters. Fields and annotations are found by the *old* page refs, so
+  // they go before the refs move; bookmarks are matched to the *new* refs, so
+  // after. The sanitiser unhooks things from the catalog, so it goes before the
+  // sweep; and resource narrowing and the sweep need pdf-lib's lazily-embedded
+  // fonts and images to exist as objects, so they go after `flush()`.
+  const anyReplaced = replaced.size > 0;
+  if (anyReplaced) {
+    const oldPages = new Set(replaced.keys());
+    pruneFieldsOnPages(out, oldPages);
+    detachAnnotsOfPages(out, oldPages);
+    retargetPageRefs(out, replaced);
+    retitleOutlinesInto(out, new Set(replaced.values()));
+    dropStructureTree(out);
+  }
   // Privacy: strip metadata / timestamps / active content before handing the
   // file back (the app never uploads, so the download is the only thing that
   // leaves the device — it should carry nothing identifying).
   sanitizeDocument(out);
-  return out.save();
+  await out.flush();
+  if (anyReplaced) isolatePageResources(out);
+  collectGarbage(out);
+  if (anyReplaced) assertNoStructureTree(out);
+  // Appearances were generated when (and if) the form was flattened; asking
+  // pdf-lib to regenerate every field's on save would rewrite the untouched
+  // ones and throws on fields whose /DA it can't parse.
+  return out.save({ updateFieldAppearances: false });
 }
 
 /** Render a page to an image with edits, text boxes, and redactions baked in,
  * then add it to the output document as a full-page image. */
 async function rasterisePage(
   out: PDFDocument,
+  /** Position in `out` to insert the raster page at. */
+  at: number,
   loaded: LoadedPdf,
   pageIndex: number,
   edits: Edits,
@@ -738,7 +788,12 @@ async function rasterisePage(
   const image = await embedPageRaster(out, canvas, encodeJpeg);
   const wPt = pageData.viewBox.width;
   const hPt = pageData.viewBox.height;
-  const page = out.addPage([wPt, hPt]);
+  const page = out.insertPage(at, [wPt, hPt]);
+  // A page inserted into an existing tree inherits /Rotate, /CropBox and
+  // /Resources from its parent node. The raster is already the page as seen,
+  // rotation included, so pin what it would otherwise inherit.
+  page.setRotation(degrees(0));
+  page.setCropBox(0, 0, wPt, hPt);
   page.drawImage(image, { x: 0, y: 0, width: wPt, height: hPt });
   return page;
 }

@@ -61,6 +61,58 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   (`ctx.measureText` / `widthOfTextAtSize`), never estimated from character
   counts. That estimate shipped once and left original text visible past the
   cover for wide glyphs and non-Latin scripts.
+- **Search matches are measured, then widened to the worst case**
+  (`pdf/find.ts`). The stand-in font that measures a match doesn't know about
+  `Tc`/`Tw`/`Tz`, so the leftover between measured and real fragment width is
+  spread three ways (proportional, per-character, per-space) and the box takes
+  the union. Text that isn't upright left-to-right (rotated by its matrix, or
+  RTL) redacts the *whole fragment* — over-covering is a cosmetic cost,
+  under-covering is a leak; a `/Rotate` page is mapped into display space. Case folding keeps a
+  map back to the original indices (Turkish "İ" lower-cases to two code
+  points). Don't tighten any of this without `export.spec`'s hostile-text test.
+- **Export edits the loaded file in place; it doesn't rebuild one.** That keeps
+  catalog-level structure (outline, page labels, tags, `/Lang`, named
+  destinations, layers, the form) and shares what the source shared. It also
+  inverts the privacy default — a rebuild carried only what it copied, an
+  in-place save carries everything still in the file — so three rules hold it
+  together (`pdf/structure.ts`):
+  - **A redacted page is replaced, never edited.** The raster page is inserted
+    and the original removed; references to the old page are retargeted, form
+    fields on it are pruned, and the structure tree is dropped outright when
+    any page was replaced (its `/ActualText` and `/Alt` repeat page text, and
+    partial pruning would trust every producer's bookkeeping with a redaction).
+  - **`collectGarbage` must run last, after `flush()`.** pdf-lib writes *every*
+    object in its context, reachable or not — so without it the replaced
+    page's content stream, objects orphaned by old incremental saves, and
+    whatever the sanitiser unhooked all ship in the file.
+  - **The catalog is an allow-list** (`CATALOG_KEEP` in `sanitize.ts`), and so
+    is `/Names` (only `/Dests`). Adding a key there ships it in every export;
+    outline and form-field actions go through the same `scrubActions` as
+    annotations.
+  - **pdf-lib's page list is aligned to pdf.js's before anything else**
+    (`alignPageTree` in `pdf/pageTree.ts`). On a malformed tree (an untyped
+    `/Kids` entry, a wrong `/Count`) the two libraries disagree on which object
+    is "page 2", and export rasterised the wrong page — shipping the redacted
+    one intact. Export addresses pages by the refs pdf.js rendered
+    (`PageData.ref`) and *fails* rather than guess; a failed export is
+    recoverable, a misplaced redaction isn't.
+  - **Everything that could carry a replaced page out is cut, not just the
+    page:** resources a kept page shares or inherits are narrowed to the names
+    its content draws (`isolatePageResources` — a shared `/XObject` dict
+    otherwise keeps the redacted page's forms reachable, so GC keeps them);
+    replies and popups on kept pages lose their link to the page's comments;
+    bookmarks pointing at it are retitled "Page N" (a title often quotes the
+    page); `/GoTo /SD` is dropped (it reaches the structure tree); and a final
+    `assertNoStructureTree` fails the export if any tag survived.
+  - **Known limits, accepted:** layer names, named-destination keys and
+    page-label prefixes may quote text; undecodable content and Type3/pattern/
+    shading resources aren't narrowed; a page with no object of its own fails
+    export. Listed in PR #45.
+- **Organise copies pages in batches.** Each `copyPages` call has its own
+  object copier, and only one copier can notice that two pages share a font or
+  image — one call per page wrote a shared image once per page. A page the
+  plan uses twice can share the call: the copier clones the page leaf on every
+  request (only its resources are shared), so the two slots are two objects.
 - **Download via `src/download.ts`.** It attaches the anchor before clicking and
   defers `revokeObjectURL`; revoking synchronously races the browser's fetch of
   the blob and cancels downloads on Firefox/Safari.

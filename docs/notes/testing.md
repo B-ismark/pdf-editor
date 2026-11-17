@@ -18,7 +18,20 @@ type-checking can't see, and each exists because it broke once:
   extractable text while its neighbour keeps its own, the redaction raster is a
   JPEG (and the lossless switch really turns that off), "Keep text" shrinks a
   flate-compressed image without costing the page its text, it never rewrites a
-  soft mask, and an image whose `/DecodeParms` it can't read is left alone;
+  soft mask, and an image whose `/DecodeParms` it can't read is left alone.
+  Package 1 added: "Redact all" covers every glyph of every search match (the
+  target located from the rendered ink, not from font metrics, which disagree
+  with pdf.js); export keeps the outline, page labels, tags and `/Lang`, named
+  destinations, layers and the form; a redacted page leaves nothing behind
+  (field values, tag `/ActualText`, orphaned objects, Info) while links to it
+  follow the replacement; a shared image is written once on export *and* on
+  Organise; a page used twice in Organise is two pages; and export yields per
+  slice of work, not per page (counted, not timed). From the adversarial
+  reviews: no red survives "Redact all" on text that's stretched, spaced,
+  rotated, case-folded, right-to-left or on a page not yet scrolled to (the
+  Turkish/Hebrew pages need DejaVu, and are skipped with a note without it); a
+  damaged page tree redacts the page the user saw; a page sharing resources
+  with a redacted one doesn't carry its forms out;
 - `ocr.spec.ts` — an image-only page becomes findable text, with the engine and
   language model loaded from our own origin only; and the engine cache holds the
   wasm core and *nothing else* (skips if assets are absent);
