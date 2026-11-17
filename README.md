@@ -275,7 +275,9 @@ A pragmatic, client-side editor — worth knowing where the seams are:
   is unlocked once, in your browser, when you type its password (an owner-only
   lock opens without asking); the copy you edit and download is unlocked, and
   the app says so. A document opened with a password is never stored in the
-  session copy. Adding a password on export isn't supported yet.
+  session copy. Adding a password on export isn't supported yet, and
+  Organise's "Add PDF" can't take a password-protected file — open it in its
+  own tab first, then add it from there.
 
 ## Tech
 

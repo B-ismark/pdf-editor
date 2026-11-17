@@ -337,6 +337,8 @@ export function App() {
   const [baked, setBaked] = useState(0);
   const [savedMark, setSavedMark] = useState<SavedMark | null>(null);
   const [locked, setLocked] = useState(false);
+  /** Organise pulled pages from a password-opened tab (see its `onApply`). */
+  const organizeTookLocked = useRef(false);
   const [pwAsk, setPwAsk] = useState<{
     name: string;
     wrong: boolean;
@@ -918,9 +920,13 @@ export function App() {
     async (bytes: ArrayBuffer, name: string): Promise<{ bytes: ArrayBuffer; locked: boolean } | null> => {
       const { unlockPdf } = await import("./pdf/decrypt");
       let password = "";
+      // Cancel pressed while a try is "Checking…": the attempt can't be
+      // interrupted, so its result is thrown away instead of opened.
+      let cancelled = false;
       try {
         for (;;) {
           const r = await unlockPdf(bytes, password);
+          if (cancelled) return null;
           if (r.kind === "unlocked") return { bytes: r.bytes, locked: r.password };
           // Not encrypted after all, or encrypted beyond what the decrypter
           // reads: open the original and let pdf.js say what it can.
@@ -934,7 +940,17 @@ export function App() {
             setPwAsk({ name, wrong, checking: false, answer }),
           );
           if (next == null) return null;
-          setPwAsk((a) => a && { ...a, checking: true });
+          setPwAsk((a) =>
+            a && {
+              ...a,
+              checking: true,
+              answer: (pw) => {
+                if (pw != null) return;
+                cancelled = true;
+                setPwAsk(null);
+              },
+            },
+          );
           password = next;
         }
       } finally {
@@ -968,7 +984,14 @@ export function App() {
       }
       let locked = false;
       if (mayBeEncrypted(bytes)) {
-        const opened = await unlock(bytes, file.name);
+        let opened: Awaited<ReturnType<typeof unlock>>;
+        try {
+          opened = await unlock(bytes, file.name);
+        } catch {
+          // Whatever went wrong inside the decrypter, the app mustn't be left
+          // on a spinner that ignores every later open.
+          opened = { bytes, locked: false };
+        }
         if (!opened) {
           setStatus(liveTabs.current.pdf ? "ready" : "idle");
           setMessage(`Didn't open "${file.name}".`);
@@ -3447,18 +3470,32 @@ export function App() {
               setOrganizeOpen(false);
               // The result *is* the edits, baked in: still unsaved work, so the
               // tab stays dirty and autosaved, and closing it asks.
-              void openBytes(bytes, fileName, note, undefined, { replace: true, baked: Math.max(1, changeCount) });
+              // Pages pulled in from a password-opened tab make the result one
+              // too, or merging would be a way round "never stored on the device".
+              const tookLocked = organizeTookLocked.current;
+              organizeTookLocked.current = false;
+              void openBytes(bytes, fileName, note, undefined, {
+                replace: true,
+                baked: Math.max(1, changeCount),
+                ...(tookLocked ? { locked: true } : {}),
+              });
             }}
             onExtract={(bytes) =>
               downloadBytes(bytes, fileName.replace(/\.pdf$/i, "") + "-extract.pdf")
             }
-            onClose={() => setOrganizeOpen(false)}
+            onClose={() => {
+              organizeTookLocked.current = false;
+              setOrganizeOpen(false);
+            }}
             otherDocs={tabs
               .filter((t) => t.id !== activeId)
               .map((t) => ({
                 id: t.id,
                 name: t.fileName,
                 bake: async () => {
+                  // Conservative: a locked tab baked at all marks the result,
+                  // even if its pages are later taken back out of the plan.
+                  if (t.locked) organizeTookLocked.current = true;
                   const { exportPdf } = await import("./pdf/exporter");
                   const state = t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
                   // The same guard as Download: a whiteout over live text would

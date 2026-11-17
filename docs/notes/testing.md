@@ -119,7 +119,10 @@ type-checking can't see, and each exists because it broke once:
   and downloads as a plain PDF with its text (no `/Encrypt`); cancel opens
   nothing; an owner-locked file opens without asking and its download is
   readable (it wasn't); and a password-opened document never reaches the
-  autosave store. Fixtures are encrypted with `@cantoo/pdf-lib`;
+  autosave store — nor does a document Organise merged its pages into; an
+  owner-locked file with a 30,000-item outline opens (the unlocker's recursive
+  walk overflowed); and Cancel during "Checking…" opens nothing. Fixtures are
+  encrypted with `@cantoo/pdf-lib`;
 - `overlays.spec.ts` — a marquee'd group moves as one (one undo step) and
   survives the drag, a plain click on a member selects just that one, arrows
   nudge the group, and a buried stroke can be raised — in the overlay's paint

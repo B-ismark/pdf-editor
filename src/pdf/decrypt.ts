@@ -44,31 +44,39 @@ export async function unlockPdf(bytes: ArrayBuffer, password: string): Promise<U
   // object streams and the old xref stream as unreferenced objects; written
   // out, they'd be dead weight carrying the encryption parameters into a file
   // that has none. Keep only what the document can reach.
-  const { PDFRef, PDFDict, PDFArray, PDFStream } = lib;
-  const ctx = doc.context;
-  const seen = new Set<string>();
-  const walk = (o: unknown): void => {
-    if (o instanceof PDFRef) {
-      const key = o.toString();
-      if (seen.has(key)) return;
-      seen.add(key);
-      walk(ctx.lookup(o));
-    } else if (o instanceof PDFDict) {
-      for (const [, v] of o.entries()) walk(v);
-    } else if (o instanceof PDFStream) {
-      walk(o.dict);
-    } else if (o instanceof PDFArray) {
-      for (const v of o.asArray()) walk(v);
+  //
+  // Walked with an explicit stack, not recursion: outline /Next chains and
+  // page-to-page links run thousands deep, and a recursive walk overflowed
+  // the stack on them. Anything that still throws lands as "failed".
+  let out: Uint8Array;
+  try {
+    const { PDFRef, PDFDict, PDFArray, PDFStream } = lib;
+    const ctx = doc.context;
+    const seen = new Set<string>();
+    const stack: unknown[] = [ctx.trailerInfo.Root, ctx.trailerInfo.Info];
+    while (stack.length) {
+      const o = stack.pop();
+      if (o instanceof PDFRef) {
+        const key = o.toString();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        stack.push(ctx.lookup(o));
+      } else if (o instanceof PDFDict) {
+        for (const [, v] of o.entries()) stack.push(v);
+      } else if (o instanceof PDFStream) {
+        stack.push(o.dict);
+      } else if (o instanceof PDFArray) {
+        for (const v of o.asArray()) stack.push(v);
+      }
     }
-  };
-  walk(ctx.trailerInfo.Root);
-  walk(ctx.trailerInfo.Info);
-  for (const [ref] of ctx.enumerateIndirectObjects()) {
-    if (!seen.has(ref.toString())) ctx.delete(ref);
+    for (const [ref] of ctx.enumerateIndirectObjects()) {
+      if (!seen.has(ref.toString())) ctx.delete(ref);
+    }
+    ctx.trailerInfo.Encrypt = undefined;
+    out = await doc.save({ useObjectStreams: true, updateFieldAppearances: false });
+  } catch {
+    return { kind: "failed" };
   }
-  ctx.trailerInfo.Encrypt = undefined;
-
-  const out = await doc.save({ useObjectStreams: true, updateFieldAppearances: false });
   return {
     kind: "unlocked",
     bytes: out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer,

@@ -128,6 +128,18 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   Root/Info is deleted before saving; and a document that took a real password
   is `locked` (per tab, carried through Organise/finishing rebuilds) and
   treated as clean by autosave, so no plain copy of it is left on the device.
+  **Locked is contagious through Organise:** pulling a locked tab's pages in via
+  "From open tabs" makes the result locked too (`organizeTookLocked`), or a
+  merge would be a way round it. The reachability sweep is an explicit-stack
+  loop, not recursion — outline `/Next` chains run thousands deep and a
+  recursive walk overflowed, stranding the app on a spinner; any throw in the
+  sweep or save is `failed`, and `openFile` catches whatever escapes `unlock`.
+  Cancel during "Checking…" can't stop the decrypt, so its result is dropped.
+  Known limits, invisible today because export rewrites metadata anyway: the
+  Info dictionary and `/ID` of an xref-stream file aren't carried over, and XMP
+  in a file with `EncryptMetadata false` comes out undecodable. Organise's "Add
+  PDF" doesn't decrypt (open the file as a tab instead), and a session saved
+  before this change restores without decryption.
   The download says "This copy has no password." Re-encrypting on export is
   package 7.
 - **Download via `src/download.ts`.** It attaches the anchor before clicking and
