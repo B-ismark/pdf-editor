@@ -67,9 +67,10 @@ and is **mobile- and tablet-first**:
 - **Download** — writes your changes back to a new PDF, preserving everything
   you didn't touch.
 - **Remembers your preferences** — new text boxes inherit your last font / size
-  / colour, the draw tool and style persist across sessions, and signatures are
-  saved to a small reusable gallery (all in `localStorage`; a "Reset style"
-  action clears the text defaults).
+  / colour, the draw tool and style persist across sessions, and a signature
+  can be kept in a small reusable gallery when you tick "Remember this
+  signature on this device" — off by default (all in `localStorage`; a
+  "Reset style" action clears the text defaults).
 
 Everything runs locally with the [File API]; the PDF never leaves your machine.
 
@@ -161,8 +162,8 @@ this in a real browser, and CI runs it on every push and pull request.
 
 Two things are stored locally, both under your control:
 
-- **Preferences** (`localStorage`) — theme, last text style, draw tool, saved
-  signatures.
+- **Preferences** (`localStorage`) — theme, last text style, draw tool, and
+  the signatures you chose to remember.
 - **A session copy** (IndexedDB) — each open PDF that has edits, and those edits (unedited tabs are never stored), so a crash or an
   accidental reload doesn't lose your work. Because that's a real copy of your
   document on the device, the overflow menu has a **Save session on this device**
@@ -270,8 +271,11 @@ A pragmatic, client-side editor — worth knowing where the seams are:
   good, not perfect: check anything you intend to redact.
 - **Page numbers / watermark / organize** rebuild the document, so they bake in
   (and reset) the current text edits — do them as a finishing step.
-- **No password encryption.** pdf-lib can't write encrypted PDFs, so that's out
-  of scope for this server-free build.
+- **Password-protected PDFs open, but download without a password.** The file
+  is unlocked once, in your browser, when you type its password (an owner-only
+  lock opens without asking); the copy you edit and download is unlocked, and
+  the app says so. A document opened with a password is never stored in the
+  session copy. Adding a password on export isn't supported yet.
 
 ## Tech
 

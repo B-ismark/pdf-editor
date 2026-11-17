@@ -28,7 +28,7 @@ import { useFragmentColors } from "./hooks/usePageColors";
 import { usePersistentState, usePersistentFlag } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
 import { useViewport } from "./hooks/useViewport";
-import { loadPdf, looksLikePdf, releaseDoc } from "./pdf/loader";
+import { loadPdf, looksLikePdf, mayBeEncrypted, releaseDoc } from "./pdf/loader";
 import { clearEngineCache } from "./pdf/engineCache";
 import { prepareImageStamp } from "./pdf/imageStamp";
 import {
@@ -61,6 +61,9 @@ const FinishDialog = lazy(() =>
 );
 const CompressDialog = lazy(() =>
   import("./components/CompressDialog").then((m) => ({ default: m.CompressDialog })),
+);
+const PasswordDialog = lazy(() =>
+  import("./components/PasswordDialog").then((m) => ({ default: m.PasswordDialog })),
 );
 const SignCertDialog = lazy(() =>
   import("./components/SignCertDialog").then((m) => ({ default: m.SignCertDialog })),
@@ -109,7 +112,7 @@ const pageItems = <T,>(map: Map<number, T[]>, pageIndex: number): T[] =>
 function pdfOpenError(err: unknown): string {
   const s = String(err).toLowerCase();
   if (s.includes("password") || s.includes("encrypt"))
-    return "This PDF is password-protected or encrypted, so it can't be opened here.";
+    return "This PDF is encrypted in a way this app can't open.";
   if (
     s.includes("invalid") ||
     s.includes("corrupt") ||
@@ -209,6 +212,28 @@ interface OpenDoc {
   changeCount: number;
   /** Changes already baked into `pdf.bytes` (an Organise, a merge) that the
    * doc state can't see. They still make the document unsaved work. */
+  baked: number;
+  /** What was last downloaded, if anything (see {@link SavedMark}). */
+  saved: SavedMark | null;
+  /** Opened with a password. Its unlocked copy is never stored on the device:
+   * the user locked that file for a reason, and a plain copy in the browser's
+   * storage would undo it. */
+  locked: boolean;
+  /** Has changes since its last download (or ever, if never downloaded).
+   * Stale for the tab in front, like `changeCount`. */
+  unsaved: boolean;
+}
+
+/**
+ * The state a document was in when it was last downloaded. The document is
+ * saved while its live state *is* this one — the same object, since every edit
+ * makes a new one — so an edit after downloading makes it unsaved again, and
+ * undoing back to what was downloaded makes it saved again. Without this the
+ * change counter survived a download, and the leave and close prompts warned
+ * that changes already in the downloaded file would be lost.
+ */
+interface SavedMark {
+  doc: DocState;
   baked: number;
 }
 
@@ -310,6 +335,14 @@ export function App() {
   const [activeId, setActiveId] = useState<string | null>(null);
   /** The front document's {@link OpenDoc.baked}. */
   const [baked, setBaked] = useState(0);
+  const [savedMark, setSavedMark] = useState<SavedMark | null>(null);
+  const [locked, setLocked] = useState(false);
+  const [pwAsk, setPwAsk] = useState<{
+    name: string;
+    wrong: boolean;
+    checking: boolean;
+    answer: (pw: string | null) => void;
+  } | null>(null);
   const tabCounter = useRef(0);
   /** Ids of tabs being opened whose `setTabs` hasn't rendered yet, so the tab
    * cap counts them: a loop of opens (a restore, a multi-file drop) reads the
@@ -516,6 +549,13 @@ export function App() {
   const changeCount =
     editedFragmentCount + textBoxes.length + redactions.length + annotations.length + stamps.length + links.length + Object.keys(formValues).length +
     (pageNumbers ? 1 : 0) + (watermark ? 1 : 0) + baked;
+  const isSaved = savedMark != null && savedMark.doc === docHistory.state && savedMark.baked === baked;
+  /** Work that only exists in this window: what the leave/close prompts guard. */
+  const unsaved = changeCount > 0 && !isSaved;
+  /** The current state as a saved mark — read when a download *starts*, so an
+   * edit made while the file builds isn't counted as downloaded. */
+  const markNow = useRef<SavedMark>({ doc: docHistory.state, baked });
+  markNow.current = { doc: docHistory.state, baked };
 
   // A long-running operation is in flight (opening a file, exporting, OCR,
   // finishing ops). Drives the busy spinner + prevents overlapping actions.
@@ -663,19 +703,20 @@ export function App() {
     if (!autosaveOn) return;
     const entries = tabs.map((t) =>
       t.id === activeId && pdf
-        ? { id: t.id, fileName, bytes: pdf.bytes, doc: docHistory.state, hasChanges: changeCount > 0, baked }
+        ? { id: t.id, fileName, bytes: pdf.bytes, doc: docHistory.state, hasChanges: changeCount > 0 && !locked, baked }
         : {
             id: t.id,
             fileName: t.fileName,
             bytes: t.pdf.bytes,
             doc: t.history ? t.history.entries[t.history.index] : EMPTY_DOC,
-            hasChanges: t.changeCount > 0,
+            // A clean tab is never stored; a password-opened one is treated as clean.
+            hasChanges: t.changeCount > 0 && !t.locked,
             baked: t.baked,
           },
     );
     saveSession(entries, activeId, flushSave.current);
     flushSave.current = false;
-  }, [tabs, activeId, pdf, fileName, docHistory.state, changeCount, baked, saveSession, autosaveOn]);
+  }, [tabs, activeId, pdf, fileName, docHistory.state, changeCount, baked, locked, saveSession, autosaveOn]);
 
   /** Toggle the on-device session copy. Turning it off erases whatever is
    * already stored — the point of the switch is that no copy remains. That
@@ -737,11 +778,14 @@ export function App() {
               view: vp.captureView(),
               changeCount,
               baked,
+              saved: savedMark,
+              unsaved,
+              locked,
             }
           : t,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeId, pdf, fileName, doc.snapshot, vp.captureView, changeCount, baked],
+    [activeId, pdf, fileName, doc.snapshot, vp.captureView, changeCount, baked, savedMark, unsaved, locked],
   );
 
   /** Bring a parked document to the front. */
@@ -752,6 +796,8 @@ export function App() {
       setFileName(t.fileName);
       setActiveId(t.id);
       setBaked(t.baked);
+      setSavedMark(t.saved);
+      setLocked(t.locked);
       if (t.history) doc.restore(t.history);
       else doc.reset(EMPTY_DOC);
       vp.setPageWidth(Math.max(...t.pdf.pages.map((p) => p.viewBox.width), 1));
@@ -796,7 +842,7 @@ export function App() {
       name: string,
       note?: string,
       seedDoc?: DocState,
-      opts: { replace?: boolean; id?: string; quiet?: boolean; baked?: number } = {},
+      opts: { replace?: boolean; id?: string; quiet?: boolean; baked?: number; locked?: boolean } = {},
     ): Promise<OpenDoc | null> => {
       const { tabs, activeId } = liveTabs.current;
       const replacing = opts.replace && activeId != null;
@@ -825,6 +871,10 @@ export function App() {
           view: null,
           changeCount: 0,
           baked: opts.baked ?? 0,
+          saved: null,
+          unsaved: false,
+          // A rebuild of a password-opened document is still that document.
+          locked: opts.locked ?? (replacing ? tabs.find((t) => t.id === id)?.locked ?? false : false),
         };
         if (replacing) {
           const old = pdf;
@@ -858,6 +908,42 @@ export function App() {
     [],
   );
 
+  /**
+   * Decrypt an encrypted file once, before anything else sees it — asking for
+   * its password if it has one, and again after a wrong one. Null means the
+   * user cancelled. A file with only an owner password opens without asking:
+   * it's decrypted all the same, or its download would come out unreadable.
+   */
+  const unlock = useCallback(
+    async (bytes: ArrayBuffer, name: string): Promise<{ bytes: ArrayBuffer; locked: boolean } | null> => {
+      const { unlockPdf } = await import("./pdf/decrypt");
+      let password = "";
+      try {
+        for (;;) {
+          const r = await unlockPdf(bytes, password);
+          if (r.kind === "unlocked") return { bytes: r.bytes, locked: r.password };
+          // Not encrypted after all, or encrypted beyond what the decrypter
+          // reads: open the original and let pdf.js say what it can.
+          if (r.kind !== "needs-password") return { bytes, locked: false };
+          setStatus("loading");
+          setMessage(`"${name}" is password-protected.`);
+          // The dialog stays up between tries (it shows "checking", then the
+          // wrong-password state), so what was typed is still there to fix.
+          const wrong = password !== "";
+          const next = await new Promise<string | null>((answer) =>
+            setPwAsk({ name, wrong, checking: false, answer }),
+          );
+          if (next == null) return null;
+          setPwAsk((a) => a && { ...a, checking: true });
+          password = next;
+        }
+      } finally {
+        setPwAsk(null);
+      }
+    },
+    [],
+  );
+
   const openFile = useCallback(
     async (file: File): Promise<boolean> => {
       // Show feedback immediately — reading a large file into memory and
@@ -880,9 +966,19 @@ export function App() {
         setMessage(`"${file.name}" isn't a PDF file. Please choose a .pdf document.`);
         return false;
       }
-      return (await openBytes(bytes, file.name)) != null;
+      let locked = false;
+      if (mayBeEncrypted(bytes)) {
+        const opened = await unlock(bytes, file.name);
+        if (!opened) {
+          setStatus(liveTabs.current.pdf ? "ready" : "idle");
+          setMessage(`Didn't open "${file.name}".`);
+          return false;
+        }
+        ({ bytes, locked } = opened);
+      }
+      return (await openBytes(bytes, file.name, undefined, undefined, { locked })) != null;
     },
-    [openBytes],
+    [openBytes, unlock],
   );
 
   // Open the OS file picker. What's picked opens in new tabs, so this no longer
@@ -1109,6 +1205,9 @@ export function App() {
     const base = compressName.current.replace(/\.pdf$/i, "");
     const suffix = out.lossless ? "-optimized.pdf" : out.helped ? "-compressed.pdf" : ".pdf";
     downloadBytes(out.bytes, base + suffix);
+    // A smaller copy is still a copy of everything: the dialog is modal, so
+    // nothing has changed since it was built.
+    setSavedMark(markNow.current);
     setStatus("ready");
     const fmt = (n: number) => (n < 1_000_000 ? Math.round(n / 1000) + " KB" : (n / 1_000_000).toFixed(2) + " MB");
     setMessage(
@@ -1132,10 +1231,12 @@ export function App() {
       meta: import("./pdf/sign").SignMeta,
     ): Promise<void> => {
       if (!pdf) throw new Error("No document");
+      const mark = markNow.current;
       const baked = await bakeCurrent();
       const { signPdf } = await import("./pdf/sign");
       const signed = await signPdf(baked, identity, meta);
       downloadBytes(signed, fileName.replace(/\.pdf$/i, "") + "-signed.pdf");
+      setSavedMark(mark);
       setStatus("ready");
       setMessage("Signed the document and downloaded it.");
     },
@@ -2030,16 +2131,16 @@ export function App() {
   // Warn before leaving/reloading the tab while there are unsaved changes.
   // Everything lives in memory (no server, no autosave), so an accidental
   // refresh or back-navigation would otherwise silently discard all edits.
-  const anyBackgroundChanges = tabs.some((t) => t.id !== activeId && t.changeCount > 0);
+  const anyBackgroundChanges = tabs.some((t) => t.id !== activeId && t.unsaved);
   useEffect(() => {
-    if (changeCount === 0 && !anyBackgroundChanges) return;
+    if (!unsaved && !anyBackgroundChanges) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [changeCount, anyBackgroundChanges]);
+  }, [unsaved, anyBackgroundChanges]);
 
   // Auto-dismiss transient status messages (keep errors and in-progress
   // messages until superseded).
@@ -2256,6 +2357,7 @@ export function App() {
 
   const runExport = useCallback(async () => {
     if (!pdf) return;
+    const mark = markNow.current;
     setStatus("exporting");
     setMessage("Building edited PDF…");
     try {
@@ -2266,17 +2368,18 @@ export function App() {
         (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`),
       );
       downloadBytes(out, fileName.replace(/\.pdf$/i, "") + "-edited.pdf");
+      setSavedMark(mark);
       setStatus("ready");
       setMessage(
-        redactions.length > 0
+        (redactions.length > 0
           ? "Downloaded — redacted pages were flattened to images."
-          : "Downloaded edited PDF.",
+          : "Downloaded edited PDF.") + (locked ? " This copy has no password." : ""),
       );
     } catch {
       setStatus("error");
       setMessage("Couldn't build the edited PDF. Please try again.");
     }
-  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, fileName]);
+  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, fileName, locked]);
 
   // Guard the download: a whiteout cover only paints over content — the text
   // beneath stays recoverable. If any cover sits over live text, warn before
@@ -2303,6 +2406,8 @@ export function App() {
     setPdf(null);
     setFileName("document.pdf");
     setBaked(0);
+    setSavedMark(null);
+    setLocked(false);
     doc.reset(EMPTY_DOC);
     resetDocUi();
     setNavOpen(false);
@@ -2343,11 +2448,11 @@ export function App() {
   const requestCloseTab = useCallback(
     (id: string) => {
       if (busy) return;
-      const dirty = id === activeId ? changeCount > 0 : (tabs.find((t) => t.id === id)?.changeCount ?? 0) > 0;
+      const dirty = id === activeId ? unsaved : tabs.find((t) => t.id === id)?.unsaved ?? false;
       if (dirty) setConfirmCloseId(id);
       else closeTab(id);
     },
-    [busy, activeId, changeCount, tabs, closeTab],
+    [busy, activeId, unsaved, tabs, closeTab],
   );
 
   const goHome = useCallback(() => {
@@ -2373,6 +2478,14 @@ export function App() {
       );
       return;
     }
+    // What each document is as the ZIP starts: what it will be marked saved as.
+    const liveMark = markNow.current;
+    const marks = new Map(
+      tabs.map((t) => [
+        t.id,
+        t.id === activeId ? liveMark : { doc: t.history ? t.history.entries[t.history.index] : EMPTY_DOC, baked: t.baked },
+      ]),
+    );
     setStatus("exporting");
     try {
       const { exportPdf } = await import("./pdf/exporter");
@@ -2396,6 +2509,15 @@ export function App() {
         entries.push({ name: entry, data: out });
       }
       downloadBytes(makeZip(entries), "documents-edited.zip", "application/zip");
+      if (marks.has(activeId ?? "")) setSavedMark(liveMark);
+      setTabs((list) =>
+        list.map((t) => {
+          const m = marks.get(t.id);
+          if (!m || t.id === activeId) return t;
+          const now = t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
+          return now === m.doc && t.baked === m.baked ? { ...t, saved: m, unsaved: false } : t;
+        }),
+      );
       setStatus("ready");
       setMessage(`Downloaded ${plural(entries.length, "document")} as a ZIP.`);
     } catch {
@@ -2484,8 +2606,8 @@ export function App() {
           <button className="icon-btn" onClick={() => (findOpen ? closeFind() : openFind())} aria-label="Find" aria-pressed={findOpen} data-tip="Find · Ctrl+F">
             <Icon name="search" size={18} />
           </button>
-          <span className="appbar__changes label-medium">
-            {changeCount > 0 ? `${changeCount} change${changeCount === 1 ? "" : "s"}` : ""}
+          <span className="appbar__changes label-medium" role="status">
+            {unsaved ? `${changeCount} change${changeCount === 1 ? "" : "s"}` : changeCount > 0 ? "Downloaded" : ""}
           </span>
           <button
             className="btn btn--filled appbar__download"
@@ -2692,10 +2814,26 @@ export function App() {
     </div>
   );
 
+  // Asked for from the start screen as often as from an open document, so
+  // both views render it.
+  const passwordDialog = pwAsk && (
+    <Suspense fallback={null}>
+      <PasswordDialog
+        key={pwAsk.name}
+        fileName={pwAsk.name}
+        wrong={pwAsk.wrong}
+        checking={pwAsk.checking}
+        onSubmit={(pw) => pwAsk.answer(pw)}
+        onCancel={() => pwAsk.answer(null)}
+      />
+    </Suspense>
+  );
+
   if (!pdf) {
     return (
       <div className="app">
         <TooltipHost />
+        {passwordDialog}
         {appBar}
         <div
           className={`dropzone${dragging ? " dropzone--active" : ""}`}
@@ -2811,8 +2949,8 @@ export function App() {
         <DocTabs
           tabs={tabs.map((t) =>
             t.id === activeId
-              ? { id: t.id, name: fileName, dirty: changeCount > 0 }
-              : { id: t.id, name: t.fileName, dirty: t.changeCount > 0 },
+              ? { id: t.id, name: fileName, dirty: unsaved }
+              : { id: t.id, name: t.fileName, dirty: t.unsaved },
           )}
           activeId={activeId}
           disabled={busy}
@@ -3132,6 +3270,8 @@ export function App() {
           )}
         </div>
       )}
+
+      {passwordDialog}
 
       {sigOpen && (
         <Suspense fallback={null}>

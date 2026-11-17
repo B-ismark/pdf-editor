@@ -113,6 +113,23 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   image — one call per page wrote a shared image once per page. A page the
   plan uses twice can share the call: the copier clones the page leaf on every
   request (only its resources are shared), so the two slots are two objects.
+- **Encrypted files are decrypted once, at open — never later.** pdf-lib 1.17
+  can't read encryption: it saved an owner-locked file's still-encrypted
+  streams under a trailer with no `/Encrypt`, so the download was unreadable.
+  `openFile` scans for `/Encrypt` (`mayBeEncrypted`, in the loader so the scan
+  doesn't pull the decrypter into the main chunk) and runs `pdf/decrypt.ts`,
+  which lazy-loads `@cantoo/pdf-lib`, tries the empty password, and asks
+  (`PasswordDialog`) only if that fails. Everything downstream — pdf.js, font
+  extraction, the exporter, autosave — gets plain bytes and never sees a
+  password. Three traps: `doc.isEncrypted` and the trailer's `/Encrypt` both
+  read empty once the loader has decrypted, so "was it encrypted" is
+  `context.isDecrypted`; the decrypted context still holds the old encrypt
+  dictionary, object streams and xref stream, so everything unreachable from
+  Root/Info is deleted before saving; and a document that took a real password
+  is `locked` (per tab, carried through Organise/finishing rebuilds) and
+  treated as clean by autosave, so no plain copy of it is left on the device.
+  The download says "This copy has no password." Re-encrypting on export is
+  package 7.
 - **Download via `src/download.ts`.** It attaches the anchor before clicking and
   defers `revokeObjectURL`; revoking synchronously races the browser's fetch of
   the blob and cancels downloads on Firefox/Safari.

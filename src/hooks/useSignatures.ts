@@ -20,7 +20,8 @@ function load(): SavedSig[] {
 }
 
 /**
- * A small localStorage-backed gallery of signatures the user has created, so a
+ * A small localStorage-backed gallery of signatures the user chose to keep
+ * ("Remember this signature on this device" — off by default), so a
  * signature can be reused across sessions instead of re-drawn every time.
  */
 export function useSignatures() {

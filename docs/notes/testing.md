@@ -106,6 +106,18 @@ type-checking can't see, and each exists because it broke once:
   the tab cap, Delete from a second window, and a discarded tab each leave the
   device holding exactly what they should; Download all refuses a whiteout over
   live text in *any* tab; and closing a tab by keyboard keeps focus on the strip;
+- `saved.spec.ts` — a download is a save: it clears the counter, the tab's
+  dot, the leave prompt and the close prompt; the next edit brings all four
+  back and undoing to what was downloaded clears them again; the saved state
+  travels with a tab to the background; Download all saves every tab it
+  zipped; and a signature is stored on the device only when "Remember this
+  signature" is ticked, and can be removed;
+- `password.spec.ts` — a password-protected PDF asks in-app, says a wrong
+  password is wrong without losing what was typed, opens with the right one,
+  and downloads as a plain PDF with its text (no `/Encrypt`); cancel opens
+  nothing; an owner-locked file opens without asking and its download is
+  readable (it wasn't); and a password-opened document never reaches the
+  autosave store. Fixtures are encrypted with `@cantoo/pdf-lib`;
 - `overlays.spec.ts` — a marquee'd group moves as one (one undo step) and
   survives the drag, a plain click on a member selects just that one, arrows
   nudge the group, and a buried stroke can be raised — in the overlay's paint
