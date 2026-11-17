@@ -2530,3 +2530,100 @@ body {
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   }
 }
+
+/* "The app was updated under this page": floats over whatever is showing, the
+   start screen or a document, below the app bar. An offer, not a wall — the
+   document stays usable behind it. */
+.update-banner {
+  position: fixed;
+  top: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: min(560px, calc(100vw - 32px));
+  padding: 14px 16px;
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+  border: 1px solid var(--outline-variant);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+}
+.update-banner__icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: var(--radius-full);
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+}
+.update-banner__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.update-banner__text span { color: var(--on-surface-variant); }
+.update-banner { flex-wrap: wrap; }
+/* Actions on their own row, trailing, primary last — the dialog convention. */
+.update-banner__actions { display: flex; flex-direction: row-reverse; gap: 8px; width: 100%; justify-content: flex-start; padding-left: 48px; }
+@media (max-width: 599px) { .update-banner__actions { padding-left: 0; } }
+
+/* The crash screen: never an empty page. */
+.crash {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: var(--surface);
+  color: var(--on-surface);
+}
+.crash__card {
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+}
+.crash__card p { margin: 0; color: var(--on-surface-variant); }
+.crash__card h1 { margin: 0; }
+
+/* "This page is an image": top-centre, the contextual-bar slot — shown only
+   when nothing is selected and Find is closed, so it never shares it. */
+.picturehint {
+  position: absolute;
+  top: 80px; /* under the zoom pill: 16px + its 56px + 8px */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: max-content;
+  max-width: calc(100% - 32px);
+  padding: 6px 6px 6px 14px;
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-2);
+}
+.picturehint > svg { flex: none; color: var(--on-surface-variant); }
+.picturehint__text { min-width: 0; }
+/* Beside the zoom pill, never under it. Measured against the viewer, not the
+   window — the Inspector can leave the page area narrow on a wide screen. When
+   the row beside the zoom pill (~232px) has room for the whole sentence, the
+   hint starts at the left and stops short of the pill; when it hasn't, the
+   hint drops to the row below the pill. On phones the zoom pill steps aside
+   (DocumentEditor's zoomHidden) and the hint takes the centre. */
+.viewer { container: viewer / inline-size; }
+@container viewer (min-width: 860px) {
+  .picturehint {
+    top: 12px;
+    left: 12px;
+    transform: none;
+    max-width: calc(100% - 24px - 256px);
+  }
+}
+@media (max-width: 599px) {
+  .picturehint { top: 12px; border-radius: var(--radius-lg); flex-wrap: wrap; padding: 10px 8px 8px 14px; }
+  .picturehint__text { flex: 1 1 60%; }
+}

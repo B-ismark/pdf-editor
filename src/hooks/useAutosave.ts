@@ -187,6 +187,8 @@ export function useAutosave() {
   const legacyMigrated = useRef(false);
   /** The work a pending debounced save will do, so it can be run early. */
   const pending = useRef<(() => Promise<void>) | null>(null);
+  /** The save currently writing, so `flush` can wait for it to land. */
+  const inflight = useRef<Promise<void>>(Promise.resolve());
   /** The last workspace handed to `save`, to re-save when another page
    * deletes one of its slots. */
   const last = useRef<{ entries: SessionEntry[]; activeId: string | null } | null>(null);
@@ -293,11 +295,13 @@ export function useAutosave() {
         }
     };
     if (now) {
-      void run();
+      inflight.current = run();
       return;
     }
     pending.current = run;
-    timer.current = window.setTimeout(() => void run(), 1200);
+    timer.current = window.setTimeout(() => {
+      inflight.current = run();
+    }, 1200);
   }, []);
 
   // Leaving the page with a save still waiting: start it now. A discard's
@@ -364,5 +368,16 @@ export function useAutosave() {
     for (const id of ids) owned.current.add(id);
   }, []);
 
-  return { restorable, save, clear, discard, dismissRestore, adopt };
+  /** Write any waiting save now and resolve once it's on disk — for a reload
+   * the app asks for itself, which must not outrun the copy it promises. */
+  const flush = useCallback((): Promise<void> => {
+    const run = pending.current;
+    if (run) {
+      if (timer.current != null) window.clearTimeout(timer.current);
+      inflight.current = run();
+    }
+    return inflight.current;
+  }, []);
+
+  return { restorable, save, clear, discard, dismissRestore, adopt, flush };
 }

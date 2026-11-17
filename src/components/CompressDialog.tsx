@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { staleBuildMessage } from "../staleBuild";
 import { Icon } from "./Icon";
 import { useModal } from "../hooks/useModal";
 import type { CompressOptions } from "../pdf/finishOps";
@@ -59,7 +60,9 @@ export function CompressDialog({ onEstimate, onDownload, onClose }: Props) {
     setBusy(true);
     try {
       setEst(await onEstimate(preset));
-    } catch {
+    } catch (err) {
+      // A missing code file raises the app's "updated" banner as well.
+      staleBuildMessage(err);
       setErrored(true);
     } finally {
       setBusy(false);

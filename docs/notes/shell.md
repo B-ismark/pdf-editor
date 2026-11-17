@@ -177,3 +177,18 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   tools take the full width and the style controls go in a row beneath; the
   bar spans the screen there (`left/right: 12px`), because centred with
   `left: 50%` it only gets half the screen to lay out in.
+- **The app can be updated under an open page.** On-demand parts (dialogs,
+  exporter, signing, OCR) are hashed files a deploy deletes. Load them with
+  `lazyPart` (`src/staleBuild.ts`), never bare `React.lazy`: a part whose file
+  is gone becomes a stub that closes itself and raises the update banner
+  (`UpdateBanner`), instead of the rejection unmounting the app. In a `catch`
+  that turns a failure into a message, try `staleBuildMessage(err)` first.
+  Don't `preventDefault()` on `vite:preloadError` — Vite then resolves the
+  import to `undefined`. `CrashScreen` (in `main.tsx`) is the last resort for
+  anything else that throws during render. The deploy also carries the last
+  five builds' assets forward (`scripts/carry-assets.mjs`), so this is rare.
+- **The picture-page hint** (`.picturehint`) appears the first time a Select
+  click lands on a page with no text fragments, and offers OCR. It's laid out
+  against the viewer (a container query), not the window: beside the zoom pill
+  when the page area is wide enough, below it when not, centred on phones
+  where the pill steps aside.

@@ -125,6 +125,16 @@ type-checking can't see, and each exists because it broke once:
   undo mid-drag isn't redone by the drop; a blocked Delete doesn't steal focus
   later; picks don't survive their page's removal; with Find open the view and
   the active hit stay put through page work and text loading;
+- `update.spec.ts` — the site redeployed under an open page: an on-demand
+  part whose file is gone (a 404'd chunk) doesn't open, the document and its
+  edits stay on screen, no modal is left half-open, and a banner offers a
+  reload; Reload stores the latest edit before reloading, so it's offered back.
+  And picture-only pages: clicking one says its text can't be edited yet and
+  offers Recognise text (never on a page with real text), the hint stays clear
+  of the zoom pill on a wide and a narrow page area, Dismiss holds for the
+  document, and Recognise text makes the words editable. Both came from one
+  user report (a blank screen after Compress; a printed-to-PDF file whose
+  words did nothing);
 - `saved.spec.ts` — a download is a save: it clears the counter, the tab's
   dot and the leave prompt, and turns the close prompt into a plain "Close";
   a download the browser didn't finish still can't lose the work (close asks,

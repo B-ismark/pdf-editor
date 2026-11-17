@@ -38,10 +38,26 @@ jobs:
       - run: npm run setup-ocr
       - run: npm run build
       - uses: actions/configure-pages@v5
+        id: pages
         # Enable Pages (Actions source) on first run so no manual Settings
         # toggle is needed.
         with:
           enablement: true
+      # Keep the last few deploys' code files online. The app loads parts of
+      # itself on demand under hashed names, and a deploy replaces the whole
+      # site: a page opened before this deploy would otherwise find those
+      # parts gone (that blanked the app, before it learned to cope). See
+      # scripts/carry-assets.mjs. Best-effort — it never fails the deploy.
+      - uses: actions/cache/restore@v4
+        with:
+          path: .pages-history
+          key: pages-history-${{ github.run_id }}
+          restore-keys: pages-history-
+      - run: node scripts/carry-assets.mjs --dist dist --history .pages-history --keep 5 --seed-url "${{ steps.pages.outputs.base_url }}/"
+      - uses: actions/cache/save@v4
+        with:
+          path: .pages-history
+          key: pages-history-${{ github.run_id }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

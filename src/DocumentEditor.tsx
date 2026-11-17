@@ -1,7 +1,6 @@
 import {
   Fragment,
   Suspense,
-  lazy,
   memo,
   useCallback,
   useEffect,
@@ -61,25 +60,16 @@ import {
 } from "./overlays";
 import { DEFAULT_STYLE, isFragmentModified, resolveFragmentStyle } from "./pdf/style";
 import { keepOnPage, onPage, placeAt, placedSize, rotatedExtent } from "./pdf/placement";
+import { lazyPart, staleBuildMessage } from "./staleBuild";
 
 // On-demand modals — each pulls in heavy code (pdf-lib, canvas rendering) that
 // isn't needed until the user opens it, so they're code-split out of the
 // initial bundle.
-const Organize = lazy(() =>
-  import("./components/Organize").then((m) => ({ default: m.Organize })),
-);
-const SignatureDialog = lazy(() =>
-  import("./components/SignatureDialog").then((m) => ({ default: m.SignatureDialog })),
-);
-const FinishDialog = lazy(() =>
-  import("./components/FinishDialog").then((m) => ({ default: m.FinishDialog })),
-);
-const CompressDialog = lazy(() =>
-  import("./components/CompressDialog").then((m) => ({ default: m.CompressDialog })),
-);
-const SignCertDialog = lazy(() =>
-  import("./components/SignCertDialog").then((m) => ({ default: m.SignCertDialog })),
-);
+const Organize = lazyPart(() => import("./components/Organize").then((m) => m.Organize));
+const SignatureDialog = lazyPart(() => import("./components/SignatureDialog").then((m) => m.SignatureDialog));
+const FinishDialog = lazyPart(() => import("./components/FinishDialog").then((m) => m.FinishDialog));
+const CompressDialog = lazyPart(() => import("./components/CompressDialog").then((m) => m.CompressDialog));
+const SignCertDialog = lazyPart(() => import("./components/SignCertDialog").then((m) => m.SignCertDialog));
 import type {
   Annotation,
   AnnotationTool,
@@ -389,6 +379,12 @@ export const DocumentEditor = memo(function DocumentEditor({
 }: DocumentEditorProps) {
   const { pdf, fileName, baked, saved: savedMark, locked, id: activeId } = entry;
   const [tool, setTool] = useState<Tool>("select");
+  /** "This page is a picture" — offered the first time the user clicks a page
+   * with no text layer to edit (a scan, or a "print to PDF" that flattened
+   * every page to an image). Clicking such a page used to do nothing at all,
+   * which reads as "editing is broken". Once dismissed, or once OCR has been
+   * asked for, it stays away for this document. */
+  const [pictureHint, setPictureHint] = useState<"off" | "shown" | "done">("off");
   /** Organise pulled pages from a password-opened tab (see its `onApply`). */
   const organizeTookLocked = useRef(false);
   const docHistory = useHistory<DocState>(EMPTY_DOC, undefined, entry.history);
@@ -968,6 +964,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   const runOcr = useCallback(async () => {
     if (!pdf) return;
     setMenuOpen(false);
+    setPictureHint("done");
     const ctrl = new AbortController();
     setOnCancel(() => () => ctrl.abort());
     setStatus("working");
@@ -1015,12 +1012,14 @@ export const DocumentEditor = memo(function DocumentEditor({
         // Surface the real cause in the console — the UI message is deliberately
         // generic, but we need the underlying error to diagnose field reports.
         console.error("OCR failed:", err);
+        const stale = staleBuildMessage(err);
         const timedOut = /timed out/i.test((err as Error)?.message ?? "");
         setStatus("error");
         setMessage(
-          timedOut
+          stale ??
+          (timedOut
             ? "OCR timed out on this document — it may be very large or image-heavy. Try again, or split it into fewer pages."
-            : "OCR couldn't finish on this document. It may be very large or image-heavy — try again.",
+            : "OCR couldn't finish on this document. It may be very large or image-heavy — try again."),
         );
       }
     } finally {
@@ -1058,9 +1057,9 @@ export const DocumentEditor = memo(function DocumentEditor({
         setStatus("ready");
         setMessage(`Exported ${urls.length} images as a ZIP.`);
       }
-    } catch {
+    } catch (err) {
       setStatus("error");
-      setMessage("Couldn't export images. Please try again.");
+      setMessage(staleBuildMessage(err) ?? "Couldn't export images. Please try again.");
     }
   }, [pdf, bakeCurrent, fileName, downloadBytes]);
 
@@ -1411,7 +1410,11 @@ export const DocumentEditor = memo(function DocumentEditor({
   // closes the field — otherwise it would reopen, focused, keyboard up, the
   // moment the pill came back.
   const zoomHidden =
-    compact && (findOpen || multi.length >= 2 || (selection != null && selection.kind !== "stamp" && !sheetOpen));
+    compact &&
+    (findOpen ||
+      pictureHint === "shown" ||
+      multi.length >= 2 ||
+      (selection != null && selection.kind !== "stamp" && !sheetOpen));
   useEffect(() => {
     if (zoomHidden) setPageJumpOpen(false);
   }, [zoomHidden]);
@@ -2141,9 +2144,9 @@ export const DocumentEditor = memo(function DocumentEditor({
           ? "Downloaded — redacted pages were flattened to images."
           : "Downloaded edited PDF.") + (locked ? " This copy has no password." : ""),
       );
-    } catch {
+    } catch (err) {
       setStatus("error");
-      setMessage("Couldn't build the edited PDF. Please try again.");
+      setMessage(staleBuildMessage(err) ?? "Couldn't build the edited PDF. Please try again.");
     }
   }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, planned, fileName, locked]);
 
@@ -2555,7 +2558,17 @@ export const DocumentEditor = memo(function DocumentEditor({
             ref={vp.viewportRef}
             {...vp.handlers}
           >
-            <div className="doc">
+            <div
+              className="doc"
+              onPointerDownCapture={(ev) => {
+                // A click meant to pick text, on a page that has none.
+                if (tool !== "select" || pictureHint !== "off" || !pdf) return;
+                const el = (ev.target as Element).closest<HTMLElement>(".page");
+                const idx = Number(el?.dataset.pageIndex);
+                const pg = pdf.pages.find((p) => p.pageIndex === idx);
+                if (pg && pg.fragments.length === 0) setPictureHint("shown");
+              }}
+            >
             {shown.map((page, position) => (
               <PageView
                 key={page.pageIndex}
@@ -2608,6 +2621,26 @@ export const DocumentEditor = memo(function DocumentEditor({
             ))}
             </div>
           </div>
+
+          {pictureHint === "shown" && !findOpen && !selection && multi.length < 2 && (
+            <div className="picturehint" role="status">
+              <Icon name="scan_text" size={18} />
+              <span className="body-medium picturehint__text">
+                This page is an image, so its text can't be edited yet.
+              </span>
+              <button className="btn btn--tonal" onClick={() => void runOcr()} disabled={busy}>
+                Recognise text
+              </button>
+              <button
+                className="icon-btn icon-btn--sm"
+                onClick={() => setPictureHint("done")}
+                aria-label="Dismiss"
+                data-tip="Dismiss"
+              >
+                <Icon name="close" size={16} />
+              </button>
+            </div>
+          )}
 
           {/* Pinned zoom control (top-right, does not scroll). On phones it
               yields to whichever top-centre contextual bar is showing (find /
