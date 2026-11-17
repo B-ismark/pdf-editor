@@ -26,7 +26,7 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   wins everywhere — lossless is hopeless against scanner noise (a scanned A4
   page measured 5127 KB as PNG against 1056 KB as JPEG), but PNG is far smaller
   on a sparse vector page — so the comparison is the design, not a fallback.
-  `pref.losslessRaster` (⋯ menu) skips JPEG entirely for users who need the
+  `pref.losslessRaster` (⋯ menu, and the Inspector with nothing selected) skips JPEG entirely for users who need the
   raster bit-exact. `docs/RASTER-CODEC-EVAL.md` has the measurements, and the
   reasons JBIG2 and MuPDF were evaluated and turned down.
 - **`optimizeImages.ts` decodes flate images itself.** `DCTDecode` goes to the

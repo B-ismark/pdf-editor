@@ -31,7 +31,7 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   the whole of bring-to-front. Deliberately annotations only: the exporter's layers
   are fixed (edits → text boxes → annotations → stamps → whiteout covers), so
   there is no order in which a stroke sits above a signature, and offering the
-  control per-kind would promise one. Surfaced in the Properties tab, the
+  control per-kind would promise one. Surfaced in the Inspector, the
   multi-select bar, and `]` / `[` — but not for a *sticky note*: a note is an
   HTML element rendered after the SVG, so it is above every shape whatever the
   array says, and both export paths now order through `annotationPaintOrder`

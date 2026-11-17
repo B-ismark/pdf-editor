@@ -106,7 +106,7 @@ const pageItems = <T,>(map: Map<number, T[]>, pageIndex: number): T[] =>
   map.get(pageIndex) ?? NO_ITEMS;
 
 /** A document/finishing action rendered identically across the overflow menu,
- * the Inspector's document panel, and the command palette — one definition, so
+ * the Export menu, and the command palette — one definition, so
  * the three surfaces can't drift apart. */
 interface DocAction {
   id: string;
@@ -1051,7 +1051,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   }, [pdf, bakeCurrent, fileName, downloadBytes]);
 
   // Single source of truth for the document/finishing actions. The overflow
-  // menu, the document panel, and the command palette all render from this —
+  // menu, the Export menu and the command palette all render from this —
   // add an action once and every surface picks it up.
   const docActions = useMemo<DocAction[]>(
     () => [
@@ -2306,11 +2306,9 @@ export const DocumentEditor = memo(function DocumentEditor({
               <>
                 <div className="menu__scrim" onClick={() => setMenuOpen(false)} />
                 <div className="menu__list" role="menu" ref={menuListRef} onKeyDown={onMenuKeyDown}>
-                  {/* Same groups, same order, same names as the Inspector's
-                      Document tab. They were only separated by hairlines here,
-                      so the menu read as one 13-item wall while the panel showed
-                      three short lists — the same commands, twice, filed
-                      differently. */}
+                  {/* Labelled groups, in the order the command palette files
+                      them. They were only separated by hairlines here, so the
+                      menu read as one 13-item wall. */}
                   {(compact ? [EXPORT_GROUP, ...DOC_GROUPS] : DOC_GROUPS).map((grp, gi) => (
                     <Fragment key={grp.key}>
                       {gi > 0 && <div className="menu__divider" />}
