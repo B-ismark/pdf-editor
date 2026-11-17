@@ -43,44 +43,63 @@ const PAPER: { name: string; w: number; h: number; unit: "mm" | "in" }[] = [
   { name: "Tabloid", w: 792, h: 1224, unit: "in" },
 ];
 
-const mm = (pt: number) => Math.round((pt / 72) * 25.4);
+/** Millimetres, whole above 10 mm and to a tenth below (a 1 pt page isn't "0 mm"). */
+const mm = (pt: number) => {
+  const v = (pt / 72) * 25.4;
+  return v >= 10 ? Math.round(v) : Math.round(v * 10) / 10;
+};
 const inch = (pt: number) => Math.round((pt / 72) * 100) / 100;
+
+/** Two sides this close are the same paper: files written by different tools
+ * round A4 to 595 or 595.28 × 841.89. */
+const SAME = 2.5;
 
 const findPaper = (width: number, height: number) => {
   const short = Math.min(width, height);
   const long = Math.max(width, height);
-  return PAPER.find((p) => Math.abs(p.w - short) < 2.5 && Math.abs(p.h - long) < 2.5);
+  return PAPER.find((p) => Math.abs(p.w - short) < SAME && Math.abs(p.h - long) < SAME);
 };
 
+type Orientation = "portrait" | "landscape" | "mixed";
+const orientationOf = (width: number, height: number): Orientation =>
+  width > height + 0.5 ? "landscape" : "portrait";
+
 /** "A4 · 210 × 297 mm", "Letter, landscape · 11 × 8.5 in", "200 × 300 mm".
- * With `turned: "mixed"` the orientation is left out and the dimensions are
- * given portrait — the label for a run of pages that are one size, some of
- * them turned. */
-export function paperLabel(width: number, height: number, turned?: "mixed"): string {
+ * A named paper is given at its nominal size, so a page a point or two off
+ * still reads as the A4 it is. With `orientation: "mixed"` the dimensions are
+ * given portrait and the label says both. */
+export function paperLabel(width: number, height: number, orientation = orientationOf(width, height)): string {
   const named = findPaper(width, height);
-  if (turned === "mixed") [width, height] = [Math.min(width, height), Math.max(width, height)];
-  const landscape = width > height + 0.5;
-  const dims = (unit: "mm" | "in") =>
-    unit === "mm" ? `${mm(width)} × ${mm(height)} mm` : `${inch(width)} × ${inch(height)} in`;
-  const orient = turned === "mixed" ? ", portrait and landscape" : landscape ? ", landscape" : "";
-  if (!named) return turned === "mixed" ? `${dims("mm")}${orient}` : dims("mm");
+  let [w, h] = named ? [named.w, named.h] : [Math.min(width, height), Math.max(width, height)];
+  if (orientation === "landscape") [w, h] = [h, w];
+  const dims = (unit: "mm" | "in") => (unit === "mm" ? `${mm(w)} × ${mm(h)} mm` : `${inch(w)} × ${inch(h)} in`);
+  const orient = orientation === "mixed" ? ", portrait and landscape" : orientation === "landscape" ? ", landscape" : "";
+  if (!named) return `${dims("mm")}${orient}`;
   return `${named.name}${orient} · ${dims(named.unit)}`;
 }
 
-/** One label for the document's pages. Pages that differ only in which way
- * round they are are the same paper, so they don't count as "Mixed". */
+/** One label for the document's pages. Pages are the same size when they are
+ * the same named paper, or (unnamed) their short and long sides each agree
+ * within {@link SAME} — whichever way round they are; orientation is then
+ * reported separately. */
 export function sizeSummary(pages: { width: number; height: number }[]): string {
   if (pages.length === 0) return "—";
-  const exact = new Set(pages.map((p) => paperLabel(p.width, p.height)));
-  if (exact.size === 1) return [...exact][0];
-  // The same paper ignoring orientation: compare the short and long sides.
-  const key = (p: { width: number; height: number }) => {
-    const named = findPaper(p.width, p.height);
-    return named ? named.name : `${mm(Math.min(p.width, p.height))}x${mm(Math.max(p.width, p.height))}`;
-  };
-  const papers = new Set(pages.map(key));
-  if (papers.size === 1) return paperLabel(pages[0].width, pages[0].height, "mixed");
-  return `Mixed · ${papers.size} sizes`;
+  // A named paper is its own group (two pages can each be within SAME of A4
+  // and still a little further than that from each other); other sizes group
+  // by nearness.
+  const groups: { name?: string; short: number; long: number }[] = [];
+  for (const p of pages) {
+    const short = Math.min(p.width, p.height);
+    const long = Math.max(p.width, p.height);
+    const name = findPaper(p.width, p.height)?.name;
+    const same = (g: (typeof groups)[number]) =>
+      name || g.name ? g.name === name : Math.abs(g.short - short) < SAME && Math.abs(g.long - long) < SAME;
+    if (!groups.some(same)) groups.push({ name, short, long });
+  }
+  if (groups.length > 1) return `Mixed · ${groups.length} sizes`;
+  const turns = new Set(pages.map((p) => orientationOf(p.width, p.height)));
+  const first = pages[0];
+  return paperLabel(first.width, first.height, turns.size > 1 ? "mixed" : [...turns][0]);
 }
 
 const POSITION: Record<NumberPosition, string> = {

@@ -295,6 +295,21 @@ test.describe("inspector", () => {
     const fact = (name: string) => panel.locator(".docpanel__fact", { has: page.locator(`dt:text-is("${name}")`) }).locator("dd");
     await expect(fact("Page size")).toHaveText("A4, portrait and landscape · 210 × 297 mm");
 
+    // Pages a point or two apart are one size, and all-portrait says nothing
+    // about landscape — named paper or not.
+    const near = async (sizes: [number, number][]) => {
+      const d = await PDFDocument.create();
+      for (const sz of sizes) d.addPage(sz);
+      const path = join(dir, `near-${sizes.map((x) => x.join("x")).join("-")}.pdf`);
+      writeFileSync(path, await d.save());
+      await page.setInputFiles('input[accept="application/pdf,.pdf"]', path);
+      await expect(fact("Pages")).toHaveText(String(sizes.length));
+    };
+    await near([[595, 842], [597.6, 842]]);
+    await expect(fact("Page size")).toHaveText("A4 · 210 × 297 mm");
+    await near([[568.06, 800], [568.63, 800], [569, 801]]);
+    await expect(fact("Page size")).toHaveText("200 × 282 mm");
+
     await page.setInputFiles('input[accept="application/pdf,.pdf"]', (await fixtures()).typeset);
     await expect(fact("Pages")).toHaveText("1");
     await expect(fact("Text")).toHaveText("Searchable");
@@ -403,7 +418,7 @@ test.describe("inspector", () => {
     const f = await fixtures();
     await open(page, await merge([f.scanned, f.scanned]));
     const panel = page.locator("aside.inspector");
-    const fact = panel.locator(".docpanel__fact", { hasText: "Text" });
+    const fact = panel.locator(".docpanel__fact", { has: page.locator('dt:text-is("Text")') });
     await panel.getByRole("button", { name: "Recognise text (OCR)" }).click();
     await expect(page.locator(".snackbar__msg")).toContainText("couldn't be read", { timeout: 180_000 });
     await expect(fact).toContainText("Searchable on 1 of 2 pages");
