@@ -134,7 +134,9 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   (`theme`), `useSignatures.ts` (`signatures`). New text boxes inherit the last
   text style. A signature reaches `signatures` only when the dialog's
   "Remember this signature on this device" is ticked — off by default, and
-  it stays a per-signature choice rather than a remembered preference.
+  it stays a per-signature choice rather than a remembered preference. Unticked
+  doesn't mean "nothing on the device": a placed signature is a stamp in the
+  document, so the session copy holds it, and the dialog's hint says so.
 - **Theme** — `theme.css` holds M3 Expressive tokens; light is `:root`, dark is
   `:root[data-theme="dark"]`. An inline script in `index.html` sets the theme
   before first paint (no flash). `useTheme` cycles system/light/dark.

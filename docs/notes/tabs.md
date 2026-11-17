@@ -40,8 +40,13 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   (`SavedMark`: the `DocState` object plus `baked`, compared by identity —
   every edit makes a new state object, and undo/redo hand back the very
   objects in the history, so undoing to what was downloaded is saved again).
-  `unsaved` is what the leave prompt, the close-tab prompt, the tab's dot and
-  the app-bar counter ("Downloaded") read; Organise's "you'll lose edits" and
+  `unsaved` is what the tab's dot and the app-bar counter ("Downloaded")
+  read. **A download can't be confirmed** — the page only clicks a link, and a
+  cancelled "Save as…" looks identical — so downloaded work is never let go
+  silently: closing it still asks, as a plain "Close" with the honest caveat
+  rather than "Discard & close", and the leave prompt stays off only while the
+  session copy holds the work (autosave on, not a password-opened document).
+  The rest of the app reads `unsaved` the same way; Organise's "you'll lose edits" and
   autosave still read `changeCount`, deliberately — a downloaded document is
   still work worth restoring after a crash. Every path that hands the user the
   whole document sets the mark (Download, Download all, Compress, certificate

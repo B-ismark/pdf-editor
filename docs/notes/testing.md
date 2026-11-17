@@ -107,7 +107,9 @@ type-checking can't see, and each exists because it broke once:
   device holding exactly what they should; Download all refuses a whiteout over
   live text in *any* tab; and closing a tab by keyboard keeps focus on the strip;
 - `saved.spec.ts` — a download is a save: it clears the counter, the tab's
-  dot, the leave prompt and the close prompt; the next edit brings all four
+  dot and the leave prompt, and turns the close prompt into a plain "Close";
+  a download the browser didn't finish still can't lose the work (close asks,
+  and with the session copy off, leaving prompts); the next edit brings it all
   back and undoing to what was downloaded clears them again; the saved state
   travels with a tab to the background; Download all saves every tab it
   zipped; and a signature is stored on the device only when "Remember this

@@ -2131,16 +2131,21 @@ export function App() {
   // Warn before leaving/reloading the tab while there are unsaved changes.
   // Everything lives in memory (no server, no autosave), so an accidental
   // refresh or back-navigation would otherwise silently discard all edits.
-  const anyBackgroundChanges = tabs.some((t) => t.id !== activeId && t.unsaved);
+  // Downloaded work is let go without the browser's prompt only when the
+  // session copy holds it too: the download itself can't be confirmed.
+  const atRisk = (edited: boolean, unsaved: boolean, locked: boolean) =>
+    unsaved || (edited && (!autosaveOn || locked));
+  const anyBackgroundChanges = tabs.some((t) => t.id !== activeId && atRisk(t.changeCount > 0, t.unsaved, t.locked));
+  const frontAtRisk = atRisk(changeCount > 0, unsaved, locked);
   useEffect(() => {
-    if (!unsaved && !anyBackgroundChanges) return;
+    if (!frontAtRisk && !anyBackgroundChanges) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [unsaved, anyBackgroundChanges]);
+  }, [frontAtRisk, anyBackgroundChanges]);
 
   // Auto-dismiss transient status messages (keep errors and in-progress
   // messages until superseded).
@@ -2448,11 +2453,14 @@ export function App() {
   const requestCloseTab = useCallback(
     (id: string) => {
       if (busy) return;
-      const dirty = id === activeId ? unsaved : tabs.find((t) => t.id === id)?.unsaved ?? false;
-      if (dirty) setConfirmCloseId(id);
+      // A downloaded document still asks, more gently: the page can't know the
+      // download finished (a cancelled "Save as…" looks the same from here),
+      // and closing deletes the session copy that would otherwise hold the work.
+      const edited = id === activeId ? changeCount > 0 : (tabs.find((t) => t.id === id)?.changeCount ?? 0) > 0;
+      if (edited) setConfirmCloseId(id);
       else closeTab(id);
     },
-    [busy, activeId, unsaved, tabs, closeTab],
+    [busy, activeId, changeCount, tabs, closeTab],
   );
 
   const goHome = useCallback(() => {
@@ -3315,12 +3323,18 @@ export function App() {
       {confirmCloseId && (() => {
         const name = confirmCloseId === activeId ? fileName : tabs.find((t) => t.id === confirmCloseId)?.fileName ?? "this PDF";
         const last = tabs.length === 1;
+        const downloaded =
+          confirmCloseId === activeId ? !unsaved : !(tabs.find((t) => t.id === confirmCloseId)?.unsaved ?? true);
         return (
           <ConfirmDialog
             title={last ? "Close this PDF?" : `Close ${name}?`}
-            message={`Your unsaved changes to ${name} will be discarded. Download the edited file first if you want to keep it.`}
-            confirmLabel="Discard & close"
-            danger
+            message={
+              downloaded
+                ? `You downloaded ${name}, so your changes should be in that file. If the download didn't finish, closing loses them.`
+                : `Your unsaved changes to ${name} will be discarded. Download the edited file first if you want to keep it.`
+            }
+            confirmLabel={downloaded ? "Close" : "Discard & close"}
+            danger={!downloaded}
             onConfirm={() => closeTab(confirmCloseId)}
             onCancel={() => {
               const id = confirmCloseId;

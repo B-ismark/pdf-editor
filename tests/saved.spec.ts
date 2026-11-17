@@ -20,6 +20,17 @@ const activeTab = (page: Page) => page.locator(".doctab--active");
 const counter = (page: Page) => page.locator(".appbar__changes");
 const modal = (page: Page) => page.locator('[aria-modal="true"]');
 
+/** Closing a downloaded document still asks — the page can't know the
+ * download finished — but as a plain "Close", not "Discard & close". */
+async function closeDownloaded(page: Page, tab = activeTab(page)) {
+  await tab.locator(".doctab__close").click();
+  const d = modal(page);
+  await expect(d).toContainText("You downloaded");
+  await expect(d.getByRole("button", { name: /Discard/ })).toHaveCount(0);
+  await d.getByRole("button", { name: "Close", exact: true }).click();
+  await expect(d).toHaveCount(0);
+}
+
 async function addText(page: Page, text: string) {
   const ov = (await page.locator(".page__overlay").first().boundingBox())!;
   await page.locator('.tooldock__btn[aria-label="Add text"]').click();
@@ -78,9 +89,8 @@ test.describe("saved means saved", () => {
     await expect(counter(page)).toHaveText("Downloaded");
     expect(await wouldPromptOnLeave(page)).toBe(false);
 
-    // And closing it doesn't ask.
-    await activeTab(page).locator(".doctab__close").click();
-    await expect(modal(page)).toHaveCount(0);
+    // And closing it asks the gentle question, not the discard one.
+    await closeDownloaded(page);
     await expect(page.locator(".appbar__download")).toHaveCount(0);
     expect(w.errors).toEqual([]);
   });
@@ -97,8 +107,7 @@ test.describe("saved means saved", () => {
 
     await tabs(page).first().locator(".doctab__btn").click();
     await expect(counter(page)).toHaveText("Downloaded");
-    await activeTab(page).locator(".doctab__close").click();
-    await expect(modal(page)).toHaveCount(0);
+    await closeDownloaded(page);
     await expect(tabs(page)).toHaveCount(1);
   });
 
@@ -117,10 +126,27 @@ test.describe("saved means saved", () => {
     ]);
     await expect(page.locator(".doctab__dirty")).toHaveCount(0);
     expect(await wouldPromptOnLeave(page)).toBe(false);
+    await closeDownloaded(page);
+    await closeDownloaded(page);
+  });
+
+  test("a download the browser didn't finish can't lose the work", async ({ page }) => {
+    // The page only clicks a link; a cancelled "Save as…" looks exactly like a
+    // finished download from here. Closing must still ask, and with the
+    // session copy off, leaving must still raise the browser's prompt.
+    const f = await fixtures();
+    await open(page, f.sample);
+    await addText(page, "Work");
+    page.on("download", (d) => void d.cancel());
+    await download(page);
     await activeTab(page).locator(".doctab__close").click();
-    await expect(modal(page)).toHaveCount(0);
-    await activeTab(page).locator(".doctab__close").click();
-    await expect(modal(page)).toHaveCount(0);
+    await expect(modal(page)).toContainText("didn't finish");
+    await modal(page).getByRole("button", { name: "Cancel" }).click();
+    await expect(page.locator(".textbox").first()).toHaveText("Work");
+
+    await page.locator('.icon-btn[aria-label="More actions"]').click();
+    await page.getByRole("menuitemcheckbox", { name: /Save session on this device/ }).click();
+    expect(await wouldPromptOnLeave(page)).toBe(true);
   });
 });
 
@@ -144,6 +170,9 @@ test.describe("signature consent", () => {
     await dialog.getByPlaceholder("Type your name").fill(name);
     const box = dialog.getByRole("checkbox", { name: /Remember this signature/ });
     await expect(box).not.toBeChecked();
+    // Unticked isn't "nothing on this device" while the session copy is on —
+    // the signature is part of the document — and the dialog says so.
+    await expect(dialog).toContainText("session copy");
     if (remember) await box.check();
     await dialog.getByRole("button", { name: "Add", exact: true }).click();
     await expect(dialog).toHaveCount(0);
