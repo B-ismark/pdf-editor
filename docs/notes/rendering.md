@@ -44,6 +44,14 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   Leaving the window aborts an in-flight render (`renderPageToCanvas` takes an
   `AbortSignal` and cancels the pdf.js task), and removes and zeroes a finished
   canvas. Their slots have a fixed aspect ratio, so this doesn't move layout.
+  Thumbnails visible when they mount skip the settle (opening the rail, an
+  Organize card remounted by a move), and a new image replaces the old one
+  only once it's ready, so nothing flashes empty.
+- **Never put an imperatively-made canvas into a node React renders children
+  into.** The thumbnail's canvas lives in `.thumb__host`, which React leaves
+  empty, with the error mark beside it. When the canvas shared a parent with
+  the mark, clearing the mark after a retry threw `removeChild`
+  NotFoundError and unmounted the whole app (there is no error boundary).
 - **pdf-lib is lazy-loaded.** `exporter.ts`, `finishOps.ts`, and the
   `Organize`/`FinishDialog`/`SignatureDialog` components are `import()`-ed /
   `React.lazy`-ed on demand so pdf-lib stays out of the initial bundle. **Keep

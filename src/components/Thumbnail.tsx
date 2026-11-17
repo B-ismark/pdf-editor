@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { renderPageToCanvas } from "../pdf/loader";
 import { useRenderWindow } from "../hooks/useRenderWindow";
 
@@ -31,36 +31,53 @@ export function Thumbnail({ bytes, index, rotation }: Props) {
   const [failed, setFailed] = useState(false);
   // A modest margin: thumbnails are cheap and these rails scroll fast.
   const { ref, near } = useRenderWindow<HTMLDivElement>(600);
+  // The canvas lives in a host React never gives children to. Swapping it into
+  // a node React also renders into (the error mark) desyncs React's view of the
+  // DOM, and the next commit's `removeChild` throws and unmounts the app.
+  const host = useRef<HTMLSpanElement>(null);
+  // Thumbnails visible on arrival (opening the rail, an Organize card remounted
+  // by a move) render at once; only ones reached by scrolling wait to settle.
+  const mountedAt = useRef(performance.now());
 
   useEffect(() => {
     if (!near) return;
     const ctrl = new AbortController();
-    let canvas: HTMLCanvasElement | null = null;
+    const settle = performance.now() - mountedAt.current < 100 ? 0 : SETTLE_MS;
     const timer = window.setTimeout(() => {
       renderPageToCanvas(bytes, index, 0.4, ctrl.signal)
         .then((c) => {
-          if (ctrl.signal.aborted || !ref.current) {
+          if (ctrl.signal.aborted || !host.current) {
             c.width = c.height = 0;
             return;
           }
-          canvas = c;
           c.className = "thumb__canvas";
-          ref.current.replaceChildren(c);
+          // Replaces the previous page image only now, so a new file or index
+          // swaps image for image instead of flashing an empty slot.
+          releaseCanvases(host.current);
+          host.current.append(c);
           setFailed(false);
         })
         .catch((err) => {
           if (!ctrl.signal.aborted && (err as Error)?.name !== "AbortError") setFailed(true);
         });
-    }, SETTLE_MS);
+    }, settle);
     return () => {
       window.clearTimeout(timer);
       ctrl.abort();
-      if (canvas) {
-        canvas.remove();
-        canvas.width = canvas.height = 0;
-      }
     };
-  }, [bytes, index, near, ref]);
+  }, [bytes, index, near]);
+
+  // Leaving the window (or unmounting) gives the backing store back.
+  useEffect(() => {
+    const el = host.current;
+    if (!near) {
+      if (el) releaseCanvases(el);
+      return;
+    }
+    return () => {
+      if (el) releaseCanvases(el);
+    };
+  }, [near]);
 
   return (
     <div
@@ -68,7 +85,15 @@ export function Thumbnail({ bytes, index, rotation }: Props) {
       className="thumb__frame"
       style={{ transform: `rotate(${rotation}deg)` }}
     >
+      <span ref={host} className="thumb__host" />
       {failed && <span className="thumb__err">!</span>}
     </div>
   );
+}
+
+function releaseCanvases(el: HTMLElement) {
+  for (const c of el.querySelectorAll("canvas")) {
+    c.width = c.height = 0;
+    c.remove();
+  }
 }

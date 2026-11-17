@@ -185,6 +185,38 @@ test.describe("first frame", () => {
   });
 });
 
+test("a thumbnail that failed and then renders doesn't take the app down", async ({ page }) => {
+  // Low canvas memory (iOS Safari especially) makes `getContext` return null.
+  // The thumbnail shows its error mark; when it later renders, the canvas went
+  // into the same node React rendered the mark in, the mark's removal threw
+  // `removeChild` NotFoundError, and React unmounted the whole app.
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
+  await page.addInitScript(() => {
+    const real = HTMLCanvasElement.prototype.getContext;
+    const w = window as unknown as { __starve: boolean };
+    w.__starve = false;
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, ...args: Parameters<typeof real>) {
+      if (w.__starve && this.width < 400) return null;
+      return real.apply(this, args);
+    } as typeof real;
+  });
+  await open(page, (await fixtures()).long);
+  await page.evaluate(() => ((window as unknown as { __starve: boolean }).__starve = true));
+  await page.getByRole("button", { name: "Show pages" }).click();
+  await expect(page.locator(".pagenav .thumb__err").first()).toBeVisible({ timeout: 15_000 });
+
+  await page.evaluate(() => ((window as unknown as { __starve: boolean }).__starve = false));
+  // Out of the window and back: the failed thumbnails render this time.
+  await page.evaluate(() => (document.querySelector(".pagenav__list")!.scrollTop = 1e6));
+  await page.waitForTimeout(800);
+  await page.evaluate(() => (document.querySelector(".pagenav__list")!.scrollTop = 0));
+  await expect(page.locator(".pagenav__item").first().locator(".thumb__canvas")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(".pagenav__item").first().locator(".thumb__err")).toHaveCount(0);
+  expect(errors).toEqual([]);
+  expect(await page.locator(".page").count(), "the app is still mounted").toBe(150);
+});
+
 test.describe("page memo", () => {
   const renders = (page: import("@playwright/test").Page) =>
     page.evaluate(() => (window as unknown as { __pageRenders: number[] }).__pageRenders.splice(0));
