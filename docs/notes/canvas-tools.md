@@ -100,7 +100,7 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   screen when you armed the stamp. Esc cancels.
 - **The page edge is the file's edge.** The exported page cuts off anything
   past its MediaBox, so the overlay matches it:
-  - stamps can't be dragged off (`keepStampOnPage` in App: a move stops at
+  - stamps can't be dragged off (`keepStampOnPage` in `DocumentEditor`: a move stops at
     the edge; a resize or rotation that would *grow* it off is refused, one
     that shrinks it always goes through). The bulk paths don't go through
     `onChangeStamp`, so they have their own guards: paste/duplicate and
@@ -123,7 +123,7 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   (the stop is the fragment you last left, else the first). Up/Down move
   between fragments, across pages; Left/Right do too once the caret is at the
   start/end, or always when the fragment isn't editable (a phone outside edit
-  mode), so they never fall through to App's nudge. If the fragment you leave
+  mode), so they never fall through to the editor's nudge. If the fragment you leave
   is selected, the selection moves with you. A "Skip to tools" button is the
   first Tab stop and lands on the active tool. Don't give a new
   per-fragment control its own tab stop.

@@ -38,12 +38,11 @@ export interface History<T> {
 }
 
 /** Undo/redo history for a single immutable state value. */
-export function useHistory<T>(initial: T, limit = 200): History<T> {
-  const [h, setH] = useState<Internal<T>>({
-    entries: [initial],
-    index: 0,
-    lastKey: null,
-  });
+export function useHistory<T>(initial: T, limit = 200, from?: HistorySnapshot<T> | null): History<T> {
+  // `from` resumes a parked history (a document brought back to the front).
+  const [h, setH] = useState<Internal<T>>(() =>
+    from ? { ...from, lastKey: null } : { entries: [initial], index: 0, lastKey: null },
+  );
   // Mirrors `h` so `snapshot` can be stable and still read the latest value
   // (a switch reads it from an event handler, after any pending commit).
   const latest = useRef(h);
