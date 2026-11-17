@@ -149,3 +149,35 @@ export function userToShownBox(
   const q = shownToUserDelta(box.r, box.t, back);
   return { l: Math.min(p.dx, q.dx), r: Math.max(p.dx, q.dx), b: Math.min(p.dy, q.dy), t: Math.max(p.dy, q.dy) };
 }
+
+/**
+ * Move the pages whose source index is in `keys` to the gap before shown
+ * position `gap` (0 = the top, `plan.length` = the end), keeping their order.
+ * The gap counts positions in the plan *before* the move, so a drop indicator
+ * drawn between two thumbnails means exactly that slot.
+ */
+export function movePages(plan: PageRef[], keys: ReadonlySet<number>, gap: number): PageRef[] {
+  const moving = plan.filter((p) => keys.has(p.index));
+  if (moving.length === 0) return plan;
+  const at = Math.max(0, Math.min(plan.length, gap));
+  const before = plan.slice(0, at).filter((p) => !keys.has(p.index));
+  const after = plan.slice(at).filter((p) => !keys.has(p.index));
+  return [...before, ...moving, ...after];
+}
+
+/** Turn the pages in `keys` a quarter clockwise. */
+export function turnPages(plan: PageRef[], keys: ReadonlySet<number>): PageRef[] {
+  return plan.map((p) => (keys.has(p.index) ? { ...p, rotate: quarterTurn(p.rotate + 90) } : p));
+}
+
+/** Drop the pages in `keys`. Never every page: a document keeps at least one,
+ * so this returns the plan unchanged when asked to. */
+export function dropPages(plan: PageRef[], keys: ReadonlySet<number>): PageRef[] {
+  const kept = plan.filter((p) => !keys.has(p.index));
+  return kept.length === 0 ? plan : kept;
+}
+
+/** Same pages, same order, same turns. */
+export function samePlan(a: PageRef[], b: PageRef[]): boolean {
+  return a.length === b.length && a.every((p, i) => p.index === b[i].index && quarterTurn(p.rotate) === quarterTurn(b[i].rotate));
+}

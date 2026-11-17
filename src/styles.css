@@ -390,7 +390,7 @@ body {
   color: var(--on-surface-variant);
   font-variant-numeric: tabular-nums;
 }
-.pagenav__head .icon-btn { margin-left: auto; }
+.pagenav__tools { margin-left: auto; display: flex; gap: 2px; }
 .pagenav__list {
   flex: 1;
   overflow-y: auto;
@@ -411,6 +411,72 @@ body {
   border-radius: var(--radius-md);
 }
 .pagenav__item:hover { background: var(--surface-container-high); }
+.pagenav__item:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+/* A press on a page may become a drag: no text selection, no native image
+   drag, and a held finger doesn't open the callout. */
+.pagenav__item { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+/* Picked for an action: tinted, with a tick in the corner — a second mark,
+   distinct from the ring that says which page is on screen, because the two
+   are different facts (you can pick page 7 while reading page 2). */
+.pagenav__item--selected,
+.pagenav__item--selected:hover { background: color-mix(in srgb, var(--primary) 18%, transparent); }
+.pagenav__check {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  color: var(--on-primary);
+}
+/* Being dragged: the pages stay where they are, faded, until they land. */
+.pagenav__item--lifted { opacity: 0.45; }
+.pagenav__list--dragging { cursor: grabbing; }
+.pagenav__list--dragging .pagenav__item { cursor: grabbing; }
+/* Where they will land: a bar in the gap, drawn without moving anything. */
+.pagenav__item--drop::before,
+.pagenav__list--drop-end > .pagenav__item:last-child::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  height: 3px;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  pointer-events: none;
+}
+.pagenav__item--drop::before { top: -4px; }
+.pagenav__list--drop-end > .pagenav__item:last-child::after { bottom: -4px; }
+/* The actions for the picked pages, at the foot of the sidebar. */
+.pagenav__bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding: 6px 4px 6px 10px;
+  min-height: 48px;
+  border-top: 1px solid var(--outline-variant);
+  padding-bottom: max(6px, env(safe-area-inset-bottom));
+}
+/* Three actions and the count share the rail's 176px: the buttons give a little
+   on a pointer screen. On a phone the sidebar is wider and they keep full size. */
+@media (pointer: fine) {
+  .pagenav__bar .icon-btn--sm { width: 34px; height: 34px; }
+}
+.pagenav__picked {
+  margin-right: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px 2px 6px;
+  border-radius: var(--radius-full);
+  background: var(--primary);
+  color: var(--on-primary);
+  font-variant-numeric: tabular-nums;
+}
 .pagenav__item--on { background: var(--secondary-container); }
 .pagenav__thumb {
   position: relative;

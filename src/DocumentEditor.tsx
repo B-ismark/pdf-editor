@@ -27,12 +27,12 @@ import { PageJump } from "./components/PageJump";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
 import { findMatches, extractText, type FindMatch } from "./pdf/find";
-import { isIdentityPlan, quarterTurn, resolvePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
+import { isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
 import { boxCX, boxCY } from "./pdf/bbox";
 import { findUnsafeCovers, type CoverWarning } from "./pdf/redactionSafety";
 import { downloadBytes, downloadText } from "./download";
 import { plural } from "./plural";
-import type { PageNumberOptions, WatermarkOptions } from "./pdf/types";
+import type { PageNumberOptions, PageRef, WatermarkOptions } from "./pdf/types";
 import { useHistory } from "./hooks/useHistory";
 import { EMPTY_DOC, aModalIsOpen, toAB, type EditorHandle, type LiveDoc, type OpenDoc, type SavedMark, type Status } from "./workspace";
 import { usePageArrays, usePageRecords, usePageSets } from "./hooks/usePageBuckets";
@@ -367,6 +367,18 @@ export const DocumentEditor = memo(function DocumentEditor({
   const plan = useMemo(() => (pdf ? resolvePlan(planned, pdf.pages.length) : []), [pdf, planned]);
   const shown = useMemo(() => (pdf ? shownPages(pdf.pages, plan) : []), [pdf, plan]);
   const shownBySource = useMemo(() => new Map(shown.map((p) => [p.pageIndex, p])), [shown]);
+  /** Apply a page plan (reorder, turn, delete) as one undoable edit. Stored
+   * only when it changes something, so an arrangement put back by hand reads as
+   * the document as loaded. The sidebar and the grid both come through here. */
+  const applyPlan = (next: PageRef[]): boolean => {
+    if (!pdf || next.length === 0 || samePlan(next, plan)) return false;
+    const pages = isIdentityPlan(next, pdf.pages.length) ? undefined : next.map((p) => ({ index: p.index, rotate: quarterTurn(p.rotate) }));
+    doc.set((d) => ({ ...d, pages }));
+    return true;
+  };
+  const arrangePages = (next: PageRef[], note: string) => {
+    if (applyPlan(next)) setMessage(note);
+  };
   /** The turn the page holding object `id` is shown at (0 if not found). */
   const turnOfObject = useCallback(
     (id: string | undefined): number => {
@@ -2364,6 +2376,11 @@ export const DocumentEditor = memo(function DocumentEditor({
             <PageNav
               bytes={pdf.bytes}
               pages={plan}
+              onArrange={arrangePages}
+              onGrid={() => {
+                setSelection(null);
+                setOrganizeOpen(true);
+              }}
               onClose={compact ? () => setNavOpen(false) : undefined}
             />
           </>
@@ -2762,12 +2779,7 @@ export const DocumentEditor = memo(function DocumentEditor({
             onArrange={(next) => {
               setOrganizeOpen(false);
               setSelection(null);
-              const same = next.length === plan.length && next.every((p, i) => p.index === plan[i].index && quarterTurn(p.rotate) === quarterTurn(plan[i].rotate));
-              if (same) return;
-              // Stored only when it changes something, so an arrangement put
-              // back by hand reads as the document as loaded.
-              const pages = isIdentityPlan(next, pdf.pages.length) ? undefined : next.map((p) => ({ index: p.index, rotate: quarterTurn(p.rotate) }));
-              doc.set((d) => ({ ...d, pages }));
+              applyPlan(next);
             }}
             bakeMain={async (finishing) => {
               // The same guard as Download: baked in, a whiteout cover stops

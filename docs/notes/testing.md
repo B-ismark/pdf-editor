@@ -110,6 +110,13 @@ type-checking can't see, and each exists because it broke once:
   lands at the scroll position it was left at, a switch keeps the page at the
   size it was shown (no re-fit after hiding the panel), and Ctrl+O closes the
   ⋯ menu;
+- `sidebar.spec.ts` — the Pages sidebar moves (Alt+↑/↓ and drag, a whole
+  selection together), turns and deletes pages as live, undoable edits that
+  keep each page's markup and come out in the file in that order; Shift picks a
+  run; a document always keeps one page (Delete off with every page picked);
+  Ctrl+A and Escape in the sidebar act on pages, not the canvas; keyboard focus
+  stays on the page through a move or delete; on a phone a tap goes to the page
+  and a press-and-hold picks it;
 - `saved.spec.ts` — a download is a save: it clears the counter, the tab's
   dot and the leave prompt, and turns the close prompt into a plain "Close";
   a download the browser didn't finish still can't lose the work (close asks,
