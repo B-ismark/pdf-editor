@@ -55,6 +55,8 @@ export interface Fixtures {
   /** One line set as separately positioned runs, the way word processors
    * write it — see {@link SPLIT_LINE}. */
   splitLine: string;
+  /** Body text in an embedded TrueType face with ligatures — see {@link LIGATURES}. */
+  ligatures: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
@@ -258,6 +260,7 @@ async function build(): Promise<Fixtures> {
     locked: write("locked.pdf", await lockedPdf(LOCKED_PASSWORD)),
     ownerLocked: write("owner-locked.pdf", await lockedPdf("")),
     splitLine: write("split-line.pdf", await splitLinePdf()),
+    ligatures: write("ligatures.pdf", await ligaturesPdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -572,6 +575,38 @@ async function sharedImagePdf(): Promise<Uint8Array> {
  * it. Used by `baseline.spec.ts` (does the overlay sit on the document's
  * baseline?) and `export.spec.ts` (does an edit keep the panel's colour?).
  */
+/**
+ * Text in an embedded TrueType face whose ToUnicode includes ligatures — see
+ * `ligature.spec.ts`.
+ *
+ * pdf-lib lays text out with the face's `liga` feature, so "fifty office" is
+ * drawn with the "fi" and "ffi" glyphs, and the ToUnicode it writes maps each to
+ * its letters — as Word and most writers do. pdf.js filed those glyphs under
+ * their *first* letter when it rebuilt the face, so every "f" drawn in it came
+ * out "fi" ("from" → "firom"). DejaVu ships with most Linux images, the CI
+ * runner's included; where it's missing the PDF is written in Helvetica and the
+ * spec skips.
+ */
+export const LIGATURES = {
+  font: SEARCH_HOSTILE_FONT,
+  size: 14,
+  lines: [
+    { text: "fifty office staff", baseline: 300 },
+    { text: "from the floor", baseline: 260 },
+  ],
+};
+
+async function ligaturesPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  const font = existsSync(LIGATURES.font)
+    ? await doc.embedFont(readFileSync(LIGATURES.font), { subset: false })
+    : await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([640, 400]);
+  for (const line of LIGATURES.lines) page.drawText(line.text, { x: 40, y: line.baseline, size: LIGATURES.size, font });
+  return doc.save();
+}
+
 async function splitLinePdf(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const page = doc.addPage([SPLIT_LINE.page.width, SPLIT_LINE.page.height]);

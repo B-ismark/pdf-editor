@@ -34,6 +34,48 @@ export interface SourceFontEmbedder {
  * a page won't render, or a glyph is missing, `get()` returns null and the
  * exporter uses a standard font — so export never fails because of this path.
  */
+/**
+ * `@pdf-lib/fontkit`, with its subsets made to look like what
+ * `@cantoo/pdf-lib` expects of it.
+ *
+ * The fork serialises a subset with `subset.encode()` when there is one (the API
+ * of fontkit 2 / `@cantoo/fontkit`) and falls back to `encodeStream()` (the API
+ * of `@pdf-lib/fontkit`). But `@pdf-lib/fontkit`'s subsets have an `encode`
+ * too — an internal `encode(stream)` — so the fork called it with no stream and
+ * it threw at save: every export with an edit kept in the document's own
+ * TrueType face failed outright ("Couldn't build the edited PDF"). Hiding
+ * `encode` sends the fork down the streaming path it already supports; every
+ * other member is the real subset's, bound to it, so `encodeStream()` still
+ * reaches the real `encode` inside.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function streamingSubsets(fontkit: any) {
+  return {
+    ...fontkit,
+    create(...args: unknown[]) {
+      const font = fontkit.create(...args);
+      return new Proxy(font, {
+        get(target, prop) {
+          if (prop !== "createSubset") {
+            const v = Reflect.get(target, prop, target);
+            return typeof v === "function" ? v.bind(target) : v;
+          }
+          return () => {
+            const subset = target.createSubset();
+            return new Proxy(subset, {
+              get(s, p) {
+                if (p === "encode") return undefined;
+                const v = Reflect.get(s, p, s);
+                return typeof v === "function" ? v.bind(s) : v;
+              },
+            });
+          };
+        },
+      });
+    },
+  };
+}
+
 export async function createSourceFontEmbedder(
   bytes: ArrayBuffer,
   out: PDFDocument,
@@ -47,7 +89,7 @@ export async function createSourceFontEmbedder(
   try {
     const pdfjs = await import("pdfjs-dist");
     fontkit = (await import("@pdf-lib/fontkit")).default;
-    out.registerFontkit(fontkit);
+    out.registerFontkit(streamingSubsets(fontkit));
     doc = await pdfjs.getDocument({ data: bytes.slice(0), fontExtraProperties: true, disableFontFace: true }).promise;
   } catch {
     return NOOP;

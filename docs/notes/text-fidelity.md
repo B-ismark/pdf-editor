@@ -138,3 +138,15 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     past it. The overlay (`scaleX`), the vector path (`cm`) and the raster path
     (`ctx.scale`) all use it. Reflow was rejected: it redraws untouched text and
     would slide words out from under a measured search-redaction box.
+  - **The document's face is patched at build time** (`pdfWorkerPlugin` in
+    `vite.config.ts`). pdf.js's rebuilt face is used by Unicode three ways — the
+    selected overlay, the raster export's `ctx.font`, and the vector export,
+    which embeds those bytes (`fontEmbed.ts`) — and its Unicode cmap had two
+    gaps: a ligature was filed under its first letter ("f" drew "fi"), and an
+    outline-less glyph (the space) was left out (the export drew .notdef boxes).
+    The patch fails the build if a pdf.js upgrade moves the code; re-derive it
+    from `adjustMapping` rather than deleting it.
+  - **`fontEmbed.ts` registers `@pdf-lib/fontkit` through `streamingSubsets`.**
+    `@cantoo/pdf-lib` prefers a subset's `encode()`, which in this fontkit is an
+    internal `encode(stream)`; called bare it threw at save, and every export
+    with an edit kept in the source face failed. Don't register fontkit directly.
