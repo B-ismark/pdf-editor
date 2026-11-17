@@ -12,7 +12,7 @@ import { PageJump } from "./components/PageJump";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
 import { findMatches, extractText, type FindMatch } from "./pdf/find";
-import { isIdentityPlan, quarterTurn, resolvePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown } from "./pdf/pagePlan";
+import { isIdentityPlan, quarterTurn, resolvePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
 import { boxCX, boxCY } from "./pdf/bbox";
 import { findUnsafeCovers, type CoverWarning } from "./pdf/redactionSafety";
 import { useAutosave } from "./hooks/useAutosave";
@@ -562,13 +562,23 @@ export function App() {
     () =>
       pdf
         ? [...fragmentById.values()].filter((f) =>
-            isFragmentModified(f, edits[f.id]),
+            shownBySource.has(f.pageIndex) && isFragmentModified(f, edits[f.id]),
           ).length
         : 0,
-    [pdf, fragmentById, edits],
+    [pdf, fragmentById, edits, shownBySource],
+  );
+  // Only what ships: markup on a deleted page stays in the state (undo brings
+  // the page back with it) but isn't a change to the file.
+  const shippedOverlays = useMemo(
+    () =>
+      [textBoxes, redactions, annotations, stamps, links].reduce(
+        (n, list) => n + (list as { pageIndex: number }[]).filter((o) => shownBySource.has(o.pageIndex)).length,
+        0,
+      ),
+    [textBoxes, redactions, annotations, stamps, links, shownBySource],
   );
   const changeCount =
-    editedFragmentCount + textBoxes.length + redactions.length + annotations.length + stamps.length + links.length + Object.keys(formValues).length +
+    editedFragmentCount + shippedOverlays + Object.keys(formValues).length +
     (pageNumbers ? 1 : 0) + (watermark ? 1 : 0) + (planned ? 1 : 0) + baked;
   const isSaved = savedMark != null && savedMark.doc === docHistory.state && savedMark.baked === baked;
   /** Work that only exists in this window: what the leave/close prompts guard. */
@@ -814,6 +824,15 @@ export function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeId, pdf, fileName, doc.snapshot, vp.captureView, changeCount, baked, savedMark, unsaved, locked],
   );
+
+  // The fit-to-width base follows the widest page *as shown*: turning a
+  // portrait page sideways in Organise (or undoing it) changes it. Measured
+  // here rather than only on load, or turned pages run off the side.
+  const shownWidthPts = useMemo(() => Math.max(...shown.map((p) => shownSize(p).width), 1), [shown]);
+  const setPageWidth = vp.setPageWidth;
+  useEffect(() => {
+    if (pdf) setPageWidth(shownWidthPts);
+  }, [pdf, shownWidthPts, setPageWidth]);
 
   /** Bring a parked document to the front. */
   const showDoc = useCallback(
@@ -1967,12 +1986,17 @@ export function App() {
   const pasteItem = useCallback(
     (item: ClipItem) => {
       const def = OVERLAYS[item.kind];
+      // A copy of something on a page that's since been deleted would land
+      // on a page nobody can see.
+      const page = shownBySource.get((item.obj as { pageIndex?: number }).pageIndex ?? -1);
+      if (!page) return;
       const id = nextId(def.idPrefix);
-      const copy = { ...def.translate(item.obj, PASTE_DX, PASTE_DY), id };
+      const off = shownToUserDelta(PASTE_DX, PASTE_DY, page.rotation);
+      const copy = { ...def.translate(item.obj, off.dx, off.dy), id };
       doc.set((d) => keepStampsOnPage(addOverlay(d, item.kind, copy), [id], pdf?.pages));
       setSelection({ kind: item.kind, id });
     },
-    [doc, pdf],
+    [doc, pdf, shownBySource],
   );
 
   const duplicateSelection = useCallback(() => {
@@ -2073,8 +2097,25 @@ export function App() {
       : selection?.kind === "annotation" && selectedAnnotation?.kind !== "note";
 
   type AlignOp = "left" | "center-h" | "right" | "top" | "middle" | "bottom";
+  // Align and distribute work on the page as shown: on a turned page "left"
+  // is another side of each box in the page's own space. Boxes are turned into
+  // the shown frame, moved there, and the moves turned back.
+  const multiTurn = turnOfObject(multi[0]);
+  const shownItems = useMemo(
+    () => multiItems.map((it) => ({ ...it, box: userToShownBox(it.box, multiTurn) })),
+    [multiItems, multiTurn],
+  );
+  const applyShownDeltas = useCallback(
+    (deltas: Map<string, { dx: number; dy: number }>) => {
+      const back = new Map<string, { dx: number; dy: number }>();
+      deltas.forEach((d, id) => back.set(id, shownToUserDelta(d.dx, d.dy, multiTurn)));
+      applyDeltas(back);
+    },
+    [applyDeltas, multiTurn],
+  );
   const alignMulti = useCallback(
     (op: AlignOp) => {
+      const multiItems = shownItems;
       if (multiItems.length < 2) return;
       const ls = multiItems.map((i) => i.box.l);
       const rs = multiItems.map((i) => i.box.r);
@@ -2093,13 +2134,14 @@ export function App() {
         else if (op === "middle") dy = cV - boxCY(it.box);
         deltas.set(it.id, { dx, dy });
       }
-      applyDeltas(deltas);
+      applyShownDeltas(deltas);
     },
-    [multiItems, applyDeltas],
+    [shownItems, applyShownDeltas],
   );
 
   const distributeMulti = useCallback(
     (axis: "h" | "v") => {
+      const multiItems = shownItems;
       if (multiItems.length < 3) return;
       const sorted = [...multiItems].sort((a, b) =>
         axis === "h" ? boxCX(a.box) - boxCX(b.box) : boxCY(a.box) - boxCY(b.box),
@@ -2114,9 +2156,9 @@ export function App() {
         const cur = axis === "h" ? boxCX(it.box) : boxCY(it.box);
         deltas.set(it.id, axis === "h" ? { dx: target - cur, dy: 0 } : { dx: 0, dy: target - cur });
       });
-      applyDeltas(deltas);
+      applyShownDeltas(deltas);
     },
-    [multiItems, applyDeltas],
+    [shownItems, applyShownDeltas],
   );
 
   const deleteMulti = useCallback(() => {
@@ -2137,13 +2179,14 @@ export function App() {
           if (!set.has(item.id)) continue;
           const id = nextId(def.idPrefix);
           newIds.push(id);
-          next = addOverlay(next, def.kind, { ...def.translate(item, PASTE_DX, PASTE_DY), id });
+          const off = shownToUserDelta(PASTE_DX, PASTE_DY, shownBySource.get((item as unknown as { pageIndex: number }).pageIndex)?.rotation ?? 0);
+          next = addOverlay(next, def.kind, { ...def.translate(item, off.dx, off.dy), id });
         }
       }
       return next;
     });
     setMulti(newIds);
-  }, [multi, multiItems, doc]);
+  }, [multi, multiItems, doc, shownBySource]);
 
   // Move focus into the overflow menu when it opens (ARIA menu pattern).
   useEffect(() => {
@@ -2186,12 +2229,19 @@ export function App() {
   useEffect(() => {
     if (
       selection &&
-      selection.kind !== "fragment" &&
-      !overlayExists(docHistory.state, selection.kind, selection.id)
+      ((selection.kind !== "fragment" && !overlayExists(docHistory.state, selection.kind, selection.id)) ||
+        // Its page was deleted (or a redo deleted it again): nothing to edit.
+        !shownBySource.has(pageOf(selection.id) ?? -1))
     ) {
       setSelection(null);
     }
-  }, [docHistory.state, selection]);
+  }, [docHistory.state, selection, shownBySource, pageOf]);
+  useEffect(() => {
+    setMulti((m) => {
+      const kept = m.filter((id) => shownBySource.has(pageOf(id) ?? -1));
+      return kept.length === m.length ? m : kept;
+    });
+  }, [shownBySource, pageOf]);
 
   // Warn before leaving/reloading the tab while there are unsaved changes.
   // Everything lives in memory (no server, no autosave), so an accidental
@@ -3476,7 +3526,7 @@ export function App() {
               })),
               { id: "duplicate", label: "Duplicate selection", hint: "Ctrl+D", icon: "duplicate", disabled: !selection || selection.kind === "fragment", run: duplicateSelection },
               { id: "find", label: "Find in document", hint: "Ctrl+F", icon: "search", run: openFind },
-              ...(pdf && pdf.pages.length > 1
+              ...(pdf && shown.length > 1
                 ? [{ id: "goto", label: "Go to page…", icon: "go_to_page", keywords: "jump page number", run: openPageJump }]
                 : []),
               { id: "pages", label: navOpen ? "Hide page thumbnails" : "Show page thumbnails", icon: navOpen ? "panel_close" : "panel_open", run: () => setNavOpen((v) => !v) },
@@ -3523,9 +3573,19 @@ export function App() {
               const pages = isIdentityPlan(next, pdf.pages.length) ? undefined : next.map((p) => ({ index: p.index, rotate: quarterTurn(p.rotate) }));
               doc.set((d) => ({ ...d, pages }));
             }}
-            bakeMain={async () => {
+            bakeMain={async (finishing) => {
+              // The same guard as Download: baked in, a whiteout cover stops
+              // being an object, and nothing would flag the text under it.
+              const warn = findUnsafeCovers(pdf, redactions, planned);
+              if (warn.count > 0) {
+                throw Object.assign(
+                  new Error(`Whiteout sits over live text on page ${warn.pages.join(", ")}. Redact it instead, then try again.`),
+                  { userFacing: true },
+                );
+              }
               const { exportPdf } = await import("./pdf/exporter");
-              return toAB(await exportPdf(pdf, { ...docHistory.state, pages: undefined, losslessRaster }));
+              const state = finishing ? docHistory.state : { ...docHistory.state, pageNumbers: undefined, watermark: undefined };
+              return toAB(await exportPdf(pdf, { ...state, losslessRaster }));
             }}
             onApply={(bytes, note) => {
               setOrganizeOpen(false);
@@ -3535,7 +3595,10 @@ export function App() {
               // too, or merging would be a way round "never stored on the device".
               const tookLocked = organizeTookLocked.current;
               organizeTookLocked.current = false;
-              void openBytes(bytes, fileName, note, undefined, {
+              // Page numbers and the watermark weren't drawn in: they carry
+              // over live, so they number and mark the merged pages.
+              const finishing = pageNumbers || watermark ? { ...EMPTY_DOC, pageNumbers: pageNumbers ?? undefined, watermark: watermark ?? undefined } : undefined;
+              void openBytes(bytes, fileName, note, finishing, {
                 replace: true,
                 baked: Math.max(1, changeCount),
                 ...(tookLocked ? { locked: true } : {}),

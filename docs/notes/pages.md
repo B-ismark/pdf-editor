@@ -63,14 +63,38 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
   `collectGarbage`. `pages.spec` counts `/Page` objects in the file.
 - **Organise**: a plan of only this document's pages is applied as
   `doc.set({ pages })`: no confirm, undoable, edits kept. A plan with another
-  document's pages still rebuilds the file. This document is baked first
-  (`bakeMain`, with no plan, so Organise's source indices still fit) and the
-  confirm says the edits are drawn in and undo starts over.
+  document's pages (a merge) still rebuilds the file, and so does Extract.
+  Both start from this document *as shown* (`bakeMain` exports it with the
+  plan, so edits, redactions and turns are drawn in), and `mainAsShown` in
+  `Organize.tsx` remaps Organise's source indices and turns onto those baked
+  pages. Extract must never hand back the raw original: a redacted page would
+  come back unredacted. The bake runs the same whiteout-over-text guard as
+  Download. Page numbers and the watermark are not drawn in by a merge; they
+  carry over to the new document as live settings, so they number the merged
+  file in its new order.
+- **`buildFromPlan` cuts strays too.** `copyPages` follows a link annotation's
+  `/Dest` into a page that isn't in the plan and copies it along, outside the
+  page tree. Any `/Type /Page` not in the tree is cut and garbage-collected.
+- **Page labels follow their pages.** When the plan isn't the identity,
+  `remapPageLabels` (`structure.ts`) rewrites `/PageLabels` one range per kept
+  page, with the start number advanced to where that page sat in its range.
+
+## Editing on a turned page
+
+- Align, distribute, paste and duplicate work in the page *as shown*:
+  `userToShownBox` / `shownToUserDelta` (`pagePlan.ts`) convert the boxes and
+  offsets, so "left" and "down-right" mean what the reader sees.
+- The view refits when a turn changes the widest shown page, and rail
+  thumbnails scale a quarter-turned canvas to fit their slot.
+- The tick/cross preview ghost is drawn upright, as the placed mark is.
+- An object on a deleted page can't stay selected, be pasted back, or be
+  counted as a change: `shownBySource` gates selection, paste and the counts.
 
 ## Known limits
 
 - OCR renders in user space. On a page whose own `/Rotate` turns sideways-scanned
   text upright, it reads sideways text: fewer words, never misplaced ones.
+- Resize cursors on a turned page point the unturned way.
 - Marquee hit-testing and the selection bbox of a *rotated text box* are
   approximate.
 - A session saved before this change, with overlays on a `/Rotate` page, restores

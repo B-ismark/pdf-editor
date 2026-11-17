@@ -133,3 +133,19 @@ export function shownToUserDelta(dx: number, dy: number, rotation: number): { dx
       return { dx, dy };
   }
 }
+
+/**
+ * A box in a page's user space (y up) as it lies on the page as shown, in the
+ * same units and still y up — for aligning and distributing on a turned page,
+ * where "left" on screen is another side of the box in user space. Only the
+ * directions matter there, so the turn is taken about the origin.
+ */
+export function userToShownBox(
+  box: { l: number; r: number; b: number; t: number },
+  rotation: number,
+): { l: number; r: number; b: number; t: number } {
+  const back = (360 - quarterTurn(rotation)) % 360;
+  const p = shownToUserDelta(box.l, box.b, back);
+  const q = shownToUserDelta(box.r, box.t, back);
+  return { l: Math.min(p.dx, q.dx), r: Math.max(p.dx, q.dx), b: Math.min(p.dy, q.dy), t: Math.max(p.dy, q.dy) };
+}

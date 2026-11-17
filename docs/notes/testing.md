@@ -132,7 +132,12 @@ type-checking can't see, and each exists because it broke once:
   its page, take one undo, and export exactly the planned pages in order and
   turned, with no page object left for the deleted one; on a `/Rotate` page new
   text lands where it was placed and reads upright; on a turned page a drag
-  moves the way the pointer went;
+  moves the way the pointer went, Align and Duplicate work as the page is
+  shown, the view refits, the thumbnail fits and the tick preview is upright.
+  Merge and Extract start from the document as shown (a deleted page doesn't
+  come back through a link, whiteout over text is refused, page numbers follow
+  the new order, an extracted redacted page stays redacted); page labels follow
+  their pages; markup on a deleted page can't be selected, pasted or counted;
 - `overlays.spec.ts` — a marquee'd group moves as one (one undo step) and
   survives the drag, a plain click on a member selects just that one, arrows
   nudge the group, and a buried stroke can be raised — in the overlay's paint

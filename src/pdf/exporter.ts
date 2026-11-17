@@ -11,9 +11,10 @@ import {
   retargetPageRefs,
   retitleOutlinesInto,
   cutDeletedPages,
+  remapPageLabels,
 } from "./structure";
 import { alignPageTree, setPageList } from "./pageTree";
-import { quarterTurn, resolvePlan } from "./pagePlan";
+import { isIdentityPlan, quarterTurn, resolvePlan } from "./pagePlan";
 import { safeLinkUrl } from "./url";
 import { markPolylines, markStroke } from "./marks";
 import { createSourceFontEmbedder, type SourceFontEmbedder } from "./fontEmbed";
@@ -675,6 +676,7 @@ export async function exportPdf(
     else finished[i].setRotation(degrees(quarterTurn(pd.rotation + slot.rotate)));
   });
   setPageList(out, plan.map((p) => finished[p.index]));
+  if (!isIdentityPlan(plan, finished.length)) remapPageLabels(out, plan.map((p) => p.index));
 
   // Order matters. Fields and annotations are found by the *old* page refs, so
   // they go before the refs move; bookmarks are matched to the *new* refs, so

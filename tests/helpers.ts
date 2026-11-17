@@ -1,4 +1,6 @@
 import { expect, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import type { DocState } from "../src/pdf/types";
 
 /** Requests and errors recorded for a page, so a spec can assert on them. */
 export interface Watcher {
@@ -133,4 +135,46 @@ export async function pageTexts(bytes: Buffer, pages: number[]): Promise<string[
     out.push(content.items.map((i) => ("str" in i ? i.str : "")).join(" "));
   }
   return out;
+}
+
+/** Write records straight into the autosave store, as a previous visit would
+ * have left them. `bytes` values are PDF files read from disk. */
+export async function seedStore(page: Page, records: [string, unknown][], bytes: [string, string][]) {
+  const files = bytes.map(([k, path]) => [k, [...readFileSync(path)]] as const);
+  await page.evaluate(
+    ({ records, files }) =>
+      new Promise<void>((resolve) => {
+        const req = indexedDB.open("pdf-editor", 1);
+        req.onupgradeneeded = () => req.result.createObjectStore("session");
+        req.onsuccess = () => {
+          const tx = req.result.transaction("session", "readwrite");
+          const st = tx.objectStore("session");
+          for (const [k, v] of records) st.put(v, k);
+          for (const [k, arr] of files) st.put(new Uint8Array(arr).buffer, k);
+          tx.oncomplete = () => {
+            req.result.close();
+            resolve();
+          };
+        };
+      }),
+    { records, files },
+  );
+}
+
+export const EMPTY: DocState = { edits: {}, textBoxes: [], redactions: [], annotations: [], stamps: [] };
+export const docRecord = (id: string, fileName: string, order: number, extra: Partial<{ doc: DocState; baked: number }> = {}) => ({
+  id,
+  fileName,
+  doc: EMPTY,
+  savedAt: Date.now(),
+  order,
+  active: false,
+  ...extra,
+});
+
+/** Restore a session written by `seedStore` (call before it: it needs the page loaded). */
+export async function restoreSeeded(page: Page): Promise<void> {
+  await page.reload();
+  await page.locator(".restore-banner").getByRole("button", { name: "Restore" }).click();
+  await expect(page.locator(".page").first()).toBeVisible({ timeout: 30_000 });
 }

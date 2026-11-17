@@ -624,3 +624,60 @@ function pruneOutline(doc: PDFDocument, gone: Set<PDFRef>): void {
   if (top.length) root.set(PDFName.of("Count"), PDFNumber.of(visible));
   else root.delete(PDFName.of("Count"));
 }
+
+/**
+ * Re-key `/PageLabels` for pages put in a new order. The number tree is keyed
+ * by page *position*, so after a reorder or a deletion every label lands on
+ * another page ("i" on what was page "ii"). `sources[i]` is the original
+ * position of the page now at `i`; each new range restarts at exactly the
+ * number that page had, so every page keeps its own label.
+ */
+export function remapPageLabels(doc: PDFDocument, sources: number[]): void {
+  const key = PDFName.of("PageLabels");
+  const tree = deref(doc, doc.catalog.get(key));
+  if (!(tree instanceof PDFDict)) return;
+  const ranges: { start: number; dict: PDFDict }[] = [];
+  const walk = (node: PDFObject | undefined, depth: number) => {
+    if (!(node instanceof PDFDict) || depth > 32 || ranges.length > 100_000) return;
+    const nums = deref(doc, node.get(PDFName.of("Nums")));
+    if (nums instanceof PDFArray) {
+      for (let i = 0; i + 1 < nums.size(); i += 2) {
+        const k = deref(doc, nums.get(i));
+        const d = deref(doc, nums.get(i + 1));
+        if (k instanceof PDFNumber && d instanceof PDFDict) ranges.push({ start: k.asNumber(), dict: d });
+      }
+    }
+    const kids = deref(doc, node.get(PDFName.of("Kids")));
+    if (kids instanceof PDFArray) for (let i = 0; i < kids.size(); i++) walk(deref(doc, kids.get(i)), depth + 1);
+  };
+  walk(tree, 0);
+  ranges.sort((a, b) => a.start - b.start);
+  const rangeOf = (k: number) => {
+    let r: (typeof ranges)[number] | undefined;
+    for (const x of ranges) if (x.start <= k) r = x;
+    return r;
+  };
+  const out = doc.context.obj([]) as PDFArray;
+  let prev: { k: number; r: unknown } | null = null;
+  sources.forEach((k, i) => {
+    const r = rangeOf(k);
+    // Carries on from the page before it: the range already numbers it.
+    if (prev && r && prev.r === r && prev.k + 1 === k) {
+      prev = { k, r };
+      return;
+    }
+    prev = { k, r };
+    const d = doc.context.obj({}) as PDFDict;
+    if (r) {
+      for (const name of ["S", "P"]) {
+        const v = r.dict.get(PDFName.of(name));
+        if (v) d.set(PDFName.of(name), v);
+      }
+      const st = deref(doc, r.dict.get(PDFName.of("St")));
+      d.set(PDFName.of("St"), PDFNumber.of((st instanceof PDFNumber ? st.asNumber() : 1) + (k - r.start)));
+    }
+    out.push(PDFNumber.of(i));
+    out.push(d);
+  });
+  doc.catalog.set(key, doc.context.obj({ Nums: out }));
+}

@@ -17,9 +17,12 @@ interface Props {
   /** Apply a plan that only rearranges this document's own pages: an ordinary,
    *  undoable edit that keeps every overlay with its page. */
   onArrange: (pages: PageRef[]) => void;
-  /** This document with its edits drawn in and every source page present
-   *  (no plan applied), for a plan that merges in other documents' pages. */
-  bakeMain: () => Promise<ArrayBuffer>;
+  /** This document as shown: its edits drawn in and its page plan applied
+   *  (deleted pages cut out, not just unlisted). Page numbers and the
+   *  watermark are drawn too only when `finishing`; a merge leaves them live,
+   *  to number the merged document. Rejects (user-facing) on whiteout over
+   *  live text, as Download does. */
+  bakeMain: (finishing: boolean) => Promise<ArrayBuffer>;
   /** Apply a merged plan as the new working document. */
   onApply: (bytes: ArrayBuffer, note: string) => void;
   /** Download the given bytes without changing the working document. */
@@ -136,6 +139,29 @@ export function Organize({
    *  applied as an undoable edit rather than a rebuild. */
   const ownPagesOnly = !!plan && plan.every((e) => e.sourceKey === "main");
 
+  /**
+   * This document's pages for a rebuild: the original bytes when it has no
+   * edits, otherwise the baked copy, with the plan's entries moved onto it.
+   * The baked copy has the plan applied, so a card's source page becomes its
+   * position in `pages`, and the turn the plan already drew is taken off.
+   */
+  const mainAsShown = async (entries: PlanEntry[], finishing: boolean) => {
+    if (!hasEdits) return { entries, bytes: mainBytes };
+    const bytes = await bakeMain(finishing);
+    const at = new Map(pages.map((p, i) => [p.index, { pos: i, rotate: p.rotate }]));
+    return {
+      bytes,
+      entries: entries.map((e) => {
+        if (e.sourceKey !== "main") return e;
+        const was = at.get(e.index);
+        if (!was) throw new Error("A page isn't in the document any more.");
+        return { ...e, index: was.pos, rotation: (((e.rotation - was.rotate) % 360) + 360) % 360 };
+      }),
+    };
+  };
+  const failure = (e: unknown, fallback: string) =>
+    (e as { userFacing?: boolean })?.userFacing ? (e as Error).message : fallback;
+
   const doApply = async () => {
     if (!plan || plan.length === 0) return;
     setConfirmApply(false);
@@ -147,13 +173,14 @@ export function Organize({
     setBusy("Applying…");
     try {
       // Merging rebuilds the file, so this document's edits are drawn into its
-      // pages first — every source page, so the plan's indices still fit.
-      const bytes = await buildFromPlan(plan, new Map(sources).set("main", hasEdits ? await bakeMain() : mainBytes));
+      // pages first.
+      const main = await mainAsShown(plan, false);
+      const bytes = await buildFromPlan(main.entries, new Map(sources).set("main", main.bytes));
       const ab = new ArrayBuffer(bytes.byteLength);
       new Uint8Array(ab).set(bytes);
       onApply(ab, `${plural(plan.length, "page")} after organising`);
-    } catch {
-      setErr("Couldn't rebuild the document. Please try again.");
+    } catch (e) {
+      setErr(failure(e, "Couldn't rebuild the document. Please try again."));
     } finally {
       setBusy(null);
     }
@@ -172,9 +199,12 @@ export function Organize({
     setErr(null);
     setBusy("Extracting…");
     try {
-      onExtract(await buildFromPlan(subset, sources));
-    } catch {
-      setErr("Couldn't extract those pages. Please try again.");
+      // The pages as you see them: an extract of the original bytes would hand
+      // back text you redacted.
+      const main = await mainAsShown(subset, true);
+      onExtract(await buildFromPlan(main.entries, new Map(sources).set("main", main.bytes)));
+    } catch (e) {
+      setErr(failure(e, "Couldn't extract those pages. Please try again."));
     } finally {
       setBusy(null);
     }

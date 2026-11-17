@@ -733,6 +733,7 @@ function PageViewInner(props: Props) {
               size={DEFAULT_MARK_SIZE * scale}
               color={drawStyle.color}
               width={drawStyle.width * scale}
+              rotation={upright}
             />
           )}
         </div>
@@ -808,6 +809,7 @@ function MarkGhost({
   size,
   color,
   width,
+  rotation,
 }: {
   kind: "check" | "cross";
   x: number;
@@ -815,6 +817,8 @@ function MarkGhost({
   size: number;
   color: string;
   width: number;
+  /** The turn the placed mark gets: upright on a turned page, as committed. */
+  rotation: number;
 }) {
   const left = x - size / 2;
   const top = y - size / 2;
@@ -823,6 +827,7 @@ function MarkGhost({
     // the specs count its shapes. A preview that answered those counts would
     // make every mark assertion off by the ghost.
     <svg className="markghost" width="100%" height="100%" aria-hidden="true">
+      <g transform={rotation ? `rotate(${rotation} ${x} ${y})` : undefined}>
       <rect x={left} y={top} width={size} height={size} className="markghost__box" />
       {MARK_PATHS[kind].map((line, i) => (
         <polyline
@@ -835,6 +840,7 @@ function MarkGhost({
           strokeLinejoin="round"
         />
       ))}
+      </g>
     </svg>
   );
 }

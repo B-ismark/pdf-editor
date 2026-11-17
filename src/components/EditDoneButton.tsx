@@ -29,32 +29,44 @@ export function EditDoneButton({
     if (!el) return;
     const overlay = el.closest(".page__overlay") as HTMLElement | null;
     if (!overlay) return;
-    // In the overlay's own (unturned) frame: on a turned page its screen box
-    // is rotated, so client-rect arithmetic would put the tick off to a side.
+    // Worked out in the overlay's own (unturned) frame: on a turned page its
+    // screen box is rotated, so client-rect arithmetic would put the tick off
+    // to a side.
     const W = overlay.offsetWidth;
+    // Which way the text runs in that frame: a page's own text runs along it,
+    // but a text box or note made upright on a turned page is turned against
+    // it, and the tick has to trail the text, not the frame.
+    let rel = 0;
+    for (let n: HTMLElement | null = el; n && n !== overlay; n = n.parentElement) {
+      const t = getComputedStyle(n).transform;
+      if (t && t !== "none") {
+        const m = new DOMMatrix(t);
+        rel += Math.atan2(m.b, m.a);
+      }
+    }
+    const dir = { x: Math.cos(rel), y: Math.sin(rel) };
     const range = document.createRange();
     range.selectNodeContents(el);
     range.collapse(false);
     const rects = range.getClientRects();
     // Empty element (no text yet) has no caret rects — anchor to its own box.
     const r = rects.length ? rects[rects.length - 1] : el.getBoundingClientRect();
+    // The caret at the end of the text, mapped into the overlay frame; its
+    // centre survives any turn. A caret is a line, so its length is its line
+    // height whichever way it's turned.
+    const end = toLocal(overlay, r.left + r.width / 2, r.top + r.height / 2);
+    const lineH = rects.length ? Math.max(r.width, r.height) : el.offsetHeight;
+    // An empty element's own box has width to clear.
+    const halfW = rects.length ? 0 : el.offsetWidth / 2;
+    const TICK = 24;
+    const at = { x: end.x + dir.x * (halfW + 8), y: end.y + dir.y * (halfW + 8) };
     // The overlay clips 16px past the page edge (to match the exported page),
     // so a tick for text ending near the edge would be cut off. There it sits
     // above the end of the text instead, inside the page.
-    const TICK = 24;
-    // The caret at the end of the text, mapped into the overlay frame. Client
-    // rects are axis-aligned screen boxes, so on a quarter-turned page the
-    // caret's line height is its rect's *width*; its centre survives the turn.
-    const sideways = Number(overlay.dataset.rotation ?? 0) % 180 !== 0;
-    const lineH = sideways ? r.width : r.height;
-    const end = toLocal(overlay, r.left + r.width / 2, r.top + r.height / 2);
-    // A caret rect is a line; an empty element's own box has width to clear.
-    const halfW = rects.length ? 0 : (sideways ? r.height : r.width) / 2;
-    const left = end.x + halfW + 8;
-    if (left + TICK > W + 12) {
+    if (Math.abs(rel) < 0.01 && at.x + TICK > W + 12) {
       setPos({ left: W - TICK - 4, top: Math.max(TICK / 2, end.y - lineH / 2 - TICK / 2 - 4) });
     } else {
-      setPos({ left, top: end.y });
+      setPos({ left: at.x, top: at.y });
     }
   };
 
