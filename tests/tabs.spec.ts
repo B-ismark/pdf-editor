@@ -308,6 +308,69 @@ test.describe("document tabs", () => {
     await expect.poll(() => page.evaluate(() => document.activeElement?.className ?? "")).toContain("doctab__btn");
   });
 
+  test("arrowing between tabs keeps focus on the tab in front", async ({ page }) => {
+    // Each document gets its own editor, strip included: focus has to follow
+    // the switch into the new strip rather than fall to <body> with the old one.
+    const f = await fixtures();
+    await open(page, f.sample);
+    await openMore(page, f.typeset);
+    await expect(tabs(page)).toHaveCount(2);
+    await activeTab(page).locator(".doctab__btn").focus();
+    await page.keyboard.press("ArrowLeft");
+    const focusedTab = () =>
+      page.evaluate(() => (document.activeElement as HTMLElement | null)?.getAttribute("data-doc-tab") ?? "");
+    await expect.poll(focusedTab).not.toBe("");
+    const first = await focusedTab();
+    expect(await activeTab(page).locator(".doctab__btn").getAttribute("data-doc-tab")).toBe(first);
+    // And the next arrow still moves, which it can't from <body>.
+    await page.keyboard.press("ArrowRight");
+    await expect.poll(focusedTab).not.toBe(first);
+    expect(await activeTab(page).locator(".doctab__btn").getAttribute("data-doc-tab")).toBe(await focusedTab());
+  });
+
+  test("coming back to a document lands where it was left", async ({ page }) => {
+    // Each switch mounts a fresh editor. Measuring the page fit afresh drew a
+    // frame at the unmeasured scale and restored the position against that
+    // height: half-way down came back about a third of the way down.
+    const f = await fixtures();
+    await open(page, f.long);
+    const scroller = page.locator(".viewer__scroll");
+    await scroller.evaluate((el) => (el.scrollTop = el.scrollHeight * 0.5));
+    await openMore(page, f.sample);
+    await tabs(page).first().locator(".doctab__btn").click();
+    await expect(activeTab(page)).toContainText("long.pdf");
+    await page.waitForTimeout(600);
+    const at = await scroller.evaluate((el) => el.scrollTop / el.scrollHeight);
+    expect(Math.abs(at - 0.5)).toBeLessThan(0.02);
+  });
+
+  test("switching tabs keeps the page at the size it was shown", async ({ page }) => {
+    // Hiding the panel deliberately leaves the page at its size. A switch used
+    // to re-measure the fit and blow the page up to the wider surface.
+    const f = await fixtures();
+    await open(page, f.sample);
+    await openMore(page, f.sample);
+    await page.locator('.icon-btn[aria-label="Hide panel"]').click();
+    const width = () => page.locator(".page").first().evaluate((el) => el.getBoundingClientRect().width);
+    const before = await width();
+    await tabs(page).first().locator(".doctab__btn").click();
+    await page.waitForSelector(".page canvas");
+    await page.waitForTimeout(400);
+    expect(Math.abs((await width()) - before)).toBeLessThan(1);
+  });
+
+  test("Ctrl+O closes the menu it was pressed over", async ({ page }) => {
+    const f = await fixtures();
+    await open(page, f.sample);
+    const more = page.locator('.icon-btn[aria-label="More actions"]');
+    await more.click();
+    await expect(more).toHaveAttribute("aria-expanded", "true");
+    const chooser = page.waitForEvent("filechooser");
+    await page.keyboard.press("Control+o");
+    await chooser;
+    await expect(more).toHaveAttribute("aria-expanded", "false");
+  });
+
   test("a newly opened document starts at its first page", async ({ page }) => {
     const f = await fixtures();
     await open(page, f.long);

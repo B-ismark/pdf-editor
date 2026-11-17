@@ -4,6 +4,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { TooltipHost } from "./components/TooltipHost";
 import { Icon } from "./components/Icon";
 import { useAutosave } from "./hooks/useAutosave";
+import type { Fit } from "./hooks/useViewport";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { usePersistentFlag } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
@@ -75,6 +76,9 @@ export function App() {
    * tab in front ({@link LiveDoc.id}). */
   const [live, setLive] = useState<LiveDoc | null>(null);
   const editorRef = useRef<EditorHandle>(null);
+  /** The fit-to-width measurement, carried from one editor to the next; let
+   * go with the last document, as the scroll surface it measured is. */
+  const fitRef = useRef<Fit | null>(null);
   const [pwAsk, setPwAsk] = useState<{
     name: string;
     wrong: boolean;
@@ -530,6 +534,7 @@ export function App() {
     setTabs([]);
     setActiveId(null);
     setLive(null);
+    fitRef.current = null;
     setNavOpen(false);
     setDrawbarOpen(true);
     setInspectorOpen(true);
@@ -663,16 +668,27 @@ export function App() {
   const atRisk = (edited: boolean, unsaved: boolean, locked: boolean) =>
     unsaved || (edited && (!autosaveOn || locked));
   const anyBackgroundChanges = tabs.some((t) => t.id !== activeId && atRisk(t.changeCount > 0, t.unsaved, t.locked));
-  const frontAtRisk = !!front && atRisk(frontChanges > 0, frontUnsaved, front.locked);
+  // The document in front is asked at the moment of leaving, not taken from
+  // its last report: that report reaches the shell a render after the editor
+  // changes, and an undo back to what was downloaded would still warn (or an
+  // edit not yet reported would not).
+  const leaveGuard = useRef({ anyBackgroundChanges, front, frontChanges, frontUnsaved, atRisk });
+  leaveGuard.current = { anyBackgroundChanges, front, frontChanges, frontUnsaved, atRisk };
+  const hasTabs = tabs.length > 0;
   useEffect(() => {
-    if (!frontAtRisk && !anyBackgroundChanges) return;
+    if (!hasTabs) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      const g = leaveGuard.current;
+      const now = editorRef.current?.park();
+      const counts = now && g.front && now.id === g.front.id ? now : { changeCount: g.frontChanges, unsaved: g.frontUnsaved };
+      const frontAtRisk = !!g.front && g.atRisk(counts.changeCount > 0, counts.unsaved, g.front.locked);
+      if (!frontAtRisk && !g.anyBackgroundChanges) return;
       e.preventDefault();
       e.returnValue = "";
     };
     window.addEventListener("beforeunload", onBeforeUnload);
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
-  }, [frontAtRisk, anyBackgroundChanges]);
+  }, [hasTabs]);
 
   // Auto-dismiss transient status messages (keep errors and in-progress
   // messages until superseded).
@@ -842,6 +858,7 @@ export function App() {
         setOnCancel={setOnCancel}
         idCounter={idCounter}
         handleRef={editorRef}
+        fitRef={fitRef}
         onLive={onLive}
         onSaved={onSaved}
         onPages={onPages}

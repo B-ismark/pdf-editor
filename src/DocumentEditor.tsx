@@ -43,7 +43,7 @@ import { peekPageFonts, subscribeFonts } from "./pdf/fontInfo";
 import { useFragmentColors } from "./hooks/usePageColors";
 import { usePersistentState } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
-import { useViewport } from "./hooks/useViewport";
+import { useViewport, type Fit } from "./hooks/useViewport";
 import { prepareImageStamp } from "./pdf/imageStamp";
 import {
   OVERLAYS,
@@ -275,6 +275,9 @@ export interface DocumentEditorProps {
   /** Object ids are unique across the whole workspace, so the counter is too. */
   idCounter: MutableRefObject<number>;
   handleRef: Ref<EditorHandle>;
+  /** The workspace's fit-to-width measurement: read once as this editor
+   * mounts, kept current while it is in front (see {@link Fit}). */
+  fitRef: MutableRefObject<Fit | null>;
   onLive: (live: LiveDoc) => void;
   /** This document was handed to the user whole (Download, Compress, signing). */
   onSaved: (id: string, mark: SavedMark) => void;
@@ -314,6 +317,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   setOnCancel,
   idCounter,
   handleRef,
+  fitRef,
   onLive,
   onSaved,
   onPages,
@@ -416,7 +420,11 @@ export const DocumentEditor = memo(function DocumentEditor({
   const menuListRef = useRef<HTMLDivElement>(null);
   const nextId = (prefix: string) => `${prefix}-${idCounter.current++}`;
 
-  const vp = useViewport();
+  const vp = useViewport(fitRef.current);
+  const { fitWidth, pageWidthPts } = vp.fit;
+  useEffect(() => {
+    if (fitWidth > 0 && pageWidthPts > 0) fitRef.current = { fitWidth, pageWidthPts };
+  }, [fitRef, fitWidth, pageWidthPts]);
   // >=600px gets the persistent side panel + tool rail (Material Medium+);
   // <600px is the compact phone layout (contextual selection bar + on-demand
   // sheet, `sheetOpen` state above).
@@ -1813,6 +1821,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       // navigate away from everything open here).
       if (mod && key === "o" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
+        setMenuOpen(false);
         onOpenAnother();
         return;
       }

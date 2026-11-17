@@ -31,6 +31,18 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   - Seeding: `useHistory(initial, limit, from)` resumes a parked history; the
     editor calls `restoreView(entry.view)` once on mount, after it sets the page
     width.
+  - **What a fresh editor must not re-learn: the fit and the focus.** The
+    fit-to-width measurement belongs to the workspace (the old single shell
+    measured it once), so the shell holds it in `fitRef` and each editor seeds
+    `useViewport(seed)` from it and keeps it current. Measured afresh, a
+    switch drew one frame at the unmeasured scale, restored the scroll position
+    against that height (half-way down came back a third of the way down), and
+    re-fitted a page the user had left at its size by hiding the panel. The tab
+    strip remounts with the editor too, so `DocTabs` carries keyboard focus
+    across the remount (`carry`): without it, Delete and the arrow keys dropped
+    focus to `<body>`. And anything the shell decides *at a moment* (the
+    `beforeunload` guard) asks the editor through its handle rather than reading
+    the last `onLive` report, which lands a render late.
 - **Tabs: park, then unpark — and `openBytes` reads live state.**
   `openBytes` opens a *new tab* by default; `{ replace: true }` is only for the
   operations that rebuild the document in front (Organise, page numbers,

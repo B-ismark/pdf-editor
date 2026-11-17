@@ -62,7 +62,7 @@ Read only the section a package points at, not the whole folder.
   - Add a page plan to `DocState`, so page operations stop discarding edits. Turned pages are edited properly: markup turns with the page, and `/Rotate` pages place overlays correctly.
   - Swap pdf-lib for `@cantoo/pdf-lib`.
 - [ ] **6. New layout** (L, 2–3 sessions). (PRODUCT §3.2)
-  - First: split the `App.tsx` workspace shell from a per-document `DocumentEditor` (moved from package 5).
+  - [x] First: split the `App.tsx` workspace shell from a per-document `DocumentEditor` (moved from package 5). Notes in `docs/notes/tabs.md`.
   - A Pages sidebar replaces the rail, with live, undoable page operations. Organise becomes its grid view.
   - Download becomes an Export split button that holds every "produce a file" action.
   - The Inspector becomes properties only, showing document settings when nothing is selected.

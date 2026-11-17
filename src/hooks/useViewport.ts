@@ -24,7 +24,19 @@ const MAX_FIT_WIDTH = 1100;
  * viewport centre) so the content under that point stays put across the
  * relayout.
  */
-export function useViewport() {
+/** The fit-to-width measurement: the scroll surface's width and the page width
+ * it was fitted to. It belongs to the workspace, not to a document — the old
+ * single shell kept one for its whole life — so it is carried from the editor
+ * going into the background to the one coming forward ({@link useViewport}'s
+ * `seed`). Measured afresh, each switch drew one frame at the unmeasured scale
+ * (and restored the scroll position against it), and re-fitted a page the
+ * user had chosen to leave at its size by hiding the panel. */
+export interface Fit {
+  fitWidth: number;
+  pageWidthPts: number;
+}
+
+export function useViewport(seed?: Fit | null) {
   // The scroll container is rendered conditionally (only once a PDF is open),
   // so it mounts *after* this hook first runs. A callback ref stores the node
   // in state the moment it attaches, which lets the effects below (resize
@@ -37,8 +49,11 @@ export function useViewport() {
     setEl(node);
   }, []);
 
-  const [fitWidth, setFitWidth] = useState(0);
-  const [pageWidthPts, setPageWidthPts] = useState(0);
+  const [fitWidth, setFitWidth] = useState(seed?.fitWidth ?? 0);
+  const [pageWidthPts, setPageWidthPts] = useState(seed?.pageWidthPts ?? 0);
+  // Seeded, the surface and this page width are already measured: neither
+  // the surface mounting nor the same page width arriving re-fits.
+  const seeded = useRef(!!seed && seed.fitWidth > 0);
   const [zoom, setZoom] = useState(1);
 
   const effectiveWidth = Math.min(fitWidth, MAX_FIT_WIDTH);
@@ -57,12 +72,16 @@ export function useViewport() {
   }, []);
   useEffect(() => {
     if (!el) return;
-    measure();
+    if (!seeded.current) measure();
     window.addEventListener("resize", measure);
     return () => window.removeEventListener("resize", measure);
   }, [el, measure]);
   // Re-fit when a new document sets its page width (panel is closed then).
+  const fittedTo = useRef(seed?.pageWidthPts ?? null);
   useEffect(() => {
+    if (seeded.current && pageWidthPts === fittedTo.current) return;
+    seeded.current = false;
+    fittedTo.current = pageWidthPts;
     measure();
   }, [pageWidthPts, measure]);
 
@@ -135,6 +154,8 @@ export function useViewport() {
     const p = pendingView.current;
     const node = elRef.current;
     if (!p || !node) return;
+    // Not against an unmeasured page: that scroll extent is about to change.
+    if (fitWidth === 0 || pageWidthPts === 0) return;
     if (performance.now() > p.until) {
       pendingView.current = null;
       return;
@@ -320,6 +341,7 @@ export function useViewport() {
     resetZoom,
     captureView,
     restoreView,
+    fit: { fitWidth, pageWidthPts },
     handlers: {
       onPointerDown,
       onPointerMove,
