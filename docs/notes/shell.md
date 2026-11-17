@@ -180,15 +180,34 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
 - **The app can be updated under an open page.** On-demand parts (dialogs,
   exporter, signing, OCR) are hashed files a deploy deletes. Load them with
   `lazyPart` (`src/staleBuild.ts`), never bare `React.lazy`: a part whose file
-  is gone becomes a stub that closes itself and raises the update banner
+  can't be fetched becomes a stub that closes itself and raises the banner
   (`UpdateBanner`), instead of the rejection unmounting the app. In a `catch`
   that turns a failure into a message, try `staleBuildMessage(err)` first.
-  Don't `preventDefault()` on `vite:preloadError` — Vite then resolves the
-  import to `undefined`. `CrashScreen` (in `main.tsx`) is the last resort for
-  anything else that throws during render. The deploy also carries the last
-  five builds' assets forward (`scripts/carry-assets.mjs`), so this is rare.
+  The banner tells a deploy from a dropped connection (`diagnose`: the file
+  404s on a no-store re-request → "was updated"; otherwise "couldn't load —
+  check your connection") — Chromium caches a failed module fetch, so either
+  way only a reload brings the part back. Only *fetch* failures count:
+  `vite:preloadError` fires for every rejected import, a module that threw
+  while starting included, so it's filtered with `isStaleBuildError`. Don't
+  `preventDefault()` it — Vite then resolves the import to `undefined`.
+  The banner sits in flow above the app bar (never over the tabs, zoom pill
+  or find bar). Its Reload flushes autosave first (bounded at 3 s) and skips
+  the browser's leave prompt when nothing is at risk; if the save fails it
+  says so and offers "Reload anyway". `CrashScreen` (in `main.tsx`) is the
+  last resort for anything else that throws during render; its Reload flushes
+  through `flushAutosave()` (module-level — the app has unmounted), and its
+  copy promises a restore only if "Save session on this device" is on.
+  Autosave runs one save at a time (`inflight` chain), so a flush can't be
+  overtaken by an older write. The deploy also carries the last five builds'
+  assets forward (`scripts/carry-assets.mjs`) and always records the build
+  that's live, so this is rare.
 - **The picture-page hint** (`.picturehint`) appears the first time a Select
-  click lands on a page with no text fragments, and offers OCR. It's laid out
-  against the viewer (a container query), not the window: beside the zoom pill
-  when the page area is wide enough, below it when not, centred on phones
-  where the pill steps aside.
+  *click* (not the press that starts a scroll, pan or drag; primary button;
+  on the page itself, not on a box placed on it) lands on a page with no text
+  fragments, and offers OCR. The wording doesn't claim the page *is* an image —
+  blank and vector-only pages have no fragments either. Dismissed or acted on,
+  it stays away for that tab for the page's lifetime (`hintSettled`, module
+  level — the editor remounts on every tab switch). It's laid out against the
+  viewer (a container query), not the window: beside the zoom pill when the
+  page area is wide enough, below it when not, centred on phones where the
+  pill steps aside.

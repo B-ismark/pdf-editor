@@ -16,10 +16,11 @@
  *        --keep 5 [--seed-url https://example.github.io/app/]
  *
  * `--history` is a directory kept between deploys (CI caches it): one folder
- * per build holding that build's own assets. `--seed-url` fills an empty
- * history from the live site, so the first deploy with this step still
- * protects pages opened on the build it replaces. Best-effort throughout: it
- * logs and carries on, and never fails a deploy.
+ * per build holding that build's own assets. `--seed-url` names the live site:
+ * whenever the build it's serving isn't in the history (the first deploy with
+ * this step, a lost cache, a deploy from elsewhere), its files are fetched and
+ * recorded, so pages opened on it keep working. Best-effort throughout, and
+ * time-boxed: it logs and carries on, and never fails a deploy.
  */
 import { cp, mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -48,8 +49,12 @@ async function listBuilds() {
 
 /** Fetch the live site's asset files, following references from the entry
  * page through every script and stylesheet it reaches. */
-async function seedFromLive(url, into) {
+/** The whole crawl gets this long; a slow or hanging live site can't stall a deploy. */
+const SEED_BUDGET_MS = 60_000;
+
+async function seedFromLive(url, into, html) {
   const base = url.endsWith("/") ? url : url + "/";
+  const deadline = Date.now() + SEED_BUDGET_MS;
   const seen = new Set();
   const queue = [];
   const scan = (text) => {
@@ -61,11 +66,14 @@ async function seedFromLive(url, into) {
       }
     }
   };
-  const html = await (await fetch(base, { signal: AbortSignal.timeout(15000) })).text();
   scan(html);
   await mkdir(into, { recursive: true });
   let saved = 0;
   while (queue.length) {
+    if (Date.now() > deadline) {
+      console.warn(`carry-assets: seeding stopped at the time limit; ${queue.length} file(s) not fetched.`);
+      break;
+    }
     const name = queue.shift();
     try {
       const res = await fetch(base + "assets/" + name, { signal: AbortSignal.timeout(15000) });
@@ -89,13 +97,20 @@ async function main() {
   await mkdir(history, { recursive: true });
   let builds = await listBuilds();
 
-  if (builds.length === 0 && seedUrl) {
+  if (seedUrl) {
     const into = join(history, String(Date.now() - 1).padStart(15, "0"));
     try {
-      const n = await seedFromLive(seedUrl, into);
-      console.log(`carry-assets: seeded ${n} file(s) from the live site.`);
+      const base = seedUrl.endsWith("/") ? seedUrl : seedUrl + "/";
+      const html = await (await fetch(base, { signal: AbortSignal.timeout(15000) })).text();
+      const entry = html.match(/assets\/(index-[\w-]{8}\.js)/)?.[1];
+      let known = false;
+      for (const b of builds) if (entry && existsSync(join(history, b, entry))) known = true;
+      if (entry && !known) {
+        const n = await seedFromLive(seedUrl, into, html);
+        console.log(`carry-assets: recorded the live build (${n} file(s)).`);
+      }
     } catch (err) {
-      console.warn(`carry-assets: couldn't read the live site (${err.message}); starting fresh.`);
+      console.warn(`carry-assets: couldn't read the live site (${err.message}); carrying on.`);
       await rm(into, { recursive: true, force: true });
     }
     builds = await listBuilds();

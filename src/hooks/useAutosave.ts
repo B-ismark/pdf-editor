@@ -189,6 +189,8 @@ export function useAutosave() {
   const pending = useRef<(() => Promise<void>) | null>(null);
   /** The save currently writing, so `flush` can wait for it to land. */
   const inflight = useRef<Promise<void>>(Promise.resolve());
+  /** Whether the last save that ran reached the disk. */
+  const lastOk = useRef(true);
   /** The last workspace handed to `save`, to re-save when another page
    * deletes one of its slots. */
   const last = useRef<{ entries: SessionEntry[]; activeId: string | null } | null>(null);
@@ -214,9 +216,10 @@ export function useAutosave() {
   const save = useCallback((entries: SessionEntry[], activeId: string | null, now = false) => {
     if (timer.current != null) window.clearTimeout(timer.current);
     last.current = { entries, activeId };
+    // `pending` / `timer` are cleared where a run is queued, not inside it:
+    // a run can wait behind the one before it, and by the time it starts a
+    // newer save may already be pending.
     const run = async () => {
-        pending.current = null;
-        timer.current = null;
         try {
           const keep = entries.filter((e) => e.hasChanges);
           const keepIds = new Set(keep.map((e) => e.id));
@@ -290,31 +293,43 @@ export function useAutosave() {
             await withStore("readwrite", (s) => s.put(record, docKey(e.id)));
             savedDocs.current.set(e.id, { doc: e.doc, order, active, fileName: e.fileName, baked: e.baked });
           }
+          lastOk.current = true;
         } catch {
-          /* Quota exceeded or storage blocked — autosave is best-effort. */
+          /* Quota exceeded or storage blocked — autosave is best-effort, but
+             a reload that promises the copy needs to know (see `flush`). */
+          lastOk.current = false;
         }
     };
+    // One save at a time, in order: two overlapping runs each open their own
+    // transactions, and an older one could otherwise land after a newer one.
     if (now) {
-      inflight.current = run();
+      pending.current = null;
+      timer.current = null;
+      inflight.current = inflight.current.then(run);
       return;
     }
     pending.current = run;
     timer.current = window.setTimeout(() => {
-      inflight.current = run();
+      pending.current = null;
+      timer.current = null;
+      inflight.current = inflight.current.then(run);
     }, 1200);
   }, []);
 
   // Leaving the page with a save still waiting: start it now. A discard's
   // deletion queued a second ago must not be the thing a reload brings back.
+  // Deliberately never removed: if the app crashes, the tree unmounts, and
+  // this is what still gets the last edit to disk before the reload.
   useEffect(() => {
     const flush = () => {
       const run = pending.current;
       if (!run) return;
       if (timer.current != null) window.clearTimeout(timer.current);
-      void run();
+      pending.current = null;
+      timer.current = null;
+      inflight.current = inflight.current.then(run);
     };
     window.addEventListener("pagehide", flush);
-    return () => window.removeEventListener("pagehide", flush);
   }, []);
 
   // Another page deleted slots: if any are documents open here, write them back.
@@ -344,6 +359,8 @@ export function useAutosave() {
     savedDocs.current.clear();
     owned.current.clear();
     setRestorable(null);
+    // A save already queued must not write back what this erases.
+    await inflight.current;
     await idbClear().catch(() => {});
   }, []);
 
@@ -370,14 +387,31 @@ export function useAutosave() {
 
   /** Write any waiting save now and resolve once it's on disk — for a reload
    * the app asks for itself, which must not outrun the copy it promises. */
-  const flush = useCallback((): Promise<void> => {
+  const flush = useCallback((): Promise<boolean> => {
     const run = pending.current;
     if (run) {
       if (timer.current != null) window.clearTimeout(timer.current);
-      inflight.current = run();
+      pending.current = null;
+      timer.current = null;
+      inflight.current = inflight.current.then(run);
     }
-    return inflight.current;
+    return inflight.current.then(() => lastOk.current);
   }, []);
+  // Reachable after a crash has unmounted the app (see `flushAutosave`).
+  useEffect(() => {
+    flushLatest = flush;
+  }, [flush]);
 
   return { restorable, save, clear, discard, dismissRestore, adopt, flush };
 }
+
+let flushLatest: (() => Promise<boolean>) | null = null;
+
+/** {@link useAutosave}'s `flush`, for code outside the React tree — the crash
+ * screen, whose Reload must not outrun a save still waiting on its timer.
+ * Resolves `true` when the latest save reached the disk (or nothing was
+ * waiting and the last one did). */
+export function flushAutosave(): Promise<boolean> {
+  return flushLatest ? flushLatest() : Promise.resolve(true);
+}
+

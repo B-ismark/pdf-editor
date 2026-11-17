@@ -679,9 +679,13 @@ export function App() {
   const leaveGuard = useRef({ anyBackgroundChanges, front, frontChanges, frontUnsaved, atRisk });
   leaveGuard.current = { anyBackgroundChanges, front, frontChanges, frontUnsaved, atRisk };
   const hasTabs = tabs.length > 0;
+  /** Set while the update banner reloads with nothing at risk: the banner has
+   * already said what comes back, so no browser "Leave site?" on top of it. */
+  const reloadingForUpdate = useRef(false);
   useEffect(() => {
     if (!hasTabs) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (reloadingForUpdate.current) return;
       const g = leaveGuard.current;
       const now = editorRef.current?.park();
       const counts = now && g.front && now.id === g.front.id ? now : { changeCount: g.frontChanges, unsaved: g.frontUnsaved };
@@ -740,6 +744,7 @@ export function App() {
   if (staleBuild) {
     let kept = 0;
     let atRisk = 0;
+    let downloaded = 0;
     for (const t of tabs) {
       const isFront = t.id === activeId;
       const edited = (isFront ? frontChanges : t.changeCount) > 0;
@@ -747,16 +752,31 @@ export function App() {
       const stored = autosaveOn && !t.locked;
       if (edited && stored) kept++;
       else if (edited && unsaved) atRisk++;
+      else if (edited) downloaded++;
     }
     updateBanner = (
       <UpdateBanner
+        kind={staleBuild}
         kept={kept}
         atRisk={atRisk}
-        reopen={tabs.length - kept - atRisk}
-        onReload={async () => {
+        downloaded={downloaded}
+        reopen={tabs.length - kept - atRisk - downloaded}
+        onReload={async (force) => {
           // The copy the banner promises has to be on disk before the page goes.
-          await flushSession().catch(() => {});
+          // Bounded: a stalled storage write mustn't leave the button on "Saving…".
+          const ok = await Promise.race([
+            flushSession().catch(() => false),
+            new Promise<boolean>((r) => setTimeout(() => r(false), 3000)),
+          ]);
+          if (!ok && kept > 0 && !force) return false;
+          if (atRisk === 0) {
+            reloadingForUpdate.current = true;
+            // In case the navigation doesn't happen after all.
+            setTimeout(() => (reloadingForUpdate.current = false), 3000);
+          }
           window.location.reload();
+          // Reached only if the user chose to stay at the browser's leave prompt.
+          return true;
         }}
       />
     );
@@ -780,8 +800,8 @@ export function App() {
   if (!front) {
     return (
       <div className="app">
-        <TooltipHost />
         {updateBanner}
+        <TooltipHost />
         {passwordDialog}
         <header className="appbar">
           <div className="appbar__brand">
@@ -882,8 +902,8 @@ export function App() {
         void openFiles(e.dataTransfer.files);
       }}
     >
-      <TooltipHost />
       {updateBanner}
+      <TooltipHost />
       <DocumentEditor
         key={`${front.id}:${gen}`}
         entry={front}

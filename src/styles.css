@@ -2534,28 +2534,24 @@ body {
 /* "The app was updated under this page": floats over whatever is showing, the
    start screen or a document, below the app bar. An offer, not a wall — the
    document stays usable behind it. */
+/* The "couldn't load" strip: in flow above the app bar, like a browser's
+   info bar, so it pushes the app down instead of covering anything — the
+   tabs, the zoom pill, the find bar and the picture hint all stay usable. */
 .update-banner {
-  position: fixed;
-  top: 64px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 60;
+  flex: none;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 12px;
-  width: min(560px, calc(100vw - 32px));
-  padding: 14px 16px;
+  padding: 10px 16px;
   background: var(--surface-container-high);
   color: var(--on-surface);
-  border: 1px solid var(--outline-variant);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-3);
+  border-bottom: 1px solid var(--outline-variant);
 }
 .update-banner__icon {
   display: grid;
   place-items: center;
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   flex: none;
   border-radius: var(--radius-full);
   background: var(--primary-container);
@@ -2563,10 +2559,12 @@ body {
 }
 .update-banner__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
 .update-banner__text span { color: var(--on-surface-variant); }
-.update-banner { flex-wrap: wrap; }
-/* Actions on their own row, trailing, primary last — the dialog convention. */
-.update-banner__actions { display: flex; flex-direction: row-reverse; gap: 8px; width: 100%; justify-content: flex-start; padding-left: 48px; }
-@media (max-width: 599px) { .update-banner__actions { padding-left: 0; } }
+.update-banner__actions { display: flex; flex-direction: row-reverse; gap: 8px; flex: none; }
+@media (max-width: 599px) {
+  .update-banner { flex-wrap: wrap; align-items: flex-start; }
+  /* Actions on their own row, trailing, primary last — the dialog convention. */
+  .update-banner__actions { width: 100%; justify-content: flex-start; }
+}
 
 /* The crash screen: never an empty page. */
 .crash {

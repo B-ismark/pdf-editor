@@ -345,6 +345,10 @@ export interface DocumentEditorProps {
 
 /** One document, in front: everything that belongs to the file rather than to
  * the app. Mounted fresh per document (see `workspace.ts`). */
+/** Documents (by tab id) whose picture-page hint was dismissed or acted on,
+ * for this page's lifetime. Never stored: it's a nudge, not a setting. */
+const hintSettled = new Set<string>();
+
 export const DocumentEditor = memo(function DocumentEditor({
   entry,
   tabs,
@@ -383,8 +387,18 @@ export const DocumentEditor = memo(function DocumentEditor({
    * with no text layer to edit (a scan, or a "print to PDF" that flattened
    * every page to an image). Clicking such a page used to do nothing at all,
    * which reads as "editing is broken". Once dismissed, or once OCR has been
-   * asked for, it stays away for this document. */
-  const [pictureHint, setPictureHint] = useState<"off" | "shown" | "done">("off");
+   * asked for, it stays away for this document — across tab switches too,
+   * which remount this editor (hence the module-level set). */
+  const [pictureHint, setPictureHint] = useState<"off" | "shown" | "done">(() =>
+    hintSettled.has(entry.id) ? "done" : "off",
+  );
+  const settleHint = useCallback(() => {
+    hintSettled.add(entry.id);
+    setPictureHint("done");
+  }, [entry.id]);
+  /** Where the current press began: only a click that stayed put counts — the
+   * press that starts a scroll, pan or pinch must not raise the hint. */
+  const pressAt = useRef<{ x: number; y: number } | null>(null);
   /** Organise pulled pages from a password-opened tab (see its `onApply`). */
   const organizeTookLocked = useRef(false);
   const docHistory = useHistory<DocState>(EMPTY_DOC, undefined, entry.history);
@@ -964,7 +978,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   const runOcr = useCallback(async () => {
     if (!pdf) return;
     setMenuOpen(false);
-    setPictureHint("done");
+    settleHint();
     const ctrl = new AbortController();
     setOnCancel(() => () => ctrl.abort());
     setStatus("working");
@@ -2561,9 +2575,18 @@ export const DocumentEditor = memo(function DocumentEditor({
             <div
               className="doc"
               onPointerDownCapture={(ev) => {
+                pressAt.current = ev.isPrimary && ev.button === 0 ? { x: ev.clientX, y: ev.clientY } : null;
+              }}
+              onClickCapture={(ev) => {
                 // A click meant to pick text, on a page that has none.
-                if (tool !== "select" || pictureHint !== "off" || !pdf) return;
-                const el = (ev.target as Element).closest<HTMLElement>(".page");
+                const at = pressAt.current;
+                pressAt.current = null;
+                if (tool !== "select" || pictureHint !== "off" || !pdf || !at) return;
+                if (Math.hypot(ev.clientX - at.x, ev.clientY - at.y) > 6) return;
+                // The page itself — not a box, note or mark the user put on it.
+                const target = ev.target as Element;
+                if (!target.matches("canvas, .page, .page__overlay")) return;
+                const el = target.closest<HTMLElement>(".page");
                 const idx = Number(el?.dataset.pageIndex);
                 const pg = pdf.pages.find((p) => p.pageIndex === idx);
                 if (pg && pg.fragments.length === 0) setPictureHint("shown");
@@ -2626,14 +2649,14 @@ export const DocumentEditor = memo(function DocumentEditor({
             <div className="picturehint" role="status">
               <Icon name="scan_text" size={18} />
               <span className="body-medium picturehint__text">
-                This page is an image, so its text can't be edited yet.
+                This page has no text to edit. If it's a scan or picture, recognise its text first.
               </span>
               <button className="btn btn--tonal" onClick={() => void runOcr()} disabled={busy}>
                 Recognise text
               </button>
               <button
                 className="icon-btn icon-btn--sm"
-                onClick={() => setPictureHint("done")}
+                onClick={settleHint}
                 aria-label="Dismiss"
                 data-tip="Dismiss"
               >

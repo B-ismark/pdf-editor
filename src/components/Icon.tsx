@@ -18,6 +18,7 @@ import {
   ChevronRight,
   ChevronUp,
   CircleFadingArrowUp,
+  WifiOff,
   Command,
   Contrast,
   Copy,
@@ -186,6 +187,8 @@ const MAP: Record<string, LucideIcon> = {
   /** A newer version of the app is out (the page was opened before a deploy).
    * Not a refresh arrow: that circle-of-arrows is `rotate`'s shape. */
   app_update: CircleFadingArrowUp,
+  /** A part of the app couldn't be fetched because the connection failed. */
+  offline: WifiOff,
 
   // ---- chrome ----
   more_vert: MoreVertical,

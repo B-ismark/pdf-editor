@@ -16,24 +16,78 @@ import { lazy, useEffect, useSyncExternalStore, type ComponentType } from "react
  * shows one calm "updated — reload" banner (see `App.tsx`).
  */
 
-let stale = false;
+/** Why a part of the app couldn't load: the site was replaced by a newer
+ * build (the file is gone for good), or the connection failed (the file is
+ * there; a reload once back online fixes it). */
+export type LoadTrouble = "updated" | "offline";
+
+let trouble: LoadTrouble | null = null;
+let diagnosing = false;
 const listeners = new Set<() => void>();
 
-/** Say the running build is out of date. Idempotent. */
-export function reportStaleBuild(): void {
-  if (stale) return;
-  stale = true;
+function settle(kind: LoadTrouble): void {
+  // "updated" is the stronger claim and, once proven, stays.
+  if (trouble === "updated" || trouble === kind) return;
+  trouble = kind;
   for (const l of listeners) l();
 }
 
-/** True once any part of the app failed to load. */
-export function useStaleBuild(): boolean {
+/** The code file an import error names, when the engine includes it
+ * (Chromium and Firefox do; WebKit doesn't). */
+function fileOf(err: unknown): string | null {
+  const msg = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+  const m = msg.match(/(https?:\/\/[^\s'"]+|\/[^\s'"]+?\.(?:m?js|css))/);
+  if (!m) return null;
+  try {
+    return new URL(m[1], window.location.href).href;
+  } catch {
+    return null;
+  }
+}
+
+/** Tell a deploy from a dropped connection — the banner must not say "the
+ * app was updated" about a blip. Ask for the file again, bypassing every
+ * cache: gone (404) is a deploy. Without a file name, compare the live entry
+ * page's main script with this page's. Anything that can't be reached is the
+ * connection. */
+async function diagnose(err: unknown): Promise<LoadTrouble> {
+  const file = fileOf(err);
+  try {
+    if (file) {
+      const res = await fetch(file, { method: "HEAD", cache: "no-store" });
+      return res.status === 404 || res.status === 410 ? "updated" : "offline";
+    }
+    const res = await fetch("./", { cache: "no-store" });
+    if (!res.ok) return "offline";
+    const live = (await res.text()).match(/assets\/index-[\w-]{8}\.js/)?.[0];
+    const mine = [...document.querySelectorAll<HTMLScriptElement>("script[src]")]
+      .map((sc) => sc.src)
+      .find((src) => /assets\/index-[\w-]{8}\.js/.test(src));
+    return live && mine && !mine.endsWith(live) ? "updated" : "offline";
+  } catch {
+    return "offline";
+  }
+}
+
+/** Say a code file couldn't load. Works out why in the background, then
+ * raises the banner. Idempotent. */
+export function reportStaleBuild(err?: unknown): void {
+  if (trouble === "updated" || diagnosing) return;
+  diagnosing = true;
+  void diagnose(err).then((kind) => {
+    diagnosing = false;
+    settle(kind);
+  });
+}
+
+/** Why a part of the app couldn't load, once known; `null` while all is well. */
+export function useStaleBuild(): LoadTrouble | null {
   return useSyncExternalStore(
     (cb) => {
       listeners.add(cb);
       return () => listeners.delete(cb);
     },
-    () => stale,
+    () => trouble,
   );
 }
 
@@ -52,24 +106,30 @@ export function isStaleBuildError(err: unknown): boolean {
  * place of the raw browser error. `null` when it's some other failure. */
 export function staleBuildMessage(err: unknown): string | null {
   if (!isStaleBuildError(err)) return null;
-  reportStaleBuild();
-  return "This part of the editor couldn't load — the app was updated. Reload to continue.";
+  reportStaleBuild(err);
+  // Neutral: whether it was a deploy or the connection is settled after this
+  // line is shown, and the banner says which.
+  return "This part of the editor couldn't load. Reload to continue.";
 }
 
 /** Catch what nothing else does: a failed import in a promise nobody awaited,
  * and Vite's own preload failure event. Call once, at startup. */
 export function watchForStaleBuild(): void {
-  window.addEventListener("vite:preloadError", () => {
+  window.addEventListener("vite:preloadError", (e) => {
     // Not `preventDefault()`: that tells Vite to carry on as if the import
     // had worked, and the caller then gets `undefined` for a module — a
     // TypeError far from the cause. Let the import reject; every caller
     // handles that (and `lazyPart` turns it into a closed dialog).
-    reportStaleBuild();
+    // Vite routes *every* rejected dynamic import through this event, a module
+    // that threw while starting up included — only a file that couldn't be
+    // fetched is ours.
+    const payload = (e as Event & { payload?: unknown }).payload;
+    if (isStaleBuildError(payload)) reportStaleBuild(payload);
   });
   window.addEventListener("unhandledrejection", (e) => {
     if (isStaleBuildError(e.reason)) {
       e.preventDefault();
-      reportStaleBuild();
+      reportStaleBuild(e.reason);
     }
   });
 }
@@ -91,9 +151,12 @@ const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * `React.lazy` for an on-demand part of the app, made safe against a deploy.
- * One retry covers a dropped connection; if the file is really gone, the part
- * becomes `Unavailable` (closes itself) and the update banner is raised —
- * instead of the rejection unmounting the whole app.
+ * If the file can't be fetched, the part becomes `Unavailable` (closes itself)
+ * and the banner is raised — instead of the rejection unmounting the whole
+ * app. React keeps that answer until the page reloads, and Chromium remembers
+ * a failed module fetch anyway (its retry below never reaches the network), so
+ * the banner's Reload is the way back in both cases: a deploy and a dropped
+ * connection. The retry still helps engines that do fetch again.
  */
 export function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>) {
   return lazy(async (): Promise<{ default: ComponentType<P> }> => {
@@ -105,7 +168,7 @@ export function lazyPart<P extends object>(load: () => Promise<ComponentType<P>>
         return { default: await load() };
       } catch (err) {
         if (!isStaleBuildError(err)) throw err;
-        reportStaleBuild();
+        reportStaleBuild(err);
         return { default: Unavailable as unknown as ComponentType<P> };
       }
     }
