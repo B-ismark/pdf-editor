@@ -1873,6 +1873,27 @@ body {
   .drawbar:not(.drawbar--closed) .drawbar__width { grid-row: 2; grid-column: 3 / span 2; }
   .drawbar:not(.drawbar--closed) .drawbar__collapse { grid-row: 1; grid-column: 4; margin: 0; }
 }
+/* The narrowest phones (320px) have ~284px inside the bar: the tools alone
+   are 200px, so the colour, the stroke slider and the fold handle can't sit
+   beside them. The tools take the full width and the style controls go
+   underneath, in one row. */
+@media (max-width: 359px) {
+  /* Spans the screen with the usual 12px gutter. Centred with left:50% it only
+     gets half the screen to lay out in, and the grid collapses. */
+  .drawbar:not(.drawbar--closed) {
+    grid-template-columns: auto 1fr auto;
+    left: 12px;
+    right: 12px;
+    transform: none;
+    max-width: none;
+  }
+  .drawbar:not(.drawbar--closed) .drawbar__tools { grid-row: 1; grid-column: 1 / -1; }
+  .drawbar:not(.drawbar--closed) .drawbar__sep { display: none; }
+  .drawbar:not(.drawbar--closed) > .colorfield__swatch { grid-row: 2; grid-column: 1; }
+  .drawbar:not(.drawbar--closed) .drawbar__width { grid-row: 2; grid-column: 2; justify-self: stretch; }
+  .drawbar:not(.drawbar--closed) .drawbar__width .slider { width: 100%; }
+  .drawbar:not(.drawbar--closed) .drawbar__collapse { grid-row: 2; grid-column: 3; }
+}
 .drawbar__width { display: flex; align-items: center; flex: none; }
 .drawbar__collapse { flex: none; margin-left: 2px; }
 /* Collapsed: a handle naming the active sub-tool, in the same place the strip

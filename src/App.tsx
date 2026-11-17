@@ -244,6 +244,52 @@ function keepStampOnPage(prev: Stamp, next: Stamp, page: { width: number; height
   return { ...next, ...keepOnPage(next, pw, ph) };
 }
 
+/** Pull the given stamps back onto their page. The paths that move overlays
+ * in bulk (paste/duplicate, align, distribute) shift them by a delta without
+ * going through `onChangeStamp`, so this is their page-edge guard. */
+function keepStampsOnPage(
+  d: DocState,
+  ids: Iterable<string>,
+  pages: { viewBox: { width: number; height: number } }[] | undefined,
+): DocState {
+  const want = new Set(ids);
+  if (!pages || !d.stamps.some((s) => want.has(s.id))) return d;
+  return {
+    ...d,
+    stamps: d.stamps.map((s) => {
+      const vb = want.has(s.id) ? pages[s.pageIndex]?.viewBox : undefined;
+      return vb ? { ...s, ...keepOnPage(s, vb.width, vb.height) } : s;
+    }),
+  };
+}
+
+/** Shrink one shared move so every stamp in the group stays on its page — the
+ * group moves as a block and stops when its first stamp reaches an edge,
+ * rather than each stamp stopping on its own and the layout shearing. */
+function limitGroupMove(
+  d: DocState,
+  ids: Set<string>,
+  dx: number,
+  dy: number,
+  pages: { viewBox: { width: number; height: number } }[] | undefined,
+): { dx: number; dy: number } {
+  if (!pages) return { dx, dy };
+  let ax = dx;
+  let ay = dy;
+  for (const s of d.stamps) {
+    const vb = ids.has(s.id) ? pages[s.pageIndex]?.viewBox : undefined;
+    if (!vb) continue;
+    const k = keepOnPage({ ...s, x: s.x + dx, y: s.y + dy }, vb.width, vb.height);
+    const cx = k.x - s.x;
+    const cy = k.y - s.y;
+    if (dx > 0) ax = Math.min(ax, Math.max(0, cx));
+    else if (dx < 0) ax = Math.max(ax, Math.min(0, cx));
+    if (dy > 0) ay = Math.min(ay, Math.max(0, cy));
+    else if (dy < 0) ay = Math.max(ay, Math.min(0, cy));
+  }
+  return { dx: ax, dy: ay };
+}
+
 /** The prompt while an image or signature waits to be placed. A finger taps and
  * has no Esc key; a pointer clicks, and can back out with Esc. */
 function placeHint(what: string): string {
@@ -1527,6 +1573,24 @@ export function App() {
   const backGuard = useRef(false);
   const consumingGuard = useRef(false);
   const dismissable = compact && (editingId != null || sheetOpen || selection != null);
+  // On a phone the zoom pill yields to the top-centre contextual bar (find,
+  // multi-select, a selection). The page field lives in it, so a hidden pill
+  // closes the field — otherwise it would reopen, focused, keyboard up, the
+  // moment the pill came back.
+  const zoomHidden =
+    compact && (findOpen || multi.length >= 2 || (selection != null && selection.kind !== "stamp" && !sheetOpen));
+  useEffect(() => {
+    if (zoomHidden) setPageJumpOpen(false);
+  }, [zoomHidden]);
+  /** "Go to page…": on a phone, first put away whatever is hiding the pill. */
+  const openPageJump = useCallback(() => {
+    if (compact) {
+      setSelection(null);
+      setMulti([]);
+      closeFind();
+    }
+    setPageJumpOpen(true);
+  }, [compact, closeFind]);
   useEffect(() => {
     if (dismissable && !backGuard.current) {
       backGuard.current = true;
@@ -1739,10 +1803,10 @@ export function App() {
       const def = OVERLAYS[item.kind];
       const id = nextId(def.idPrefix);
       const copy = { ...def.translate(item.obj, PASTE_DX, PASTE_DY), id };
-      doc.set((d) => addOverlay(d, item.kind, copy));
+      doc.set((d) => keepStampsOnPage(addOverlay(d, item.kind, copy), [id], pdf?.pages));
       setSelection({ kind: item.kind, id });
     },
-    [doc],
+    [doc, pdf],
   );
 
   const duplicateSelection = useCallback(() => {
@@ -1796,9 +1860,9 @@ export function App() {
   /** Apply per-id {dx,dy} deltas to every overlay object in one undo step. */
   const applyDeltas = useCallback(
     (deltas: Map<string, { dx: number; dy: number }>) => {
-      doc.set((d) => applyOverlayDeltas(d, deltas));
+      doc.set((d) => keepStampsOnPage(applyOverlayDeltas(d, deltas), deltas.keys(), pdf?.pages));
     },
-    [doc],
+    [doc, pdf],
   );
 
   /** Shift the whole multi-selection by one delta, as a single undo step. */
@@ -1810,10 +1874,14 @@ export function App() {
   const moveMulti = useCallback(
     (dx: number, dy: number, key: string) => {
       if (!dx && !dy) return;
-      const deltas = new Map(multiRef.current.map((id) => [id, { dx, dy }] as const));
-      doc.set((d) => applyOverlayDeltas(d, deltas), key);
+      const ids = multiRef.current;
+      doc.set((d) => {
+        const m = limitGroupMove(d, new Set(ids), dx, dy, pdf?.pages);
+        if (!m.dx && !m.dy) return d;
+        return applyOverlayDeltas(d, new Map(ids.map((id) => [id, m] as const)));
+      }, key);
     },
-    [doc],
+    [doc, pdf],
   );
 
   /** Restack the selected annotation(s) within the annotation layer. Strokes
@@ -2721,19 +2789,24 @@ export function App() {
       }}
     >
       <TooltipHost />
-      {appBar}
       {/* The document is one Tab stop per page, but a long file is still many
           pages between the app bar and the tools; this jumps straight there.
-          Hidden until focused. */}
+          Hidden until focused, and the first Tab stop on the page. */}
       <button
         type="button"
         className="skiplink"
         onClick={() =>
-          document.querySelector<HTMLElement>(".tooldock .tooldock__btn--on, .tooldock .tooldock__btn")?.focus()
+          // The active tool, else the first: one selector list would return
+          // whichever comes first in the DOM, which is always "Select".
+          (
+            document.querySelector<HTMLElement>(".tooldock .tooldock__btn--on") ??
+            document.querySelector<HTMLElement>(".tooldock .tooldock__btn")
+          )?.focus()
         }
       >
         Skip to tools
       </button>
+      {appBar}
       {(isWide || tabs.length > 1) && (
         <DocTabs
           tabs={tabs.map((t) =>
@@ -2830,7 +2903,7 @@ export function App() {
               yields to whichever top-centre contextual bar is showing (find /
               multi-select / selection) so the two never overlap on a narrow
               screen; the bottom tool cluster never reaches it. */}
-          {!(compact && (findOpen || multi.length >= 2 || (selection && selection.kind !== "stamp" && !sheetOpen))) && (
+          {!zoomHidden && (
           <div className="zoombar" role="group" aria-label="Zoom">
             <button className="icon-btn" onClick={vp.zoomOut} aria-label="Zoom out" data-tip="Zoom out">
               <Icon name="remove" size={18} />
@@ -3181,7 +3254,7 @@ export function App() {
               { id: "duplicate", label: "Duplicate selection", hint: "Ctrl+D", icon: "duplicate", disabled: !selection || selection.kind === "fragment", run: duplicateSelection },
               { id: "find", label: "Find in document", hint: "Ctrl+F", icon: "search", run: openFind },
               ...(pdf && pdf.pages.length > 1
-                ? [{ id: "goto", label: "Go to page…", icon: "go_to_page", keywords: "jump page number", run: () => setPageJumpOpen(true) }]
+                ? [{ id: "goto", label: "Go to page…", icon: "go_to_page", keywords: "jump page number", run: openPageJump }]
                 : []),
               { id: "pages", label: navOpen ? "Hide page thumbnails" : "Show page thumbnails", icon: navOpen ? "panel_close" : "panel_open", run: () => setNavOpen((v) => !v) },
               { id: "undo", label: "Undo", hint: "Ctrl+Z", icon: "undo", disabled: !docHistory.canUndo, run: undo },

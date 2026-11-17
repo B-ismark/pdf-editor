@@ -47,6 +47,8 @@ test("a text box dragged past the page edge stops at it", async ({ page }) => {
   await drag(page, { x: mb.x + mb.width / 2, y: mb.y + mb.height / 2 }, pg.width, 0);
   const after = (await tb.boundingBox())!;
   expect(after.x + after.width).toBeLessThanOrEqual(pg.x + pg.width + 1);
+  // …and it got there: a drag that did nothing would pass the line above.
+  expect(after.x + after.width).toBeGreaterThan(pg.x + pg.width - 6);
 });
 
 test("an edit that runs past the edge is marked, said once, and doesn't widen the page", async ({ page }) => {

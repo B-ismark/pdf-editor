@@ -21,17 +21,32 @@ test("Tab reaches the tools after one stop per page, not every fragment", async 
     reached = f.cls.includes("tooldock__btn");
   }
   expect(reached, "Tab never reached the tool dock").toBe(true);
-  const pages = await page.locator(".page").count();
-  expect(fragments).toBeLessThanOrEqual(pages);
+  // One stop per page that has rendered its text — not per page in the file,
+  // most of which are windowed out and have no fragments at all.
+  const rendered = await page.locator(".page:has(.fragment[tabindex])").count();
+  expect(rendered).toBeGreaterThan(0);
+  expect(fragments).toBeGreaterThan(0);
+  expect(fragments).toBeLessThanOrEqual(rendered);
 });
 
-test("Skip to tools jumps past the document", async ({ page }) => {
+test("Skip to tools is the first Tab stop and lands on the active tool", async ({ page }) => {
   await open(page, (await fixtures()).sample);
+  await page.getByRole("button", { name: "Redact" }).first().click();
+  // Start from the top of the page, as a fresh visit would.
+  await page.evaluate(() => {
+    const b = document.body;
+    b.tabIndex = -1;
+    b.focus();
+    b.removeAttribute("tabindex");
+  });
+  await page.keyboard.press("Tab");
   const skip = page.getByRole("button", { name: "Skip to tools" });
-  await skip.focus();
+  await expect(skip).toBeFocused();
   await expect(skip).toBeInViewport();
   await page.keyboard.press("Enter");
-  expect((await focused(page)).cls).toContain("tooldock__btn");
+  const f = await focused(page);
+  expect(f.cls).toContain("tooldock__btn--on");
+  expect(f.label).toMatch(/Redact/);
 });
 
 test("arrow keys walk the fragments; Tab leaves from the one you were on", async ({ page }) => {
@@ -57,6 +72,20 @@ test("arrow keys walk the fragments; Tab leaves from the one you were on", async
   expect(await page.locator('.page[data-page-index="0"] .fragment[tabindex="0"]').count()).toBe(1);
 });
 
+test("arrowing away from the selected fragment takes the selection along", async ({ page }) => {
+  await open(page, (await fixtures()).sample);
+  const frags = page.locator('.page[data-page-index="0"] .fragment');
+  await frags.first().click();
+  await page.keyboard.press("ArrowDown");
+  await expect(frags.nth(1)).toBeFocused();
+  // The selection cover sits right before its fragment; it must have followed,
+  // or the Inspector styles one fragment while you type in another.
+  const selectedId = await page.evaluate(
+    () => (document.querySelector(".fragment__cover--sel")?.nextElementSibling as HTMLElement | null)?.dataset.id,
+  );
+  expect(selectedId).toBe(await frags.nth(1).getAttribute("data-id"));
+});
+
 test("the zoom pill names the page and goes to one", async ({ page }) => {
   await open(page, (await fixtures()).sample);
   const pages = await page.locator(".page").count();
@@ -69,6 +98,8 @@ test("the zoom pill names the page and goes to one", async ({ page }) => {
   await page.keyboard.press("Enter");
   await expect(page.locator('.page[data-page-index="6"]')).toBeInViewport({ ratio: 0.4 });
   await expect(chip).toHaveText(`7 / ${pages}`);
+  // Closing the field hands focus back to the chip, not to <body>.
+  await expect(chip).toBeFocused();
   // Out of range means "the end", not an error.
   await chip.click();
   await page.keyboard.type("999");
@@ -79,6 +110,7 @@ test("the zoom pill names the page and goes to one", async ({ page }) => {
   await page.keyboard.type("1");
   await page.keyboard.press("Escape");
   await expect(chip).toHaveText(`${pages} / ${pages}`);
+  await expect(chip).toBeFocused();
 });
 
 test("Go to page… from the command palette opens the same field", async ({ page }) => {

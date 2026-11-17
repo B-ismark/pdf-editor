@@ -281,7 +281,8 @@ function PageViewInner(props: Props) {
     const fresh = [...now].some((id) => !spilling.current.has(id));
     spilling.current = now;
     if (fresh) onSpill();
-  }, [edits, textBoxes, scale, near, onSpill]);
+  // `pageFonts`: the real fonts land after paint and change the text's width.
+  }, [edits, textBoxes, scale, near, pageFonts, onSpill]);
 
   // The page is one Tab stop (the audit counted ~300 stops before the chrome
   // on a 12-page file). It's the fragment you last left, else the first.
@@ -435,7 +436,9 @@ function PageViewInner(props: Props) {
             const id = (ev.target as HTMLElement).classList.contains("fragment") ? (ev.target as HTMLElement).dataset.id : undefined;
             if (id) setLastFocused(id);
           }}
-          onKeyDown={fragmentArrowNav}
+          onKeyDown={(ev) =>
+            fragmentArrowNav(ev, selection?.kind === "fragment" ? (id) => onSelect({ kind: "fragment", id }) : undefined)
+          }
         >
           {findMatches && findMatches.length > 0 && (
             <div className="findlayer" aria-hidden="true">
@@ -863,41 +866,62 @@ function PlaceLayer({
   const ref = useRef<HTMLDivElement>(null);
   const [at, setAt] = useState<{ x: number; y: number } | null>(null);
   const down = useRef<{ id: number; x: number; y: number } | null>(null);
+  // Fingers currently on the layer. A second one makes it a pinch, which never
+  // places — even if the finger that lifts last didn't move.
+  const fingers = useRef(new Set<number>());
   const size = placedSize(stamp, pageW, pageH);
   const toPdf = (ev: React.PointerEvent) => {
     const r = ref.current!.getBoundingClientRect();
     return { x: (ev.clientX - r.left) / scale, y: pageH - (ev.clientY - r.top) / scale };
   };
   const box = at && placeAt(size, at.x, at.y, pageW, pageH);
+  const lift = (ev: React.PointerEvent) => {
+    fingers.current.delete(ev.pointerId);
+    const d = down.current;
+    if (d?.id === ev.pointerId) down.current = null;
+    return d?.id === ev.pointerId ? d : null;
+  };
+  // Touch events are deliberately *not* stopped here: the viewer pans and
+  // pinches in JS (`.viewer__scroll` is touch-action:none), so swallowing them
+  // would pin the user to whatever page was on screen when they armed the
+  // stamp. A tap is told apart from a swipe by distance, on release.
   return (
     <div
       ref={ref}
       className="placelayer"
       data-testid="place-layer"
       onPointerDown={(ev) => {
-        ev.stopPropagation();
         if (ev.pointerType !== "touch") {
+          ev.stopPropagation();
+          if (ev.button !== 0) return; // right/middle click: not a placement
           ev.preventDefault();
           const p = toPdf(ev);
           onPlace(p.x, p.y);
           return;
         }
-        down.current = { id: ev.pointerId, x: ev.clientX, y: ev.clientY };
+        fingers.current.add(ev.pointerId);
+        down.current = fingers.current.size === 1 ? { id: ev.pointerId, x: ev.clientX, y: ev.clientY } : null;
       }}
       onPointerMove={(ev) => {
-        ev.stopPropagation();
-        if (ev.pointerType !== "touch") setAt(toPdf(ev));
+        if (ev.pointerType !== "touch") {
+          ev.stopPropagation();
+          setAt(toPdf(ev));
+        }
       }}
       onPointerUp={(ev) => {
-        ev.stopPropagation();
-        const d = down.current;
-        down.current = null;
-        if (!d || d.id !== ev.pointerId) return;
+        if (ev.pointerType !== "touch") {
+          ev.stopPropagation();
+          return;
+        }
+        const d = lift(ev);
+        if (!d) return;
         if (Math.hypot(ev.clientX - d.x, ev.clientY - d.y) > TAP_SLOP) return;
         const p = toPdf(ev);
         onPlace(p.x, p.y);
       }}
-      onPointerCancel={() => (down.current = null)}
+      onPointerCancel={(ev) => {
+        lift(ev);
+      }}
       onPointerLeave={() => setAt(null)}
     >
       {box && (
@@ -937,17 +961,24 @@ function caretAt(el: HTMLElement, edge: "start" | "end"): boolean {
  * caret is at the start/end. Arriving from the right puts the caret at the
  * end, so Left keeps walking backwards through the text as one run.
  */
-function fragmentArrowNav(ev: React.KeyboardEvent) {
+function fragmentArrowNav(ev: React.KeyboardEvent, select?: (id: string) => void) {
   const el = ev.target as HTMLElement;
   if (!el.classList.contains("fragment") || ev.altKey || ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
-  const back = ev.key === "ArrowUp" || (ev.key === "ArrowLeft" && caretAt(el, "start"));
-  const fwd = ev.key === "ArrowDown" || (ev.key === "ArrowRight" && caretAt(el, "end"));
+  // Not editable (a phone outside edit mode): there's no caret to walk, so
+  // Left/Right step like Up/Down — and are consumed, so they never fall through
+  // to App's nudge and shove some other selected object across the page.
+  const caretless = !el.isContentEditable;
+  const back = ev.key === "ArrowUp" || (ev.key === "ArrowLeft" && (caretless || caretAt(el, "start")));
+  const fwd = ev.key === "ArrowDown" || (ev.key === "ArrowRight" && (caretless || caretAt(el, "end")));
   if (!back && !fwd) return;
   const all = Array.from(document.querySelectorAll<HTMLElement>(".page .fragment[tabindex]"));
   const next = all[all.indexOf(el) + (fwd ? 1 : -1)];
   ev.preventDefault();
   ev.stopPropagation();
   if (!next) return;
+  // The selected fragment is the one the Inspector styles; if the selection
+  // stayed behind, typing would go to one fragment and styling to another.
+  if (select && next.dataset.id) select(next.dataset.id);
   next.focus({ preventScroll: true });
   next.scrollIntoView({ block: "nearest", inline: "nearest" });
   if (back) placeCaretEnd(next);

@@ -24,6 +24,21 @@ export function PageJump({
   const active = useActivePage(pageCount, docKey);
   const [draft, setDraft] = useState("");
   const input = useRef<HTMLInputElement>(null);
+  const chip = useRef<HTMLButtonElement>(null);
+  // Closing with Enter or Esc hands focus back to the chip — the field unmounts,
+  // and focus would otherwise fall to <body> and the next Tab restart at the
+  // app bar. Closing by leaving the field (blur) must not pull focus back.
+  const refocus = useRef(false);
+  useEffect(() => {
+    if (!editing && refocus.current) {
+      refocus.current = false;
+      chip.current?.focus();
+    }
+  }, [editing]);
+  const close = () => {
+    refocus.current = true;
+    onEditingChange(false);
+  };
 
   // The field opens empty, with the page you're on as its placeholder: typing
   // is the whole interaction, so there's nothing to select or delete first.
@@ -34,6 +49,7 @@ export function PageJump({
   if (!editing) {
     return (
       <button
+        ref={chip}
         className="zoombar__label zoombar__page label-medium"
         onClick={() => onEditingChange(true)}
         aria-label={`Page ${active + 1} of ${pageCount}. Go to page`}
@@ -47,7 +63,7 @@ export function PageJump({
   const go = () => {
     const n = parseInt(draft, 10);
     if (Number.isFinite(n)) scrollToPage(Math.min(pageCount, Math.max(1, n)) - 1, false);
-    onEditingChange(false);
+    close();
   };
 
   return (
@@ -74,7 +90,7 @@ export function PageJump({
           if (e.key === "Escape") {
             e.preventDefault();
             e.stopPropagation();
-            onEditingChange(false);
+            close();
           }
         }}
         onBlur={() => onEditingChange(false)}

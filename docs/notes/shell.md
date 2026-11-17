@@ -141,11 +141,18 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
 - **The app bar raises itself above the zoom pill while the ⋯ menu is open**
   (`.appbar--menu`, z 56). The menu lives inside the bar's stacking context
   (z 20), so no z-index on the menu itself can out-rank the pill (55); the
-  bar stays below scrims and sheets (60+).
+  bar stays below dialogs (70), the palette (75) and tooltips (90); the sheet
+  scrim (25) already covers it, so the menu can't open over a sheet.
 - **The page chip** (`PageJump`, in the zoom pill) reads `useActivePage`, which
   takes the document's identity as well as its page count — two tabs with the
   same count would otherwise keep observing the previous file's pages. The
   field opens empty with the current page as placeholder; out of range clamps
-  to the document. "Go to page…" in the palette opens the same field.
+  to the document. Enter/Esc hand focus back to the chip (blur doesn't).
+  "Go to page…" in the palette opens the same field; on a phone, where the
+  pill hides behind a selection or the find bar, it clears those first, and a
+  hidden pill closes the field so it can't reopen on its own later.
 - **Phone drawbar** is a two-row grid under 600px (tools 4×2 | colour, width,
-  collapse), so all of it fits in 360px with 48px targets.
+  collapse), so all of it fits in 360px with 48px targets. Under 360px the
+  tools take the full width and the style controls go in a row beneath; the
+  bar spans the screen there (`left/right: 12px`), because centred with
+  `left: 50%` it only gets half the screen to lay out in.
