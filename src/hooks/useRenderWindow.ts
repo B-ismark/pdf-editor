@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
  * "Is this element close enough to the viewport to be worth rendering?"
@@ -22,16 +22,41 @@ import { useEffect, useRef, useState } from "react";
  */
 export function useRenderWindow<T extends HTMLElement>(margin = 1200) {
   const ref = useRef<T | null>(null);
-  // Start visible: on first mount there is nothing to scroll and the observer
-  // hasn't reported yet, so assuming "visible" avoids a blank first paint. The
-  // observer corrects it within a frame for pages that are actually far away.
-  const [near, setNear] = useState(true);
+  // Start *not* near, and seed the truth synchronously below. Starting every
+  // element as near looked harmless ("the observer corrects it within a frame")
+  // but that first frame mounted the content of every page in the document: on
+  // a 600-page file, 600 overlays and ~15k text nodes in one long task, all torn
+  // down again a frame later (TECH 2.4).
+  const [near, setNear] = useState(false);
+
+  // The seed: one geometry check before the first paint, so pages already on
+  // screen paint in the first frame instead of flashing a skeleton while the
+  // observer gets round to its first report. Layout is already eager (page
+  // frames have their true size), so only the first read forces a layout.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (typeof IntersectionObserver === "undefined") {
+      setNear(true);
+      return;
+    }
+    const root = nearestScrollParent(el);
+    // Not rendered at all (inside a `display: none` panel): its rect is 0×0 at
+    // the origin, which would read as "on screen" for every one of them.
+    if (el.getClientRects().length === 0) return;
+    const box = el.getBoundingClientRect();
+    const top = root ? root.getBoundingClientRect().top : 0;
+    const bottom = root ? root.getBoundingClientRect().bottom : window.innerHeight;
+    if (box.bottom >= top - margin && box.top <= bottom + margin) setNear(true);
+    // Mount-only: later changes are the observer's job.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    // No IntersectionObserver (very old browser) — degrade to rendering
-    // everything, which is what the app did before.
+    // No IntersectionObserver (very old browser) — the seed above already
+    // degraded to rendering everything, which is what the app did before.
     if (typeof IntersectionObserver === "undefined") return;
     const io = new IntersectionObserver(
       (entries) => {

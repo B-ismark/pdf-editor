@@ -13,6 +13,11 @@ type-checking can't see, and each exists because it broke once:
   and not silently widened; autosave stores a session and the toggle erases it;
 - `rendering.spec.ts` — the render window stays bounded on a 150-page document,
   doesn't grow while scrolling, and the page you scroll to is actually painted;
+  no commit ever mounts every page's overlay; the page rail rasterises only a
+  band and lets go of thumbnails it scrolls past; and a keystroke or a selection
+  change re-renders only the pages involved, not all 150. The render count comes
+  from a stand-in for React's DevTools hook installed by `addInitScript` (see the
+  comment on `COUNT_PAGE_RENDERS`), so the app carries no instrumentation;
 - `export.spec.ts` — an unsafe link URL is flagged in the UI and absent from the
   exported bytes, no authoring metadata is written, a redacted page has no
   extractable text while its neighbour keeps its own, the redaction raster is a

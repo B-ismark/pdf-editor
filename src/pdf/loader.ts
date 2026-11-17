@@ -204,20 +204,42 @@ export async function renderPageToCanvas(
   bytes: ArrayBuffer,
   pageIndex: number,
   scale: number,
+  /** Abandon the render: a thumbnail scrolled out of the window before its
+   * turn came. Rejects with an `AbortError`, stops pdf.js mid-paint, and frees
+   * the half-drawn canvas. */
+  signal?: AbortSignal,
 ): Promise<HTMLCanvasElement> {
+  const aborted = () => new DOMException("Render abandoned", "AbortError");
+  if (signal?.aborted) throw aborted();
   // Reuse the cached parse instead of re-reading (and re-cloning) the whole
   // file on every call. OCR and redaction-rasterisation call this once per
   // page; a fresh getDocument()+slice per page turned an N-page document into
   // N full parses and N buffer copies — the dominant cost (and a common
   // out-of-memory / timeout cause) on large or image-heavy PDFs.
   const doc = await getCachedDoc(bytes);
+  if (signal?.aborted) throw aborted();
   const page = await doc.getPage(pageIndex + 1);
+  if (signal?.aborted) throw aborted();
   const viewport = page.getViewport({ scale });
   const canvas = document.createElement("canvas");
   canvas.width = Math.ceil(viewport.width);
   canvas.height = Math.ceil(viewport.height);
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not get 2D canvas context");
-  await page.render({ canvasContext: ctx, viewport }).promise;
+  const task = page.render({ canvasContext: ctx, viewport });
+  const stop = () => task.cancel();
+  signal?.addEventListener("abort", stop, { once: true });
+  try {
+    await task.promise;
+  } catch (err) {
+    canvas.width = canvas.height = 0;
+    throw signal?.aborted ? aborted() : err;
+  } finally {
+    signal?.removeEventListener("abort", stop);
+  }
+  if (signal?.aborted) {
+    canvas.width = canvas.height = 0;
+    throw aborted();
+  }
   return canvas;
 }

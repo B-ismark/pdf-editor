@@ -18,6 +18,7 @@ import { downloadBytes, downloadText } from "./download";
 import { plural } from "./plural";
 import type { PageNumberOptions, WatermarkOptions } from "./pdf/types";
 import { useHistory, type HistorySnapshot } from "./hooks/useHistory";
+import { usePageArrays, usePageRecords, usePageSets } from "./hooks/usePageBuckets";
 import { DocTabs } from "./components/DocTabs";
 import { useMediaQuery } from "./hooks/useMediaQuery";
 import { useFragmentFont } from "./hooks/usePageFonts";
@@ -66,6 +67,7 @@ import type {
   Annotation,
   AnnotationTool,
   DocState,
+  Edits,
   DrawStyle,
   LinkAnnot,
   LoadedPdf,
@@ -93,19 +95,11 @@ const EMPTY_DOC: DocState = { edits: {}, textBoxes: [], redactions: [], annotati
 const NO_LINKS: LinkAnnot[] = [];
 const NO_FORM_VALUES: Record<string, string | boolean> = {};
 
-/** Group per-page overlay objects once per change instead of re-filtering the
- * whole list N times (once per page) on every render. Pages with nothing on
- * them share one frozen empty array, so their props stay referentially equal. */
+/** What a page with nothing of a kind on it gets: one shared identity each, so
+ * its props stay referentially equal and the memo'd `PageView` skips it. */
 const NO_ITEMS: never[] = [];
-function bucketByPage<T extends { pageIndex: number }>(items: T[]): Map<number, T[]> {
-  const map = new Map<number, T[]>();
-  for (const item of items) {
-    const arr = map.get(item.pageIndex);
-    if (arr) arr.push(item);
-    else map.set(item.pageIndex, [item]);
-  }
-  return map;
-}
+const NO_EDITS: Edits = {};
+const NO_IDS: Set<string> = new Set();
 const pageItems = <T,>(map: Map<number, T[]>, pageIndex: number): T[] =>
   map.get(pageIndex) ?? NO_ITEMS;
 
@@ -248,12 +242,21 @@ export function App() {
   const pendingTabs = useRef(new Set<string>());
   const [confirmCloseId, setConfirmCloseId] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool>("select");
-  const doc = useHistory<DocState>(EMPTY_DOC);
-  const { edits, textBoxes, redactions, annotations, stamps } = doc.state;
-  const links = doc.state.links ?? NO_LINKS;
-  const formValues = doc.state.formValues ?? NO_FORM_VALUES;
-  const pageNumbers = doc.state.pageNumbers ?? null;
-  const watermark = doc.state.watermark ?? null;
+  const docHistory = useHistory<DocState>(EMPTY_DOC);
+  // The history's verbs, as one object whose identity never changes. Every
+  // method is a stable `useCallback`, so the dozens of callbacks that only *write*
+  // the document can depend on `[doc]` and stay stable across keystrokes — which
+  // is what lets the memo'd `PageView`s skip re-rendering. Anything that *reads*
+  // the document goes through `docHistory.state` and must list it as a dependency.
+  const doc = useMemo(
+    () => ({ set: docHistory.set, undo: docHistory.undo, redo: docHistory.redo, reset: docHistory.reset, snapshot: docHistory.snapshot, restore: docHistory.restore }),
+    [docHistory.set, docHistory.undo, docHistory.redo, docHistory.reset, docHistory.snapshot, docHistory.restore],
+  );
+  const { edits, textBoxes, redactions, annotations, stamps } = docHistory.state;
+  const links = docHistory.state.links ?? NO_LINKS;
+  const formValues = docHistory.state.formValues ?? NO_FORM_VALUES;
+  const pageNumbers = docHistory.state.pageNumbers ?? null;
+  const watermark = docHistory.state.watermark ?? null;
   // Remembered across sessions so the user's choices aren't reset each time.
   const [drawTool, setDrawTool] = usePersistentState("pref.drawTool", "highlight") as [
     AnnotationTool,
@@ -393,18 +396,36 @@ export function App() {
     list.querySelector<HTMLElement>(`#panel-tab-${key}`)?.focus();
   }, [panelTab]);
 
-  // Per-page buckets, recomputed only when the underlying list changes.
-  const boxesByPage = useMemo(() => bucketByPage(textBoxes), [textBoxes]);
-  const redactionsByPage = useMemo(() => bucketByPage(redactions), [redactions]);
-  const annotationsByPage = useMemo(() => bucketByPage(annotations), [annotations]);
-  const stampsByPage = useMemo(() => bucketByPage(stamps), [stamps]);
-  const linksByPage = useMemo(() => bucketByPage(links), [links]);
+  // Per-page buckets. Each page keeps the same bucket object until something on
+  // *that* page changes, so typing on one page re-renders only that page.
+  const boxesByPage = usePageArrays(textBoxes);
+  const redactionsByPage = usePageArrays(redactions);
+  const annotationsByPage = usePageArrays(annotations);
+  const stampsByPage = usePageArrays(stamps);
+  const linksByPage = usePageArrays(links);
 
   const fragmentById = useMemo(() => {
     const map = new Map<string, TextFragment>();
     pdf?.pages.forEach((p) => p.fragments.forEach((f) => map.set(f.id, f)));
     return map;
   }, [pdf]);
+
+  // Which page an id (fragment or overlay) lives on — for handing each page
+  // only its own edits, selection, focus and multi-selection.
+  const overlayPage = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const list of [textBoxes, redactions, annotations, stamps, links])
+      for (const o of list as { id: string; pageIndex: number }[]) map.set(o.id, o.pageIndex);
+    return map;
+  }, [textBoxes, redactions, annotations, stamps, links]);
+  const pageOf = useCallback(
+    (id: string) => fragmentById.get(id)?.pageIndex ?? overlayPage.get(id),
+    [fragmentById, overlayPage],
+  );
+  // Fragment edits only need the fragment map, so a text-box keystroke (which
+  // changes `overlayPage`) doesn't re-bucket every fragment edit.
+  const fragmentPageOf = useCallback((id: string) => fragmentById.get(id)?.pageIndex, [fragmentById]);
+  const editsByPage = usePageRecords(edits, fragmentPageOf);
 
   const editedFragmentCount = useMemo(
     () =>
@@ -565,7 +586,7 @@ export function App() {
     if (!autosaveOn) return;
     const entries = tabs.map((t) =>
       t.id === activeId && pdf
-        ? { id: t.id, fileName, bytes: pdf.bytes, doc: doc.state, hasChanges: changeCount > 0, baked }
+        ? { id: t.id, fileName, bytes: pdf.bytes, doc: docHistory.state, hasChanges: changeCount > 0, baked }
         : {
             id: t.id,
             fileName: t.fileName,
@@ -577,7 +598,7 @@ export function App() {
     );
     saveSession(entries, activeId, flushSave.current);
     flushSave.current = false;
-  }, [tabs, activeId, pdf, fileName, doc.state, changeCount, baked, saveSession, autosaveOn]);
+  }, [tabs, activeId, pdf, fileName, docHistory.state, changeCount, baked, saveSession, autosaveOn]);
 
   /** Toggle the on-device session copy. Turning it off erases whatever is
    * already stored — the point of the switch is that no copy remains. That
@@ -1665,9 +1686,9 @@ export function App() {
 
   const selectedClip = useCallback((): ClipItem | null => {
     if (!selection || selection.kind === "fragment") return null;
-    const obj = findOverlay(doc.state, selection.kind, selection.id);
+    const obj = findOverlay(docHistory.state, selection.kind, selection.id);
     return obj ? { kind: selection.kind, obj } : null;
-  }, [selection, doc]);
+  }, [selection, docHistory.state]);
 
   /** Add a copy of a clipboard item, offset slightly, and select it. */
   const pasteItem = useCallback(
@@ -1711,6 +1732,8 @@ export function App() {
 
   // ---- Multi-select (marquee) + align / distribute ----
   const multiIds = useMemo(() => new Set(multi), [multi]);
+  const multiByPage = usePageSets(multi, pageOf);
+  const selectionPage = selection ? pageOf(selection.id) : undefined;
   const clearMulti = useCallback(() => setMulti([]), []);
 
   const onMarquee = useCallback((ids: string[]) => {
@@ -1723,8 +1746,8 @@ export function App() {
   }, [selection]);
 
   const multiItems = useMemo(
-    () => overlaysInSet(doc.state, new Set(multi)),
-    [multi, doc.state],
+    () => overlaysInSet(docHistory.state, new Set(multi)),
+    [multi, docHistory.state],
   );
 
   /** Apply per-id {dx,dy} deltas to every overlay object in one undo step. */
@@ -1736,13 +1759,18 @@ export function App() {
   );
 
   /** Shift the whole multi-selection by one delta, as a single undo step. */
+  // Read at drag time rather than closed over: every selection change resets
+  // `multi` to a fresh `[]`, and a callback that depended on it would hand every
+  // memo'd PageView a new prop and re-render the whole document per click.
+  const multiRef = useRef(multi);
+  multiRef.current = multi;
   const moveMulti = useCallback(
     (dx: number, dy: number, key: string) => {
       if (!dx && !dy) return;
-      const deltas = new Map(multi.map((id) => [id, { dx, dy }] as const));
+      const deltas = new Map(multiRef.current.map((id) => [id, { dx, dy }] as const));
       doc.set((d) => applyOverlayDeltas(d, deltas), key);
     },
-    [multi, doc],
+    [doc],
   );
 
   /** Restack the selected annotation(s) within the annotation layer. Strokes
@@ -1882,11 +1910,11 @@ export function App() {
     if (
       selection &&
       selection.kind !== "fragment" &&
-      !overlayExists(doc.state, selection.kind, selection.id)
+      !overlayExists(docHistory.state, selection.kind, selection.id)
     ) {
       setSelection(null);
     }
-  }, [doc.state, selection]);
+  }, [docHistory.state, selection]);
 
   // Warn before leaving/reloading the tab while there are unsaved changes.
   // Everything lives in memory (no server, no autosave), so an accidental
@@ -2216,7 +2244,7 @@ export function App() {
     // no less a file someone else will read.
     const unsafe = tabs.flatMap((t) => {
       const live = t.id === activeId && pdf;
-      const state = live ? doc.state : t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
+      const state = live ? docHistory.state : t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
       const w = findUnsafeCovers(live ? pdf : t.pdf, state.redactions);
       return w.count > 0 ? [`${live ? fileName : t.fileName} (page ${w.pages.join(", ")})`] : [];
     });
@@ -2235,7 +2263,7 @@ export function App() {
       const used = new Set<string>();
       for (const [n, t] of tabs.entries()) {
         const live = t.id === activeId && pdf;
-        const state = live ? doc.state : t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
+        const state = live ? docHistory.state : t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
         const source = live ? pdf : t.pdf;
         const name = live ? fileName : t.fileName;
         setMessage(`Building ${n + 1} of ${tabs.length} · ${name}`);
@@ -2256,7 +2284,7 @@ export function App() {
       setStatus("error");
       setMessage("Couldn't build every document. Please try again.");
     }
-  }, [tabs, busy, activeId, pdf, doc.state, fileName, losslessRaster]);
+  }, [tabs, busy, activeId, pdf, docHistory.state, fileName, losslessRaster]);
 
   const pickTool = (t: NavKey) => {
     setPendingStamp(null);
@@ -2329,10 +2357,10 @@ export function App() {
       {pdf && (
         <>
           <div className="appbar__spacer" />
-          <button className="icon-btn" onClick={undo} disabled={!doc.canUndo} aria-label="Undo" data-tip="Undo · Ctrl+Z">
+          <button className="icon-btn" onClick={undo} disabled={!docHistory.canUndo} aria-label="Undo" data-tip="Undo · Ctrl+Z">
             <Icon name="undo" size={18} />
           </button>
-          <button className="icon-btn" onClick={redo} disabled={!doc.canRedo} aria-label="Redo" data-tip="Redo · Ctrl+Shift+Z">
+          <button className="icon-btn" onClick={redo} disabled={!docHistory.canRedo} aria-label="Redo" data-tip="Redo · Ctrl+Shift+Z">
             <Icon name="redo" size={18} />
           </button>
           <button className="icon-btn" onClick={() => (findOpen ? closeFind() : openFind())} aria-label="Find" aria-pressed={findOpen} data-tip="Find · Ctrl+F">
@@ -2686,7 +2714,7 @@ export function App() {
                 tool={tool}
                 drawTool={drawTool}
                 drawStyle={drawStyle}
-                edits={edits}
+                edits={editsByPage.get(page.pageIndex) ?? NO_EDITS}
                 textBoxes={pageItems(boxesByPage, page.pageIndex)}
                 redactions={pageItems(redactionsByPage, page.pageIndex)}
                 annotations={pageItems(annotationsByPage, page.pageIndex)}
@@ -2695,13 +2723,13 @@ export function App() {
                 formValues={formValues}
                 pageNumbers={pageNumbers}
                 watermark={watermark}
-                multiIds={multiIds}
+                multiIds={multiByPage.get(page.pageIndex) ?? NO_IDS}
                 placing={!!pendingStamp}
                 findMatches={matchesByPage.get(page.pageIndex)}
-                activeFindId={activeMatch?.id ?? null}
-                selection={selection}
-                autoFocusId={autoFocusId}
-                editingId={editingId}
+                activeFindId={activeMatch?.pageIndex === page.pageIndex ? activeMatch.id : null}
+                selection={selectionPage === page.pageIndex ? selection : null}
+                autoFocusId={autoFocusId != null && pageOf(autoFocusId) === page.pageIndex ? autoFocusId : null}
+                editingId={editingId != null && pageOf(editingId) === page.pageIndex ? editingId : null}
                 compact={compact}
                 onSelect={onSelect}
                 onEditText={enterEdit}
@@ -3077,8 +3105,8 @@ export function App() {
               { id: "duplicate", label: "Duplicate selection", hint: "Ctrl+D", icon: "duplicate", disabled: !selection || selection.kind === "fragment", run: duplicateSelection },
               { id: "find", label: "Find in document", hint: "Ctrl+F", icon: "search", run: openFind },
               { id: "pages", label: navOpen ? "Hide page thumbnails" : "Show page thumbnails", icon: navOpen ? "panel_close" : "panel_open", run: () => setNavOpen((v) => !v) },
-              { id: "undo", label: "Undo", hint: "Ctrl+Z", icon: "undo", disabled: !doc.canUndo, run: undo },
-              { id: "redo", label: "Redo", hint: "Ctrl+Shift+Z", icon: "redo", disabled: !doc.canRedo, run: redo },
+              { id: "undo", label: "Undo", hint: "Ctrl+Z", icon: "undo", disabled: !docHistory.canUndo, run: undo },
+              { id: "redo", label: "Redo", hint: "Ctrl+Shift+Z", icon: "redo", disabled: !docHistory.canRedo, run: redo },
               // Document/finishing actions come from the shared source of truth.
               ...docActions.map((a) => ({ id: a.id, label: a.label, icon: a.icon, keywords: a.keywords, opens: a.opens, run: a.run })),
               { id: "dim", label: dimPages ? "Undim pages" : "Dim pages", icon: "contrast", run: () => setDimPages((v) => !v) },

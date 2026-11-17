@@ -42,7 +42,7 @@ Read only the section a package points at, not the whole folder.
   - **Document structure is dropped.** Keep outlines, page labels, the structure tree with `/Lang`, named destinations, optional-content config and `/AcroForm` on export, and keep internal links pointing at the right pages. (PRODUCT I-1)
   - **Shared resources are duplicated.** Batch `copyPages` so fonts and images are copied once per file, not once per page, and add a size spec. (TECH 2.1)
   - **Export sleeps per page.** Remove the ~4 ms per-page sleep in the export loop. (TECH 2.6)
-- [ ] **2. Fast on long documents** (S–M). (TECH 2.3, 2.4)
+- [x] **2. Fast on long documents** (S–M). (TECH 2.3, 2.4) Done: one page re-renders per keystroke instead of all of them; the first frame and the page rail stay windowed. Guarded by `rendering.spec.ts`; notes in `docs/notes/rendering.md`.
   - The `PageView` memo is defeated on every keystroke and selection. Make the `doc` callbacks stable and pass per-page edits and selection as props.
   - `useRenderWindow` starts every element as "near". Fix the initial state and make thumbnail renders cancellable.
 - [ ] **3. Phone and canvas fixes** (M). (UX #3, #4, #7, #9 and the P1 a11y list)

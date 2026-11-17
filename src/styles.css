@@ -1059,7 +1059,8 @@ body {
 /* "Dim pages" preview mode: soften the always-white page canvas to cut glare
    (esp. in dark mode). Preview only — the exported PDF is unaffected. */
 .app--dim .page__canvas,
-.app--dim .thumb__canvas {
+.app--dim .thumb__host { display: contents; }
+.thumb__canvas {
   filter: brightness(0.8);
   transition: filter var(--dur-short4) var(--ease-standard);
 }
