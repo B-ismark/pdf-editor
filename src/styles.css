@@ -1160,6 +1160,9 @@ body {
 }
 .menu__item { white-space: nowrap; }
 .menu__item:hover { background: color-mix(in srgb, var(--on-surface) 8%, transparent); }
+.menu__item:disabled { opacity: 0.38; cursor: default; }
+.splitbtn__caret[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+.menu__item:disabled:hover { background: none; }
 .menu__divider { height: 1px; background: var(--outline-variant); margin: 6px 4px; }
 /* ---- "This opens something" ----
    A trailing chevron on list rows, a corner notch on the icon-only tool

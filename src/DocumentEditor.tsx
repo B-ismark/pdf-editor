@@ -148,6 +148,21 @@ function menuKeys(
   close: () => void,
 ) {
   return (e: ReactKeyboardEvent) => {
+    // A shortcut with a modifier (Ctrl+O, Ctrl+K…) is for the app: the menu
+    // gets out of its way. Every other key is the menu's own — it mustn't also
+    // reach the editor, where an arrow nudges the selected box, Delete deletes
+    // it and a letter switches tools behind the open menu.
+    if (e.ctrlKey || e.metaKey || e.altKey) {
+      close();
+      return;
+    }
+    e.stopPropagation();
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+      button.current?.focus();
+      return;
+    }
     const items = Array.from(
       list.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)') ?? [],
     );
@@ -161,11 +176,7 @@ function menuKeys(
     else if (e.key === "ArrowUp") focusAt(idx - 1);
     else if (e.key === "Home") focusAt(0);
     else if (e.key === "End") focusAt(items.length - 1);
-    else if (e.key === "Escape") {
-      e.preventDefault();
-      close();
-      button.current?.focus();
-    } else if (e.key === "Tab") {
+    else if (e.key === "Tab") {
       close();
     }
   };
@@ -1843,6 +1854,34 @@ export const DocumentEditor = memo(function DocumentEditor({
   useEffect(() => {
     if (exportOpen) setMenuOpen(false);
   }, [exportOpen]);
+  // The caret isn't rendered on a phone: a menu left open across the
+  // breakpoint would come back already open, with nothing focused in it.
+  useEffect(() => {
+    if (compact) setExportOpen(false);
+  }, [compact]);
+  // Every Export item is disabled while a file is being made.
+  useEffect(() => {
+    if (busy) setExportOpen(false);
+  }, [busy]);
+  // The palette opens over everything; a menu left under it is orphaned.
+  useEffect(() => {
+    if (cmdOpen) {
+      setExportOpen(false);
+      setMenuOpen(false);
+    }
+  }, [cmdOpen]);
+
+  // Close a menu with focus back on the button that opened it, *before* the
+  // item runs: a dialog the item opens records what had focus to return to on
+  // close, and by then the menu item itself is gone.
+  const closeMenu = () => {
+    setMenuOpen(false);
+    menuBtnRef.current?.focus();
+  };
+  const closeExport = () => {
+    setExportOpen(false);
+    exportBtnRef.current?.focus();
+  };
 
   const onMenuKeyDown = useMemo(() => menuKeys(menuListRef, menuBtnRef, () => setMenuOpen(false)), []);
   const onExportKeyDown = useMemo(() => menuKeys(exportListRef, exportBtnRef, () => setExportOpen(false)), []);
@@ -2142,7 +2181,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   };
 
   const appBar = (
-    <header className={`appbar${menuOpen ? " appbar--menu" : ""}`}>
+    <header className={`appbar${menuOpen || exportOpen ? " appbar--menu" : ""}`}>
       {/* With a document open the brand is the way back to the start screen —
           it looks like a home link, so it has to behave like one. With nothing
           open it's already home, and stays inert text. */}
@@ -2226,11 +2265,16 @@ export const DocumentEditor = memo(function DocumentEditor({
                 <button
                   ref={exportBtnRef}
                   className="btn btn--filled splitbtn__caret"
-                  onClick={() => setExportOpen((v) => !v)}
+                  onClick={() => { if (!busy) setExportOpen((v) => !v); }}
+                  // Nothing in it can run while a file is being made. Not
+                  // `disabled`: picking an item puts focus back here just as
+                  // the file starts, and a disabled button would drop it to
+                  // the page.
+                  aria-disabled={busy || undefined}
                   aria-label="Export options"
                   aria-haspopup="menu"
                   aria-expanded={exportOpen}
-                  data-tip="More ways to export"
+                  data-tip="Export options"
                 >
                   <Icon name="chevron_down" size={16} />
                 </button>
@@ -2242,7 +2286,7 @@ export const DocumentEditor = memo(function DocumentEditor({
                         className="menu__item"
                         role="menuitem"
                         disabled={busy}
-                        onClick={() => { setExportOpen(false); void download(); }}
+                        onClick={() => { closeExport(); void download(); }}
                       >
                         <Icon name="download" size={18} />
                         <span className="menu__itemlabel">Download PDF</span>
@@ -2254,7 +2298,7 @@ export const DocumentEditor = memo(function DocumentEditor({
                           role="menuitem"
                           disabled={busy}
                           aria-haspopup={a.opens ? "dialog" : undefined}
-                          onClick={() => { setExportOpen(false); a.run(); }}
+                          onClick={() => { closeExport(); a.run(); }}
                         >
                           <Icon name={a.icon} size={18} />
                           <span className="menu__itemlabel">{a.label}</span>
@@ -2264,7 +2308,7 @@ export const DocumentEditor = memo(function DocumentEditor({
                       {tabs.length > 1 && (
                         <>
                           <div className="menu__divider" role="separator" />
-                          <button className="menu__item" role="menuitem" disabled={busy} onClick={() => { setExportOpen(false); onDownloadAll(); }}>
+                          <button className="menu__item" role="menuitem" disabled={busy} onClick={() => { closeExport(); onDownloadAll(); }}>
                             <Icon name="download_all" size={18} />
                             <span className="menu__itemlabel">Download all ({tabs.length}) as ZIP</span>
                           </button>
@@ -2309,13 +2353,20 @@ export const DocumentEditor = memo(function DocumentEditor({
                               className="menu__item"
                               role="menuitem"
                               aria-haspopup={a.opens ? "dialog" : undefined}
-                              onClick={() => { setMenuOpen(false); a.run(); }}
+                              disabled={a.group === "export" && busy}
+                              onClick={() => { closeMenu(); a.run(); }}
                             >
                               <Icon name={a.icon} size={18} />
                               <span className="menu__itemlabel">{a.label}</span>
                               {a.opens && <Icon name="opens_dialog" size={16} className="opens-mark" />}
                             </button>
                           ))}
+                        {grp.key === "export" && tabs.length > 1 && (
+                          <button className="menu__item" role="menuitem" disabled={busy} onClick={() => { closeMenu(); onDownloadAll(); }}>
+                            <Icon name="download_all" size={18} />
+                            <span className="menu__itemlabel">Download all ({tabs.length}) as ZIP</span>
+                          </button>
+                        )}
                       </div>
                     </Fragment>
                   ))}
@@ -2376,12 +2427,6 @@ export const DocumentEditor = memo(function DocumentEditor({
                     <button className="menu__item" onClick={() => { setMenuOpen(false); onOpenAnother(); }} role="menuitem">
                       <Icon name="note_add" size={18} /> Open another PDF
                     </button>
-                    {/* On a desktop this lives in the Export menu. */}
-                    {compact && tabs.length > 1 && (
-                      <button className="menu__item" onClick={() => { setMenuOpen(false); onDownloadAll(); }} role="menuitem" disabled={busy}>
-                        <Icon name="download_all" size={18} /> Download all ({tabs.length}) as ZIP
-                      </button>
-                    )}
                     <button className="menu__item" onClick={goHome} role="menuitem">
                       <Icon name="close" size={18} /> Close document
                     </button>

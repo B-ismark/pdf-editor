@@ -71,8 +71,15 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   (`Export options`, `aria-haspopup="menu"`) opens them, with "Download PDF"
   first. A phone has no width for a second control in the bar (the `shell.spec`
   360px budget), so there the caret is not rendered and `EXPORT_GROUP` heads
-  the ⋯ menu instead. Both menus share `menuKeys` (arrows, Home/End, Escape
-  back to the opener, Tab closes).
+  the ⋯ menu instead (Download all included). Both menus share `menuKeys`
+  (arrows, Home/End, Escape back to the opener, Tab closes); it stops the
+  event, so Delete or an arrow in an open menu never reaches the selection on
+  the canvas, and a modified key closes the menu and goes through. Picking an
+  item focuses the opener *before* the item runs, so a dialog it opens hands
+  focus back there. The caret is `aria-disabled`, not `disabled`, while busy:
+  it is where focus lands as a download starts. Either menu lifts the bar to
+  `.appbar--menu` (over the zoom pill), and Export closes on busy, on the
+  palette and on crossing to phone width.
 - **Floating chrome has to be clamped to the viewport.** `TooltipHost` centres its
   bubble on the anchor with `translate(-50%)`; without the layout-effect clamp,
   every control at a screen edge (the collapsed Inspector tab, the ⋯ button on a
