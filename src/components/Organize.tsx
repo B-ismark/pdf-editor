@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { staleBuildMessage } from "../staleBuild";
 import { Icon } from "./Icon";
 import { plural } from "../plural";
 import { Thumbnail } from "./Thumbnail";
@@ -110,7 +111,7 @@ export function Organize({
     try {
       await addBytes(await d.bake());
     } catch (e) {
-      setErr((e as { userFacing?: boolean })?.userFacing ? (e as Error).message : `Couldn't add the pages of "${d.name}".`);
+      setErr(staleBuildMessage(e) ?? ((e as { userFacing?: boolean })?.userFacing ? (e as Error).message : `Couldn't add the pages of "${d.name}".`));
     } finally {
       setBusy(null);
     }
@@ -128,8 +129,8 @@ export function Organize({
         return;
       }
       await addBytes(bytes);
-    } catch {
-      setErr(`Couldn't add "${file.name}". It may be damaged or password-protected.`);
+    } catch (e) {
+      setErr(staleBuildMessage(e) ?? `Couldn't add "${file.name}". It may be damaged or password-protected.`);
     } finally {
       setBusy(null);
     }
@@ -180,7 +181,7 @@ export function Organize({
       new Uint8Array(ab).set(bytes);
       onApply(ab, `${plural(plan.length, "page")} after organising`);
     } catch (e) {
-      setErr(failure(e, "Couldn't rebuild the document. Please try again."));
+      setErr(staleBuildMessage(e) ?? failure(e, "Couldn't rebuild the document. Please try again."));
     } finally {
       setBusy(null);
     }
@@ -204,7 +205,7 @@ export function Organize({
       const main = await mainAsShown(subset, true);
       onExtract(await buildFromPlan(main.entries, new Map(sources).set("main", main.bytes)));
     } catch (e) {
-      setErr(failure(e, "Couldn't extract those pages. Please try again."));
+      setErr(staleBuildMessage(e) ?? failure(e, "Couldn't extract those pages. Please try again."));
     } finally {
       setBusy(null);
     }

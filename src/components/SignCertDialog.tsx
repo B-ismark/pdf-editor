@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { staleBuildMessage } from "../staleBuild";
 import { Icon } from "./Icon";
 import { useModal } from "../hooks/useModal";
 import type { SignIdentity, SignMeta } from "../pdf/sign";
@@ -38,7 +39,7 @@ export function SignCertDialog({ onSign, onClose }: Props) {
       await onSign(identity, meta);
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't sign the document.");
+      setError(staleBuildMessage(e) ?? (e instanceof Error ? e.message : "Couldn't sign the document."));
       setBusy(false);
     }
   };

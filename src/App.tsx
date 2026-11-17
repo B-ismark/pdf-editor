@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DocumentEditor } from "./DocumentEditor";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { TooltipHost } from "./components/TooltipHost";
@@ -14,6 +14,8 @@ import { loadPdf, looksLikePdf, mayBeEncrypted, releaseDoc } from "./pdf/loader"
 import { clearEngineCache } from "./pdf/engineCache";
 import { findUnsafeCovers } from "./pdf/redactionSafety";
 import type { DocState, LoadedPdf } from "./pdf/types";
+import { lazyPart, staleBuildMessage, useStaleBuild } from "./staleBuild";
+import { UpdateBanner } from "./components/UpdateBanner";
 import {
   EMPTY_DOC,
   aModalIsOpen,
@@ -26,9 +28,7 @@ import {
   type Status,
 } from "./workspace";
 
-const PasswordDialog = lazy(() =>
-  import("./components/PasswordDialog").then((m) => ({ default: m.PasswordDialog })),
-);
+const PasswordDialog = lazyPart(() => import("./components/PasswordDialog").then((m) => m.PasswordDialog));
 
 /** Open documents at once. Each holds its source bytes and a pdf.js parse in
  * memory; past a handful, a phone runs out before the user runs out of tabs.
@@ -37,6 +37,10 @@ const MAX_TABS = 10;
 
 /** Turn a raw thrown error into plain-language guidance (audit #12). */
 function pdfOpenError(err: unknown): string {
+  // pdf.js's worker and the decrypter are fetched on demand too: after a
+  // deploy, opening a file is the first thing to hit a missing one.
+  const stale = staleBuildMessage(err);
+  if (stale) return stale;
   const s = String(err).toLowerCase();
   if (s.includes("password") || s.includes("encrypt"))
     return "This PDF is encrypted in a way this app can't open.";
@@ -146,7 +150,7 @@ export function App() {
     theme.mode === "light" ? "Light" : theme.mode === "dark" ? "Dark" : "System";
   const themeLabel = `${themeName} theme`;
 
-  const { restorable, save: saveSession, clear: clearSession, discard: discardSession, dismissRestore, adopt: adoptSession } = useAutosave();
+  const { restorable, save: saveSession, clear: clearSession, discard: discardSession, dismissRestore, adopt: adoptSession, flush: flushSession } = useAutosave();
   /** Set by closing a tab: the next autosave runs at once, so a discarded
    * document's stored copy is gone before a reload can bring it back. */
   const flushSave = useRef(false);
@@ -630,9 +634,9 @@ export function App() {
       );
       setStatus("ready");
       setMessage(`Downloaded ${plural(entries.length, "document")} as a ZIP.`);
-    } catch {
+    } catch (err) {
       setStatus("error");
-      setMessage("Couldn't build every document. Please try again.");
+      setMessage(staleBuildMessage(err) ?? "Couldn't build every document. Please try again.");
     }
   }, [tabs, busy, activeId, frontDoc, losslessRaster]);
 
@@ -675,9 +679,13 @@ export function App() {
   const leaveGuard = useRef({ anyBackgroundChanges, front, frontChanges, frontUnsaved, atRisk });
   leaveGuard.current = { anyBackgroundChanges, front, frontChanges, frontUnsaved, atRisk };
   const hasTabs = tabs.length > 0;
+  /** Set while the update banner reloads with nothing at risk: the banner has
+   * already said what comes back, so no browser "Leave site?" on top of it. */
+  const reloadingForUpdate = useRef(false);
   useEffect(() => {
     if (!hasTabs) return;
     const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (reloadingForUpdate.current) return;
       const g = leaveGuard.current;
       const now = editorRef.current?.park();
       const counts = now && g.front && now.id === g.front.id ? now : { changeCount: g.frontChanges, unsaved: g.frontUnsaved };
@@ -728,6 +736,52 @@ export function App() {
     </Suspense>
   );
 
+  // ---- The app was updated under this page ----
+  // A part of the app couldn't be fetched (see staleBuild.ts). Say what a
+  // reload brings back, per open document, and let the user choose when.
+  const staleBuild = useStaleBuild();
+  let updateBanner: React.ReactNode = null;
+  if (staleBuild) {
+    let kept = 0;
+    let atRisk = 0;
+    let downloaded = 0;
+    for (const t of tabs) {
+      const isFront = t.id === activeId;
+      const edited = (isFront ? frontChanges : t.changeCount) > 0;
+      const unsaved = isFront ? frontUnsaved : t.unsaved;
+      const stored = autosaveOn && !t.locked;
+      if (edited && stored) kept++;
+      else if (edited && unsaved) atRisk++;
+      else if (edited) downloaded++;
+    }
+    updateBanner = (
+      <UpdateBanner
+        kind={staleBuild}
+        kept={kept}
+        atRisk={atRisk}
+        downloaded={downloaded}
+        reopen={tabs.length - kept - atRisk - downloaded}
+        onReload={async (force) => {
+          // The copy the banner promises has to be on disk before the page goes.
+          // Bounded: a stalled storage write mustn't leave the button on "Saving…".
+          const ok = await Promise.race([
+            flushSession().catch(() => false),
+            new Promise<boolean>((r) => setTimeout(() => r(false), 3000)),
+          ]);
+          if (!ok && kept > 0 && !force) return false;
+          if (atRisk === 0) {
+            reloadingForUpdate.current = true;
+            // In case the navigation doesn't happen after all.
+            setTimeout(() => (reloadingForUpdate.current = false), 3000);
+          }
+          window.location.reload();
+          // Reached only if the user chose to stay at the browser's leave prompt.
+          return true;
+        }}
+      />
+    );
+  }
+
   const openInput = (
     <input
       ref={openInputRef}
@@ -746,6 +800,7 @@ export function App() {
   if (!front) {
     return (
       <div className="app">
+        {updateBanner}
         <TooltipHost />
         {passwordDialog}
         <header className="appbar">
@@ -847,6 +902,7 @@ export function App() {
         void openFiles(e.dataTransfer.files);
       }}
     >
+      {updateBanner}
       <TooltipHost />
       <DocumentEditor
         key={`${front.id}:${gen}`}

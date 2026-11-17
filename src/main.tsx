@@ -1,11 +1,17 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
+import { CrashScreen } from "./components/CrashScreen";
+import { watchForStaleBuild } from "./staleBuild";
 import "./theme.css";
 import "./styles.css";
 
+watchForStaleBuild();
+
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <App />
+    <CrashScreen>
+      <App />
+    </CrashScreen>
   </React.StrictMode>,
 );
