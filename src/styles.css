@@ -957,7 +957,6 @@ body {
   .cmdk__item,
   .tooldock,
   .drawbar,
-  .doclist__item,
   .menu__item,
   .inspector__tab,
   .field,
@@ -976,97 +975,55 @@ body {
   overflow: hidden auto;
   animation: panel-in var(--dur-med2) var(--ease-emphasized-decelerate);
 }
-/* The tab bar. The collapse control used to float `position: absolute` over the
-   panel's own heading, overlapping it; it's a row member now.
-
-   The strip is a shade darker than the panel it sits on, so the selected tab —
-   which is painted in the *panel's* colour and joined to it — reads as part of
-   the surface below rather than as a highlighted button. That join is the whole
-   point: this panel used to swap its contents with nothing to say which of the
-   two tabs it belonged to. */
-.inspector__tabs {
+.inspector .props { padding-top: 0; }
+.inspector .props::before { display: none; }
+/* The heading carries "Hide panel", so it stays put while a long panel scrolls. */
+.inspector .props__header {
   position: sticky;
   top: 0;
   z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 8px 0 12px;
-  background: var(--surface-container);
-}
-.inspector__tablist { display: flex; gap: 6px; flex: 1; min-width: 0; }
-.inspector__tabbtn {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  flex: 1;
-  min-width: 0;
-  height: 44px;
-  padding: 0 8px;
-  border: none;
-  background: transparent;
-  color: var(--on-surface-variant);
-  font: inherit;
-  cursor: pointer;
-  white-space: nowrap;
-  /* Shape is the state. An unselected tab is a small rounded rectangle; the
-     selected one grows into a tab joined to the panel below. Material's own
-     menu guidance does the same thing — focused corners round up, unfocused
-     round down — and unlike an underline it survives being looked at
-     peripherally. */
-  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
-  transition:
-    border-radius var(--dur-med4) var(--ease-spring),
-    background var(--dur-med2) var(--ease-settle),
-    color var(--dur-med2) var(--ease-settle);
-}
-.inspector__tabbtn:hover { color: var(--on-surface); }
-.inspector__tabbtn:hover:not(.inspector__tabbtn--on) {
-  background: color-mix(in srgb, var(--on-surface) 6%, transparent);
-}
-.inspector__tabbtn--on {
-  color: var(--primary);
+  margin: 0 -16px;
+  padding: 10px 8px 8px 16px;
   background: var(--surface-container-low);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  /* The fillets are wider than the gap between tabs, so they reach a few pixels
-     under the neighbour — which paints later in DOM order and, once hovered,
-     covered the joint with its own background. Lifting the selected tab keeps
-     its joint on top whichever side it is on. */
-  z-index: 1;
 }
-/* The joint. Two concave fillets flanking the selected tab's foot, painted in
-   the panel's colour, so the tab and the panel read as one piece of material.
-   They hang off the *button*, which is what makes this cost nothing: the mark
-   is anchored to its own anchor, so there is no rect to measure, no
-   ResizeObserver, and nothing to fall out of sync when the panel resizes or
-   the user scales their fonts.
 
-   Masked rather than `corner-shape: scoop` on purpose — see `--joint-fillet`
-   in theme.css. The mask renders in every browser and these fillets carry no
-   border or shadow for it to clip. */
-.inspector__tabbtn--on::before,
-.inspector__tabbtn--on::after {
-  content: "";
-  position: absolute;
-  bottom: 0;
-  width: var(--joint-fillet);
-  height: var(--joint-fillet);
-  background: var(--surface-container-low);
-  pointer-events: none;
+/* ---- The Inspector with nothing selected: the document's properties ---- */
+.docpanel__facts { display: grid; gap: 10px; margin: 4px 0 0; }
+.docpanel__fact { display: grid; grid-template-columns: 76px 1fr; gap: 12px; align-items: baseline; }
+.docpanel__fact dt { color: var(--on-surface-variant); }
+.docpanel__fact dd { margin: 0; color: var(--on-surface); min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.docpanel__file { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block !important; }
+.docpanel__sub { color: var(--on-surface-variant); }
+.docpanel__ocr { margin-top: 14px; width: 100%; }
+.docpanel__group { display: flex; flex-direction: column; gap: 2px; margin-top: 20px; }
+.docpanel__label {
+  margin: 0 0 6px;
+  color: var(--on-surface-variant);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 500;
 }
-.inspector__tabbtn--on::before {
-  left: calc(var(--joint-fillet) * -1);
-  mask: radial-gradient(circle var(--joint-fillet) at 0 0, #0000 99%, #000 100%);
+.docpanel__layer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 52px;
 }
-.inspector__tabbtn--on::after {
-  right: calc(var(--joint-fillet) * -1);
-  mask: radial-gradient(circle var(--joint-fillet) at 100% 0, #0000 99%, #000 100%);
+.docpanel__layer > svg { color: var(--on-surface-variant); flex: none; }
+.docpanel__layertext { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.docpanel__layertext > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.docpanel__edit { height: 36px; gap: 4px; padding: 0 10px; }
+.docpanel__edit .opens-mark { opacity: 0.7; }
+.docpanel__toggle { display: flex; align-items: flex-start; gap: 12px; padding: 6px 0; cursor: pointer; }
+.docpanel__toggle input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
 }
-.inspector .props { padding-top: 12px; }
-.inspector .props::before { display: none; }
-.inspector .props__header .icon-btn { display: none; }
+.docpanel__toggle > span { display: flex; flex-direction: column; gap: 2px; }
 /* The collapsed edge: icon only. It used to carry a label set sideways with
    `writing-mode: vertical-rl`, which is slow to read, can't be scanned at a
    glance, and only repeated what the icon said. */
@@ -1088,31 +1045,7 @@ body {
   .inspector { width: 320px; }
 }
 
-/* Grouped document/finishing actions (Inspector "nothing selected" state). */
-.doclist { display: flex; flex-direction: column; gap: 2px; padding: 0 8px 12px; }
-.doclist__label {
-  color: var(--on-surface-variant);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  margin: 14px 4px 2px;
-}
-.doclist__item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 44px;
-  padding: 0 12px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--on-surface);
-  cursor: pointer;
-  font-size: 0.875rem;
-  text-align: left;
-}
-.doclist__item:hover { background: var(--surface-container-high); }
-.doclist__item svg { color: var(--on-surface-variant); flex: none; }
+/* The privacy line at the foot of the document panel. */
 .doclist__note {
   margin: 18px 12px 0;
   padding-top: 14px;
@@ -1172,9 +1105,7 @@ body {
    and `TOOLS`, not decided per call site — the Inspector and the ⋯ menu show
    the same commands and had already drifted apart once. */
 .opens-mark { margin-left: auto; opacity: 0.5; flex: none; }
-.doclist__item:hover .opens-mark,
 .menu__item:hover .opens-mark { opacity: 0.9; }
-.doclist__itemlabel { min-width: 0; }
 
 /* A 44px icon button has no room for a second glyph, so the marker is a
    triangle in the bottom-right corner — the long-standing convention for

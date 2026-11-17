@@ -151,75 +151,93 @@ const PNG_SQUARE = Buffer.from(
 );
 
 test.describe("inspector", () => {
-  test("names both of its jobs, and selecting something does not lose the other", async ({
-    page,
-  }) => {
+  test("with nothing selected it describes the document; selecting swaps in the selection", async ({ page }) => {
     const w = watch(page);
     await page.setViewportSize({ width: 1280, height: 860 });
     await open(page, (await fixtures()).sample);
+    const panel = page.locator("aside.inspector");
 
-    const tabs = page.locator(".inspector__tabbtn");
-    await expect(tabs).toHaveCount(2);
-    await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
-    await expect(page.locator(".doclist__item").first()).toBeVisible();
+    // One job, no tabs to choose between.
+    await expect(page.getByRole("tab")).toHaveCount(0);
+    await expect(panel).toHaveAccessibleName("Document");
+    await expect(panel.locator(".props__title")).toHaveText("Document");
+    const fact = (name: string) => panel.locator(".docpanel__fact", { has: page.locator(`dt:text-is("${name}")`) }).locator("dd");
+    await expect(fact("File")).toHaveText("sample.pdf");
+    await expect(fact("Pages")).toHaveText("12");
+    await expect(fact("Page size")).toHaveText("A4 · 210 × 297 mm");
+    await expect(fact("Text")).toContainText("Searchable on every page");
+    // Commands live where they act, not here.
+    await expect(panel.getByRole("button", { name: /Compress|Organise|Copy all text/ })).toHaveCount(0);
 
-    // Clicking the page used to replace the document actions with the selection's
-    // properties, with nothing anywhere to say the surface had changed identity —
-    // and no way back without deselecting.
     await page.locator(".fragment").first().click();
-    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
-    await expect(page.locator(".props__section").first()).toBeVisible();
+    await expect(panel).toHaveAccessibleName("Properties");
+    await expect(panel.locator(".props__title")).toHaveText("Text");
+    await expect(panel.locator(".props__section").first()).toBeVisible();
 
-    await tabs.nth(0).click();
-    await expect(page.locator(".doclist__item").first()).toBeVisible();
-    // Still selected — switching tabs reads the panel, it doesn't edit the page.
-    await expect(page.locator(".fragment__cover--sel")).toHaveCount(1);
-
-    // The Properties empty state shipped unreachable: with nothing selected the
-    // panel showed the document actions instead, so the one text explaining how
-    // to get properties only appeared once you no longer needed it.
-    await tabs.nth(1).click();
+    // Deselecting is the way back.
+    await page.locator(".fragment").first().blur();
     await page.keyboard.press("Escape");
-    await expect(page.locator(".props__empty")).toContainText(/Nothing selected/);
-
+    await expect(panel.locator(".props__title")).toHaveText("Document");
     expectClean(w);
   });
 
-  test("tabs are keyboard-operable, and focus travels with the selection", async ({ page }) => {
+  test("page numbers and watermark are set, shown and removed from here, and undo", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await open(page, (await fixtures()).sample);
-    const tabs = page.locator(".inspector__tabbtn");
-    await tabs.nth(0).focus();
-    await page.keyboard.press("ArrowRight");
-    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
-    await page.keyboard.press("ArrowRight"); // wraps
-    await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
-    await page.keyboard.press("End");
-    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
+    const panel = page.locator("aside.inspector");
+    const layer = (name: string) => panel.locator(".docpanel__layer", { hasText: name });
+    await expect(layer("Page numbers")).toContainText("Off");
 
-    // The unselected tab is `tabIndex={-1}`, so a selection that moves without
-    // focus leaves the keyboard parked on a control that is no longer in the tab
-    // order: the next Tab jumps somewhere unrelated and Space acts on the wrong
-    // tab. "Roving" is the focus moving, not just `aria-selected`.
-    const focused = await page.evaluate(() => document.activeElement?.id ?? "");
-    expect(focused, "focus stayed on the tab that is no longer selected").toBe(
-      "panel-tab-properties",
-    );
-    const tabIndex = await page.evaluate(
-      () => (document.activeElement as HTMLElement | null)?.tabIndex,
-    );
-    expect(tabIndex, "focus is on a control outside the tab order").toBe(0);
+    await panel.getByRole("button", { name: "Add page numbers" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.locator(".btn--filled").click();
+    await expect(dialog).toHaveCount(0);
+    await expect(layer("Page numbers")).toContainText("Bottom centre · from 1");
+    await expect(panel.getByRole("button", { name: "Edit page numbers" })).toBeVisible();
+
+    await panel.getByRole("button", { name: "Remove page numbers" }).click();
+    await expect(layer("Page numbers")).toContainText("Off");
+    await page.keyboard.press("Control+z");
+    await expect(layer("Page numbers")).toContainText("Bottom centre");
+
+    // The watermark opens the same dialog on its own tab.
+    await panel.getByRole("button", { name: "Add watermark" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(layer("Watermark")).toContainText("Off");
   });
 
-  test("clicking an image keeps the document actions, and says what it is", async ({ page }) => {
+  test("a scanned document offers to recognise its text", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).scanned);
+    const panel = page.locator("aside.inspector");
+    await expect(panel.locator(".docpanel__fact", { hasText: "Text" })).toContainText("No text layer");
+    await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toBeVisible();
+  });
+
+  test("lossless is a document setting on a desktop, and a ⋯ item only on a phone", async ({ browser }) => {
+    const desk = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+    await open(desk, (await fixtures()).sample);
+    const box = desk.getByRole("checkbox", { name: /Lossless redacted pages/ });
+    await expect(box).not.toBeChecked();
+    await box.check();
+    await desk.getByRole("button", { name: "More actions" }).click();
+    await expect(desk.getByRole("menuitemcheckbox", { name: /Lossless/ })).toHaveCount(0);
+    await desk.close();
+
+    const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true });
+    const phone = await ctx.newPage();
+    await open(phone, (await fixtures()).sample);
+    await phone.getByRole("button", { name: "More actions" }).click();
+    await expect(phone.getByRole("menuitemcheckbox", { name: /Lossless/ })).toHaveCount(1);
+    await ctx.close();
+  });
+
+  test("clicking an image says what it is", async ({ page }) => {
     const w = watch(page);
     await page.setViewportSize({ width: 1280, height: 860 });
     await open(page, (await fixtures()).sample);
-
-    // A stamp has no controls in this panel — it is edited on the canvas — so
-    // moving to Properties for one replaced every document action with "Nothing
-    // selected": clicking your own signature made Compress/Watermark/OCR vanish
-    // and put nothing in their place.
     await page.locator('[aria-label="More actions"]').click();
     await page.locator('[role="menuitem"]', { hasText: "Add image" }).click();
     await page.setInputFiles('input[accept="image/*"]', {
@@ -230,70 +248,41 @@ test.describe("inspector", () => {
     const box = (await page.locator(".page").first().boundingBox())!;
     await page.mouse.click(box.x + 120, box.y + 300);
     await expect(page.locator(".stamp")).toHaveCount(1);
-
-    const tabs = page.locator(".inspector__tabbtn");
     // Low-left of the stamp: the delete badge and the resize handle live on the
     // right-hand corners, and both are bigger than a small stamp's centre.
     const stamp = (await page.locator(".stamp").first().boundingBox())!;
     await page.mouse.click(stamp.x + 8, stamp.y + stamp.height - 8);
-    await expect(page.locator(".stamp")).toHaveCount(1);
-    await expect(tabs.nth(0), "selecting an image moved the panel off Document").toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    await expect(page.locator(".doclist__item").first()).toBeVisible();
-
-    // And if you were already reading Properties, it says which it is rather
-    // than claiming nothing is selected.
-    await tabs.nth(1).click();
+    await expect(page.locator(".props__title")).toHaveText("Image");
     await expect(page.locator(".props__empty")).toContainText(/edited on the page/);
-    await expect(page.locator(".props__title")).toContainText("Image");
     expectClean(w);
   });
 
-  test("re-clicking what is already selected comes back to Properties", async ({ page }) => {
-    // The auto-switch keys on the selection *changing*, so re-clicking the
-    // selected element while reading the Document tab did nothing at all — a
-    // dead end you could only leave by clicking the tab. `onSelect` now sets the
-    // tab directly, since clicking a thing asks to see that thing either way.
-    await page.setViewportSize({ width: 1280, height: 860 });
-    await open(page, (await fixtures()).sample);
-    const tabs = page.locator(".inspector__tabbtn");
-    const fragment = page.locator(".fragment").first();
-
-    await fragment.click();
-    await tabs.nth(0).click();
-    await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
-    await fragment.click();
-    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
-  });
-
-  test("the tab is per document, not for the session", async ({ page }) => {
+  test("a new document starts on its own properties", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     const f = await fixtures();
     await open(page, f.sample);
     await page.locator(".fragment").first().click();
-    await expect(page.locator(".inspector__tabbtn").nth(1)).toHaveAttribute("aria-selected", "true");
-
-    // A fresh document has nothing selected, so a panel left on Properties would
-    // greet it with an empty state while its actions sat one silent click away.
-    // (Three file inputs exist once a document is open — the bare `input` selector
-    // picks the image one, which rejects a PDF without a word in the UI.)
+    await expect(page.locator(".props__title")).toHaveText("Text");
     await page.setInputFiles('input[accept="application/pdf,.pdf"]', f.typeset);
     await expect(page.locator(".snackbar__msg")).toContainText("1 page ·");
-    await expect(page.locator(".inspector__tabbtn").nth(0)).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator(".props__title")).toHaveText("Document");
+    await expect(page.locator(".docpanel__fact", { hasText: "Pages" }).locator("dd")).toHaveText("1");
   });
 
-  test("collapses to an edge control with a readable name", async ({ page }) => {
+  test("collapses to an edge control with a readable name, from either view", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await open(page, (await fixtures()).sample);
-    await page.locator('.icon-btn[aria-label="Hide panel"]').click();
-    const tab = page.locator(".inspector__tab");
-    await expect(tab).toBeVisible();
-    // The label used to be a `writing-mode: vertical-rl` word on the edge.
+    const hide = page.getByRole("button", { name: "Hide panel" });
+    const show = page.locator(".inspector__tab");
+    await hide.click();
+    await expect(show).toBeVisible();
     await expect(page.locator(".inspector__tablabel")).toHaveCount(0);
-    await tab.click();
-    await expect(page.locator(".inspector__tabbtn")).toHaveCount(2);
+    await show.click();
+    await expect(page.locator(".props__title")).toHaveText("Document");
+    // The selection's view carries the same control.
+    await page.locator(".fragment").first().click();
+    await hide.click();
+    await expect(show).toBeVisible();
   });
 });
 
@@ -392,7 +381,7 @@ test.describe("Export split button", () => {
 
     // Each output has one home: not the ⋯ menu, not the Inspector.
     for (const label of OUTPUTS) {
-      await expect(page.locator(".doclist__item", { hasText: label })).toHaveCount(0);
+      await expect(page.locator("aside.inspector").getByRole("button", { name: label })).toHaveCount(0);
     }
     await page.getByRole("button", { name: "More actions" }).click();
     for (const label of OUTPUTS) {

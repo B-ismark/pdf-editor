@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { PDFDict, PDFDocument, PDFName } from "pdf-lib";
 import { readFileSync } from "node:fs";
 import { fixtures, ROTATED_TEXT, STRUCTURED } from "./fixtures";
-import { open, watch, pickTool, pickSubTool, pageTexts, expectClean, seedStore, docRecord, restoreSeeded, EMPTY } from "./helpers";
+import { open, watch, pickTool, pickSubTool, pageTexts, expectClean, seedStore, docRecord, restoreSeeded, EMPTY, openOrganise } from "./helpers";
 import type { DocState } from "../src/pdf/types";
 
 /**
@@ -21,7 +21,7 @@ async function download(page: Page): Promise<Buffer> {
 }
 
 async function organise(page: Page, steps: (org: ReturnType<Page["locator"]>) => Promise<void>) {
-  await page.getByRole("button", { name: /Organise pages/ }).first().click();
+  await openOrganise(page);
   const org = page.locator(".organize");
   await expect(org.locator(".pcard").first()).toBeVisible();
   await steps(org);
@@ -41,9 +41,7 @@ test("reorder, rotate and delete keep the edits, undo, and ship exactly the plan
   await page.mouse.click(p1.x + 120, p1.y + 140);
   await page.keyboard.type("Stays with page one");
   await pickTool(page, "Select");
-  // Making the box turned the panel to Properties; the page tools are a tab away.
   await page.keyboard.press("Escape");
-  await page.getByRole("tab", { name: "Document" }).click();
 
   await organise(page, async (org) => {
     // [1,2,3,…] → [2,1,3,…] → [2,1,4,…] (page 3 deleted) → page 1 turned.
@@ -155,7 +153,7 @@ async function restoreWith(page: Page, file: string, doc: Partial<DocState>) {
 
 /** Organise → Add PDF → Apply → confirm the rebuild. */
 async function mergeIn(page: Page, file: string) {
-  await page.getByRole("button", { name: /Organise pages/ }).first().click();
+  await openOrganise(page);
   const org = page.locator(".organize");
   await expect(org.locator(".pcard").first()).toBeVisible();
   const before = await org.locator(".pcard").count();
@@ -214,7 +212,7 @@ test.describe("Organise rebuilds keep what the plan says", () => {
     const f = await fixtures();
     const redaction = { id: "r-1", pageIndex: 0, x: 0, y: 0, width: 595, height: 842, color: "#000000" };
     await restoreWith(page, f.sample, { redactions: [redaction] });
-    await page.getByRole("button", { name: /Organise pages/ }).first().click();
+    await openOrganise(page);
     const org = page.locator(".organize");
     await org.locator(".pcard__thumb").first().click();
     const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 120_000 }), org.getByRole("button", { name: /Extract 1/ }).click()]);
@@ -317,7 +315,6 @@ test("markup on a deleted page can't be selected, copied back or counted", async
   await page.mouse.click(b.x + b.width / 2, b.y + b.height / 2);
   await expect(page.locator(".handle").first()).toBeVisible();
   await page.keyboard.press("ControlOrMeta+c");
-  await page.getByRole("tab", { name: "Document" }).click();
   await organise(page, async (org) => {
     await org.locator(".pcard").nth(0).locator('[aria-label="Delete page"]').click();
   });

@@ -18,6 +18,7 @@ import {
 import { PageView, type AnnotSpec } from "./components/PageView";
 import { translateAnnotation } from "./components/AnnotationLayer";
 import { PropertiesPanel } from "./components/PropertiesPanel";
+import { DocumentPanel } from "./components/DocumentPanel";
 import { DrawToolbar } from "./components/DrawToolbar";
 import { SelectionBar } from "./components/SelectionBar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -173,13 +174,6 @@ function menuKeys(
 }
 
 const EXPORT_GROUP: { key: DocAction["group"]; label: string } = { key: "export", label: "Export" };
-
-/** The Inspector's two jobs, each with its own tab. */
-type PanelTab = "document" | "properties";
-const PANEL_TABS: { key: PanelTab; label: string; icon: string }[] = [
-  { key: "document", label: "Document", icon: "picture_as_pdf" },
-  { key: "properties", label: "Properties", icon: "sliders" },
-];
 
 const TOOLS: { key: NavKey; label: string; icon: string; opens?: "toolbar" | "dialog" }[] = [
   { key: "select", label: "Select", icon: "select_tool" },
@@ -424,6 +418,17 @@ export const DocumentEditor = memo(function DocumentEditor({
   const plan = useMemo(() => (pdf ? resolvePlan(planned, pdf.pages.length) : []), [pdf, planned]);
   const shown = useMemo(() => (pdf ? shownPages(pdf.pages, plan) : []), [pdf, plan]);
   const shownBySource = useMemo(() => new Map(shown.map((p) => [p.pageIndex, p])), [shown]);
+  // What the Inspector says about the document with nothing selected.
+  const pageFacts = useMemo(
+    () =>
+      shown.map((p) => {
+        const { width, height } = shownSize(p);
+        let ocr = 0;
+        for (const f of p.fragments) if (f.id.startsWith("ocr:")) ocr++;
+        return { width, height, text: p.fragments.length - ocr, ocr };
+      }),
+    [shown],
+  );
   /** Apply a page plan (reorder, turn, delete) as one undoable edit. Stored
    * only when it changes something, so an arrangement put back by hand reads as
    * the document as loaded. The sidebar and the grid both come through here. */
@@ -482,7 +487,6 @@ export const DocumentEditor = memo(function DocumentEditor({
   // The zoom pill's page chip is a number field (go to page).
   const [pageJumpOpen, setPageJumpOpen] = useState(false);
   const [multi, setMulti] = useState<string[]>([]);
-  const [panelTab, setPanelTab] = useState<PanelTab>("document");
   const [compressOpen, setCompressOpen] = useState(false);
   const [signCertOpen, setSignCertOpen] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -512,47 +516,6 @@ export const DocumentEditor = memo(function DocumentEditor({
     theme.mode === "light" ? "Light" : theme.mode === "dark" ? "Dark" : "System";
   const themeLabel = `${themeName} theme`;
 
-  // Selecting something moves the panel to Properties — that is what you asked
-  // for by selecting. Deselecting does *not* move it back: the panel would then
-  // flip on every click into empty space, and Properties has a real empty state
-  // for exactly this. One tab switch per intent, none per accident.
-  //
-  // This covers the paths that don't go through `onSelect` above — adding a text
-  // box, a redaction or a link all select the new object so it can be styled
-  // straight away, and Find selects its match. `onSelect` handles the one case
-  // this can't see: re-clicking what is already selected.
-  const selectedKey = panelSelection ? `${panelSelection.kind}-${panelSelection.id}` : null;
-  useEffect(() => {
-    if (selectedKey) setPanelTab("properties");
-  }, [selectedKey]);
-
-  /** Roving focus across the panel tabs (WAI-ARIA tabs pattern).
-   *
-   * "Roving" is the whole point: the unselected tabs are `tabIndex={-1}`, so
-   * moving the selection without moving focus leaves the keyboard on a button
-   * that is no longer in the tab order — the next Tab jumps somewhere
-   * unrelated, and Space/Enter act on a tab that isn't the selected one. The
-   * focus call is what makes this the pattern rather than a lookalike. */
-  const onPanelTabKeyDown = useCallback((e: ReactKeyboardEvent<HTMLElement>) => {
-    const delta = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    if (!delta && e.key !== "Home" && e.key !== "End") return;
-    e.preventDefault();
-    const list = e.currentTarget.closest("[role=tablist]") ?? document;
-    const i = PANEL_TABS.findIndex((t) => t.key === panelTab);
-    const next =
-      e.key === "Home"
-        ? 0
-        : e.key === "End"
-          ? PANEL_TABS.length - 1
-          : (i + delta + PANEL_TABS.length) % PANEL_TABS.length;
-    const key = PANEL_TABS[next].key;
-    setPanelTab(key);
-    // Now, not after a frame: the next keystroke has to land on the tab this one
-    // moved to. Focusing it while React has yet to flip `tabIndex` to 0 is fine
-    // — `focus()` doesn't consult the tab order, and the attribute lands in the
-    // same commit as `aria-selected`.
-    list.querySelector<HTMLElement>(`#panel-tab-${key}`)?.focus();
-  }, [panelTab]);
 
   // Per-page buckets. Each page keeps the same bucket object until something on
   // *that* page changes, so typing on one page re-renders only that page.
@@ -1359,18 +1322,6 @@ export const DocumentEditor = memo(function DocumentEditor({
     setEditingId(null);
     setSheetOpen(false);
     setSelection(sel);
-    // Clicking a thing on the page asks to see that thing — including when it is
-    // already the selection. The effect below can't cover that case, because the
-    // selection didn't change; without this, re-clicking the selected element
-    // while reading the Document tab did nothing at all. `onSelect(null)`
-    // (clicking empty space) deliberately doesn't move the panel.
-    //
-    // A stamp is the exception, and the effect below already knows it: stamps
-    // are edited on the canvas and have no panel controls, so moving to
-    // Properties for one replaced every document action with an empty state —
-    // clicking your own signature made Compress/Watermark/OCR vanish and showed
-    // nothing in their place.
-    if (sel && sel.kind !== "stamp") setPanelTab("properties");
   }, []);
 
   /** Enter text-edit mode for the current selection (mobile): make it editable,
@@ -2425,16 +2376,19 @@ export const DocumentEditor = memo(function DocumentEditor({
                     <Icon name="save_local" size={18} /> Save session on this device
                     {autosaveOn && <Icon name="check" size={16} className="menu__check" />}
                   </button>
-                  <button
-                    className="menu__item"
-                    onClick={() => { setMenuOpen(false); setLosslessRaster((v) => !v); }}
-                    role="menuitemcheckbox"
-                    aria-checked={losslessRaster}
-                    data-tip="Redacted pages export bit-exact, at several times the file size"
-                  >
-                    <Icon name="lossless" size={18} /> Lossless redacted pages
-                    {losslessRaster && <Icon name="check" size={16} className="menu__check" />}
-                  </button>
+                  {/* On a desktop this is a document setting in the Inspector. */}
+                  {compact && (
+                    <button
+                      className="menu__item"
+                      onClick={() => { setMenuOpen(false); setLosslessRaster((v) => !v); }}
+                      role="menuitemcheckbox"
+                      aria-checked={losslessRaster}
+                      data-tip="Redacted pages export bit-exact, at several times the file size"
+                    >
+                      <Icon name="lossless" size={18} /> Lossless redacted pages
+                      {losslessRaster && <Icon name="check" size={16} className="menu__check" />}
+                    </button>
+                  )}
                   </div>
                   <div className="menu__divider" />
                   <div role="group" aria-labelledby="menu-grp-file">
@@ -2459,6 +2413,12 @@ export const DocumentEditor = memo(function DocumentEditor({
     </header>
   );
 
+  const hidePanel = (
+    <button className="icon-btn icon-btn--sm" onClick={() => setInspectorOpen(false)} aria-label="Hide panel" data-tip="Hide panel">
+      <Icon name="chevron_right" size={18} />
+    </button>
+  );
+
   const propertiesPanel = (
     <PropertiesPanel
       selection={panelSelection}
@@ -2476,42 +2436,27 @@ export const DocumentEditor = memo(function DocumentEditor({
       onDelete={onDelete}
       onReset={onResetStyle}
       onClose={() => (compact ? setSheetOpen(false) : setSelection(null))}
+      headerAction={compact ? undefined : hidePanel}
     />
   );
 
-  // Document-wide actions. No heading of its own — the panel's "Document" tab
-  // names it, and a tab plus an identical title underneath is the same word
-  // twice.
+  // Nothing selected: the document's own properties. See DocumentPanel.
   const documentPanel = (
-    <div className="props">
-      <div className="doclist">
-        {DOC_GROUPS.map((grp) => (
-          <Fragment key={grp.key}>
-            <span className="doclist__label label-medium">{grp.label}</span>
-            {docActions
-              .filter((a) => a.group === grp.key)
-              .map((a) => (
-                <button
-                  key={a.id}
-                  className="doclist__item"
-                  aria-haspopup={a.opens ? "dialog" : undefined}
-                  onClick={a.run}
-                >
-                  <Icon name={a.icon} size={18} />
-                  <span className="doclist__itemlabel">{a.label}</span>
-                  {a.opens && <Icon name="opens_dialog" size={16} className="opens-mark" />}
-                </button>
-              ))}
-          </Fragment>
-        ))}
-      </div>
-      {/* The tab's tail was ~300px of empty surface on any normal window. The
-          product's one real claim belongs somewhere calm and permanent, and this
-          is the only place in the editor that had room for it. */}
-      <p className="doclist__note body-small">
-        Every action here runs in this browser. Your file is never uploaded.
-      </p>
-    </div>
+    <DocumentPanel
+      fileName={fileName}
+      pages={pageFacts}
+      pageNumbers={pageNumbers}
+      watermark={watermark}
+      lossless={losslessRaster}
+      busy={busy}
+      onEditNumbers={() => setFinishTab("numbers")}
+      onEditWatermark={() => setFinishTab("watermark")}
+      onClearNumbers={clearNumbers}
+      onClearWatermark={clearWatermark}
+      onOcr={runOcr}
+      onLossless={setLosslessRaster}
+      headerAction={hidePanel}
+    />
   );
 
 
@@ -2800,50 +2745,13 @@ export const DocumentEditor = memo(function DocumentEditor({
             on-demand bottom sheet driven by the contextual SelectionBar. */}
         {isWide ? (
           inspectorOpen ? (
-            <aside className="inspector">
-              {/* Two tabs, not one surface wearing two hats. This panel used to
-                  swap between a list of document actions and the properties of
-                  the selection with nothing to say it had — so the controls you
-                  came for vanished the moment you clicked the page, and the ones
-                  that replaced them looked like they had always been there.
-                  Naming both states makes the switch legible and, more to the
-                  point, reversible: you can read a fragment's properties and
-                  still get back to Compress without deselecting. */}
-              <div className="inspector__tabs">
-                <div className="inspector__tablist" role="tablist" aria-label="Panel">
-                  {PANEL_TABS.map((t) => (
-                    <button
-                      key={t.key}
-                      id={`panel-tab-${t.key}`}
-                      role="tab"
-                      className={`inspector__tabbtn${panelTab === t.key ? " inspector__tabbtn--on" : ""}`}
-                      aria-selected={panelTab === t.key}
-                      aria-controls="panel-body"
-                      tabIndex={panelTab === t.key ? 0 : -1}
-                      onClick={() => setPanelTab(t.key)}
-                      onKeyDown={onPanelTabKeyDown}
-                    >
-                      <Icon name={t.icon} size={16} />
-                      <span className="label-large">{t.label}</span>
-                    </button>
-                  ))}
-                </div>
-                <button
-                  className="icon-btn icon-btn--sm"
-                  onClick={() => setInspectorOpen(false)}
-                  aria-label="Hide panel"
-                  data-tip="Hide panel"
-                >
-                  <Icon name="chevron_right" size={18} />
-                </button>
-              </div>
-              <div
-                id="panel-body"
-                role="tabpanel"
-                aria-labelledby={`panel-tab-${panelTab}`}
-              >
-                {panelTab === "document" ? documentPanel : propertiesPanel}
-              </div>
+            <aside className="inspector" aria-label={selection ? "Properties" : "Document"}>
+              {/* One job: describe what is selected, or the document when
+                  nothing is. It used to be two tabs (document actions /
+                  properties); the actions now live where they act — Export,
+                  the Pages sidebar, the ⋯ menu — so there is nothing left to
+                  switch between, and deselecting is the way back. */}
+              {selection ? propertiesPanel : documentPanel}
             </aside>
           ) : (
             <button

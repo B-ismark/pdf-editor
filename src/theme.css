@@ -60,18 +60,8 @@
      else, where the radius alone still yields an ordinary rounded corner.
      That makes it safe as an enhancement and unsafe as a signal: it is only
      ever used to soften a shape the app already has, never to carry state.
-     State that depends on a cut corner uses `--joint-fillet` below, which is
-     masked and therefore renders everywhere. */
+     State that needs a cut corner has to be masked, so it renders everywhere. */
   --corner-soft: squircle;
-
-  /* ---- The joint ----
-     The concave fillets that tie a selected tab to the surface it opens, so
-     the panel is visibly *that tab's* rather than a second thing that happens
-     to sit underneath. Drawn with a radial-gradient mask rather than
-     `corner-shape: scoop` precisely because this one is load-bearing — it has
-     to render on Safari and Firefox too. The fillets carry no border and no
-     shadow, so masking the paint instead of the box costs nothing here. */
-  --joint-fillet: 10px;
 
   /* ---- Typography ----
      System-font-first by design. Naming a web font first would either produce a

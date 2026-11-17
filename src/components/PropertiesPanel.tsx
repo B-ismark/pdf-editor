@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
 import { isRejectedUrl } from "../pdf/url";
@@ -27,6 +28,8 @@ interface Props {
   onReset?: () => void;
   /** Mobile bottom-sheet close affordance (omitted on desktop side panel). */
   onClose?: () => void;
+  /** Replaces the close button at the end of the heading (the Inspector's "Hide panel"). */
+  headerAction?: ReactNode;
 }
 
 const ANNOT_LABEL: Record<string, string> = {
@@ -68,6 +71,7 @@ export function PropertiesPanel({
   onDelete,
   onReset,
   onClose,
+  headerAction,
 }: Props) {
   const linkRejected = isRejectedUrl(linkUrl ?? "");
   const title =
@@ -91,23 +95,13 @@ export function PropertiesPanel({
     <div className="props">
       <div className="props__header">
         <span className="props__title title-medium">{title}</span>
-        {onClose && (
-          <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">
-            <Icon name="close" size={20} />
-          </button>
-        )}
+        {headerAction ??
+          (onClose && (
+            <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">
+              <Icon name="close" size={20} />
+            </button>
+          ))}
       </div>
-
-      {/* Reachable at last. This state existed but was unreachable: with nothing
-          selected the panel showed the document actions instead, so the one place
-          that explained how to get properties only appeared once you no longer
-          needed it. */}
-      {!selection && !stampSelected && (
-        <p className="props__empty body-medium">
-          Nothing selected. Click any text, note, shape, redaction or link on the
-          page and its settings appear here.
-        </p>
-      )}
 
       {/* Every gesture, not a sample of them: this paragraph is the only place
           the app explains how a stamp is edited, so leaving rotate out (or

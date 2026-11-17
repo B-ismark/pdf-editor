@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fixtures, LOCKED_PASSWORD, LOCKED_TEXT } from "./fixtures";
-import { open, pageTexts, watch } from "./helpers";
+import { open, pageTexts, watch, openOrganise } from "./helpers";
 
 /**
  * Password-protected PDFs open, behind an in-app password prompt.
@@ -166,7 +166,7 @@ test.describe("password-protected PDFs", () => {
     await expect(page.locator(".doctab--active")).toContainText("sample.pdf");
 
     const before = await page.locator(".page").count();
-    await page.getByRole("button", { name: /Organise pages/ }).first().click();
+    await openOrganise(page);
     await page.locator(".organize__docs .chip", { hasText: "locked.pdf" }).click();
     await page.locator(".organize .btn--filled").click();
     await expect(page.locator(".organize")).toHaveCount(0);

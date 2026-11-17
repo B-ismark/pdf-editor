@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fixtures, PHOTO_CAPTION, SEARCH_HOSTILE, SEARCH_HOSTILE_FONT, SEARCH_REDACT, STRUCTURED } from "./fixtures";
-import { open, watch, pickTool, dragOnPage, pageTexts } from "./helpers";
+import { open, watch, pickTool, dragOnPage, pageTexts, setLossless } from "./helpers";
 import type { Page } from "@playwright/test";
 import { buildFromPlan, type PlanEntry } from "../src/pdf/pageOps";
 
@@ -120,8 +120,7 @@ test.describe("export integrity", () => {
     expect(lossy.toString("latin1"), "the raster is a JPEG").toMatch(/\/DCTDecode/);
     expect((await pageTexts(lossy, [1]))[0].trim(), "still no recoverable text").toBe("");
 
-    await page.click('[aria-label="More actions"]');
-    await page.locator('[role="menuitemcheckbox"]', { hasText: "Lossless redacted pages" }).click();
+    await setLossless(page);
 
     const lossless = await downloadFrom(page, ".appbar__download");
     expect(lossless.toString("latin1"), "no lossy raster once asked for lossless").not.toMatch(/\/DCTDecode/);
@@ -245,9 +244,7 @@ test.describe("export integrity", () => {
     await open(page, file);
 
     // Lossless, so a light pixel is a leak and not a JPEG artefact.
-    await page.click('[aria-label="More actions"]');
-    await page.locator('[role="menuitemcheckbox"]', { hasText: "Lossless redacted pages" }).click();
-    await page.keyboard.press("Escape");
+    await setLossless(page);
 
     // Where the target really is, read off the rendering rather than computed
     // from any font's metrics (which is the very thing under test): split each
@@ -319,9 +316,7 @@ test("Redact all leaves no trace of the match however the text is set", async ({
   if (!nonLatin) test.info().annotations.push({ type: "note", description: "DejaVu not installed: Turkish and Hebrew cases skipped" });
 
   await open(page, file);
-  await page.click('[aria-label="More actions"]');
-  await page.locator('[role="menuitemcheckbox"]', { hasText: "Lossless redacted pages" }).click();
-  await page.keyboard.press("Escape");
+  await setLossless(page);
   // The fixture is honest: there is red to remove (the first page is in view).
   expect(await redPixels(page, 0), "the target is drawn in red").toBeGreaterThan(50);
 

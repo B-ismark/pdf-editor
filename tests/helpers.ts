@@ -178,3 +178,16 @@ export async function restoreSeeded(page: Page): Promise<void> {
   await page.locator(".restore-banner").getByRole("button", { name: "Restore" }).click();
   await expect(page.locator(".page").first()).toBeVisible({ timeout: 30_000 });
 }
+
+/** Turn on "Lossless redacted pages": a document setting in the Inspector,
+ * shown with nothing selected (Escape clears any selection first). */
+export async function setLossless(page: Page): Promise<void> {
+  await page.keyboard.press("Escape");
+  await page.getByRole("checkbox", { name: /Lossless redacted pages/ }).check();
+}
+
+/** Open Organise (the full-screen page grid) from the ⋯ menu. */
+export async function openOrganise(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "More actions" }).click();
+  await page.getByRole("menuitem", { name: /Organise pages/ }).click();
+}

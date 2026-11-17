@@ -6,12 +6,12 @@ import { expectClean, open, watch } from "./helpers";
  * "This opens something."
  *
  * The failure this guards against isn't a missing chevron, it's a *drifting*
- * one. The Inspector's Document tab, the ⋯ menu and the command palette all
- * list the same `docActions`, and they have already drifted apart once — the
- * palette carried a hand-written copy of the tool list that no longer matched.
- * So the assertion worth making is not "Watermark has a mark" but "the three
- * surfaces mark exactly the same set", which fails the moment someone adds an
- * action and only wires two of them.
+ * one. The ⋯ menu, the Export menu and the command palette all list the same
+ * `docActions`, and they have already drifted apart once — the palette carried
+ * a hand-written copy of the tool list that no longer matched. So the assertion
+ * worth making is not "Watermark has a mark" but "every surface marks exactly
+ * the same set", which fails the moment someone adds an action and only wires
+ * some of them.
  *
  * The visual mark is decorative; `aria-haspopup` / `aria-expanded` is what
  * actually reaches assistive tech, so both are checked.
@@ -24,20 +24,16 @@ const marked = (rows: Element[]) =>
     .map((r) => (r.textContent ?? "").trim())
     .sort();
 
-test("the Inspector, the ⋯ menu and the palette mark the same actions", async ({ page }) => {
+test("the ⋯ menu, the Export menu and the palette mark the same actions", async ({ page }) => {
   const w = watch(page);
   const f = await fixtures();
   await open(page, f.sample);
 
-  // Inspector → Document tab is the default when nothing is selected.
-  const panel = await page.locator(".doclist__item").evaluateAll(marked);
-  expect(panel.length, "some actions open a dialog").toBeGreaterThan(3);
-
   await page.click('[aria-label="More actions"]');
   const menu = await page.locator(".menu__item").evaluateAll(marked);
   await page.keyboard.press("Escape");
-
-  expect(menu, "the ⋯ menu marks what the Inspector marks").toEqual(panel);
+  expect(menu, "the ⋯ menu marks what opens a dialog").toEqual(["Add image", "Organise pages", "Page numbers", "Watermark"]);
+  const panel = menu;
 
   // The Export menu (Download's caret) marks its own the same way.
   await page.click('[aria-label="Export options"]');
@@ -70,11 +66,16 @@ test("an action that acts immediately carries no mark", async ({ page }) => {
   const f = await fixtures();
   await open(page, f.sample);
 
-  const row = (label: string) => page.locator(".doclist__item", { hasText: label });
   const item = (label: string) => page.locator(".menu__item", { hasText: label });
 
   // Opens a dialog.
-  await expect(row("Page numbers").locator(".opens-mark")).toHaveCount(1);
+  await page.click('[aria-label="More actions"]');
+  await expect(item("Page numbers").locator(".opens-mark")).toHaveCount(1);
+  await expect(item("Page numbers")).toHaveAttribute("aria-haspopup", "dialog");
+  // Runs there and then.
+  await expect(item("Copy all text").locator(".opens-mark")).toHaveCount(0);
+  await expect(item("Copy all text")).not.toHaveAttribute("aria-haspopup", /.*/);
+  await page.keyboard.press("Escape");
   await page.click('[aria-label="Export options"]');
   await expect(item("Compress PDF").locator(".opens-mark")).toHaveCount(1);
   await expect(item("Compress PDF")).toHaveAttribute("aria-haspopup", "dialog");
@@ -82,8 +83,10 @@ test("an action that acts immediately carries no mark", async ({ page }) => {
   // which is worse than no mark at all.
   await expect(item("Export as images").locator(".opens-mark")).toHaveCount(0);
   await page.keyboard.press("Escape");
-  await expect(row("Copy all text").locator(".opens-mark")).toHaveCount(0);
-  await expect(row("Copy all text")).not.toHaveAttribute("aria-haspopup", /.*/);
+  // The Inspector's document settings mark their dialogs too.
+  const add = page.getByRole("button", { name: "Add page numbers" });
+  await expect(add.locator(".opens-mark")).toHaveCount(1);
+  await expect(add).toHaveAttribute("aria-haspopup", "dialog");
   expectClean(w);
 });
 

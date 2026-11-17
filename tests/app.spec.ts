@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { openOrganise } from "./helpers";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -75,7 +76,7 @@ test("export as images downloads a single ZIP for a multi-page doc", async ({ pa
 
 test("a modal suppresses global editing shortcuts", async ({ page }) => {
   await openSample(page);
-  await page.getByRole("button", { name: /Organise pages/ }).first().click();
+  await openOrganise(page);
   await page.waitForSelector(".organize", { timeout: 5_000 });
   await page.keyboard.press("Control+z");
   await expect(page.locator(".organize")).toHaveCount(1);
