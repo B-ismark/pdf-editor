@@ -1,4 +1,4 @@
-import { PDFDocument } from "pdf-lib";
+import { PDFDocument } from "@cantoo/pdf-lib";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
 import { loadJpegEncoder } from "./jpeg";

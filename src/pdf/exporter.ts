@@ -1,4 +1,4 @@
-import { LineCapStyle, PDFCheckBox, PDFDocument, PDFRef, PDFString, PDFTextField, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import { LineCapStyle, PDFCheckBox, PDFDocument, PDFRef, PDFString, PDFTextField, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "@cantoo/pdf-lib";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
 import {

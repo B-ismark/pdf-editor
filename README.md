@@ -281,9 +281,10 @@ A pragmatic, client-side editor — worth knowing where the seams are:
 
 ## Tech
 
-React · TypeScript · Vite · [PDF.js] · [pdf-lib]
+React · TypeScript · Vite · [PDF.js] · [pdf-lib] (the maintained [`@cantoo/pdf-lib`] fork)
 
 [File API]: https://developer.mozilla.org/en-US/docs/Web/API/File
 [PDF.js]: https://mozilla.github.io/pdf.js/
 [pdf-lib]: https://pdf-lib.js.org/
+[`@cantoo/pdf-lib`]: https://github.com/cantoo-scribe/pdf-lib
 [Lucide]: https://lucide.dev/

@@ -1,4 +1,4 @@
-import { PDFArray, PDFDict, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFStream, PDFString, decodePDFRawStream, type PDFDocument, type PDFObject } from "pdf-lib";
+import { PDFArray, PDFDict, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFStream, PDFString, decodePDFRawStream, type PDFDocument, type PDFObject } from "@cantoo/pdf-lib";
 
 /**
  * Whole-document bookkeeping for exporting *in place*.

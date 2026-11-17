@@ -58,6 +58,13 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   the render path free of pdf-lib** — e.g. `isFragmentModified` lives in the
   pure `pdf/style.ts`, not `exporter.ts`. If you add code the initial render
   needs, don't import it from a pdf-lib module.
+- **One PDF engine: `@cantoo/pdf-lib`.** Every `src/` import names the fork.
+  `@signpdf/placeholder-pdf-lib` imports `"pdf-lib"` itself, and objects from
+  two copies of the library can't share a document — the writer's `instanceof`
+  checks fail and signing never produced a file. `vite.config.ts` aliases
+  `pdf-lib` to the fork; `sign.spec.ts` verifies a real signature and fails if
+  the alias goes. Upstream `pdf-lib` stays only as a devDependency for the
+  tests, which deliberately read the output with a different library.
 - **Long loops yield through `yieldToUI` (`pdf/yield.ts`), never `setTimeout(0)`.**
   Nested timeouts clamp to ≥4 ms, which made a 150-page export spend most of
   its time asleep. `yieldToUI` only gives the browser a turn once ~12 ms of work

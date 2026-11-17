@@ -1,4 +1,4 @@
-import { PDFArray, PDFDict, PDFName, PDFNumber, PDFRawStream, PDFRef, type PDFDocument } from "pdf-lib";
+import { PDFArray, PDFDict, PDFName, PDFNumber, PDFRawStream, PDFRef, type PDFDocument } from "@cantoo/pdf-lib";
 import { loadJpegEncoder } from "./jpeg";
 import { yieldToUI } from "./yield";
 

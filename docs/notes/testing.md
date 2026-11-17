@@ -114,6 +114,11 @@ type-checking can't see, and each exists because it broke once:
   travels with a tab to the background; Download all saves every tab it
   zipped; and a signature is stored on the device only when "Remember this
   signature" is ticked, and can be removed;
+- `sign.spec.ts` — "Sign with certificate" output verifies the way a reader
+  checks it: the `/ByteRange` spans the file except the signature, the PKCS#7
+  digest matches those bytes, and the signature checks out against the
+  embedded certificate. Exists because the engine swap could break signing
+  silently (two copies of pdf-lib → no file at all);
 - `password.spec.ts` — a password-protected PDF asks in-app, says a wrong
   password is wrong without losing what was typed, opens with the right one,
   and downloads as a plain PDF with its text (no `/Encrypt`); cancel opens

@@ -1,4 +1,4 @@
-import type { PDFDocument, PDFFont } from "pdf-lib";
+import type { PDFDocument, PDFFont } from "@cantoo/pdf-lib";
 
 /** An embedded source font plus a coverage test for the text about to use it. */
 export interface EmbeddedSourceFont {

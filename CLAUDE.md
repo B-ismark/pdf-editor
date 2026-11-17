@@ -55,7 +55,7 @@ invariant it protects (and why it exists) is in
 when a spec fails or before you add one. Specs: `app`, `privacy`, `rendering`,
 `export`, `ocr`, `font`, `baseline`, `colors`, `find`, `phone`, `shell`,
 `icons`, `marks`, `affordance`, `shape`, `fragment`, `chrome`, `tabs`,
-`overlays`, `placement`, `edge`, `keyboard`, `saved`, `password`. If you add a feature that touches privacy, the export bytes, or
+`overlays`, `placement`, `edge`, `keyboard`, `saved`, `password`, `sign`. If you add a feature that touches privacy, the export bytes, or
 per-page rendering, add a spec for it.
 
 ## Architecture
@@ -66,6 +66,10 @@ per-page rendering, add a spec for it.
   `GlobalWorkerOptions.workerSrc`. The document's real per-fragment fonts come
   from `pdf/fontInfo.ts` after the page paints — see `docs/notes/text-fidelity.md`.
 - **Write path** — `pdf/exporter.ts` uses **pdf-lib** to produce the output.
+  "pdf-lib" here means the maintained fork **`@cantoo/pdf-lib`**: import it by
+  that name, never `"pdf-lib"` (upstream 1.17 is a devDependency only, the
+  tests' independent reader). Vite aliases `pdf-lib` to the fork so
+  `@signpdf`'s own import gets the same engine — see `rendering.md`.
   Non-redacted pages keep vector content (edits/text/annotations/stamps drawn on
   top); **redacted pages are rasterized to an image** so content is truly
   removed. `pageOps.ts` (reorder/rotate/merge/extract) and `finishOps.ts` (page

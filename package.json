@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Upload a PDF, edit its text in place, and download the result — all in the browser.",
+  "description": "Upload a PDF, edit its text in place, and download the result \u2014 all in the browser.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -23,7 +23,6 @@
     "buffer": "^6.0.3",
     "lucide-react": "^1.26.0",
     "node-forge": "^1.4.0",
-    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^4.7.76",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -35,6 +34,7 @@
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
+    "pdf-lib": "^1.17.1",
     "typescript": "^5.6.3",
     "vite": "^5.4.10"
   }

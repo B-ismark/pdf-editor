@@ -1,4 +1,4 @@
-import { PDFDocument, degrees, type PDFPage } from "pdf-lib";
+import { PDFDocument, degrees, type PDFPage } from "@cantoo/pdf-lib";
 
 /** One page slot in an organize plan: which source document, which page in it,
  * and how much extra rotation the user applied (added to the page's own). */

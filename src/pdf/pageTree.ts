@@ -1,4 +1,4 @@
-import { PDFDict, PDFName, PDFNumber, PDFPageLeaf, PDFPageTree, PDFRef, type PDFDocument, type PDFObject } from "pdf-lib";
+import { PDFDict, PDFName, PDFNumber, PDFPageLeaf, PDFPageTree, PDFRef, type PDFDocument, type PDFObject } from "@cantoo/pdf-lib";
 
 /**
  * Make the file's page list exactly the pages the preview showed, in order.

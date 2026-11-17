@@ -102,6 +102,14 @@ function cspPlugin(): Plugin {
 export default defineConfig({
   plugins: [react(), cspPlugin()],
   base: "./",
+  resolve: {
+    // One PDF engine. The app writes with @cantoo/pdf-lib (the maintained
+    // fork); @signpdf/placeholder-pdf-lib imports "pdf-lib" itself, and
+    // objects from two copies of the library can't be mixed in one document
+    // (the writer's instanceof checks fail). Upstream pdf-lib stays a
+    // devDependency only, as the tests' independent reader.
+    alias: [{ find: /^pdf-lib$/, replacement: "@cantoo/pdf-lib" }],
+  },
   define: {
     __OCR_ASSET_VERSION__: JSON.stringify(ocrAssetVersion),
   },

@@ -113,8 +113,9 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   image — one call per page wrote a shared image once per page. A page the
   plan uses twice can share the call: the copier clones the page leaf on every
   request (only its resources are shared), so the two slots are two objects.
-- **Encrypted files are decrypted once, at open — never later.** pdf-lib 1.17
-  can't read encryption: it saved an owner-locked file's still-encrypted
+- **Encrypted files are decrypted once, at open — never later.** Upstream
+  pdf-lib 1.17 couldn't read encryption (the app now writes with the fork,
+  which can, but decrypting once still keeps every later step password-free): it saved an owner-locked file's still-encrypted
   streams under a trailer with no `/Encrypt`, so the download was unreadable.
   `openFile` scans for `/Encrypt` (`mayBeEncrypted`, in the loader so the scan
   doesn't pull the decrypter into the main chunk) and runs `pdf/decrypt.ts`,
