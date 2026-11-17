@@ -2,6 +2,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { renderPage, isRenderCancelled } from "../pdf/loader";
 import { useRenderWindow } from "../hooks/useRenderWindow";
 import { isFragmentModified, keepsSourceTypeface, resolveFragmentStyle } from "../pdf/style";
+import { roomAfter } from "../pdf/lineFit";
 import { usePageFonts } from "../hooks/usePageFonts";
 import { usePageColors } from "../hooks/usePageColors";
 import { offerPageCanvas, readPageColors } from "../pdf/fragmentColors";
@@ -554,6 +555,9 @@ function PageViewInner(props: Props) {
                 // re-embed it.
                 face={keepsSourceTypeface(edit?.style ?? {}) ? source : null}
                 backdrop={colors?.fill}
+                // How far it may run before the next run on its line — only
+                // needed while it's drawn (a scan of the page's runs each).
+                room={modified || selected ? roomAfter(fragment, page.fragments) : null}
                 modified={modified}
                 selected={selected}
                 interactive={tool === "select"}

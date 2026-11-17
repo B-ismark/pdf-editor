@@ -52,9 +52,31 @@ export interface Fixtures {
   sharedResources: string;
   /** Twelve pages that all draw the *same* image XObject. */
   sharedImage: string;
+  /** One line set as separately positioned runs, the way word processors
+   * write it — see {@link SPLIT_LINE}. */
+  splitLine: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
+
+/**
+ * One line of body text written as three runs, each placed at its own x, plus a
+ * label and a value a tab stop apart — see `line.spec.ts`.
+ *
+ * pdf.js reports each run as a fragment of its own (and the word space between
+ * them as a whitespace item the loader drops), so editing the middle run grows it
+ * in place while the next keeps its x. That printed "both" → "bothy" as
+ * "bothymployer", on screen and in the file.
+ */
+export const SPLIT_LINE = {
+  page: { width: 640, height: 400 },
+  size: 14,
+  x: 40,
+  baseline: 300,
+  runs: ["Employees can withdraw another", "50% from both", "employer and employee"],
+  /** On a line of their own: a label, then a value at a tab stop. */
+  tab: { label: "Amount:", value: "120", baseline: 240, valueX: 220 },
+};
 
 /**
  * Search targets whose position a per-character *average* gets wrong.
@@ -235,6 +257,7 @@ async function build(): Promise<Fixtures> {
     sharedImage: write("shared-image.pdf", await sharedImagePdf()),
     locked: write("locked.pdf", await lockedPdf(LOCKED_PASSWORD)),
     ownerLocked: write("owner-locked.pdf", await lockedPdf("")),
+    splitLine: write("split-line.pdf", await splitLinePdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -549,6 +572,27 @@ async function sharedImagePdf(): Promise<Uint8Array> {
  * it. Used by `baseline.spec.ts` (does the overlay sit on the document's
  * baseline?) and `export.spec.ts` (does an edit keep the panel's colour?).
  */
+async function splitLinePdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([SPLIT_LINE.page.width, SPLIT_LINE.page.height]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const { size, baseline, runs, tab } = SPLIT_LINE;
+  // Each run where the previous one (and a word space) ended, as its own text
+  // object — the space between them is a run of its own, as Word writes it.
+  let x = SPLIT_LINE.x;
+  runs.forEach((run, i) => {
+    if (i > 0) {
+      page.drawText(" ", { x, y: baseline, size, font });
+      x += font.widthOfTextAtSize(" ", size);
+    }
+    page.drawText(run, { x, y: baseline, size, font });
+    x += font.widthOfTextAtSize(run, size);
+  });
+  page.drawText(tab.label, { x: SPLIT_LINE.x, y: tab.baseline, size, font });
+  page.drawText(tab.value, { x: tab.valueX, y: tab.baseline, size, font });
+  return doc.save();
+}
+
 async function typesetPdf(): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   const page = doc.addPage([TYPESET_PAGE.width, TYPESET_PAGE.height]);

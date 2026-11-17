@@ -130,3 +130,11 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     properties panel, and both export paths cannot disagree about what colour the
     text is. A memo that reads it needs it as a dependency (`activeStyle` in
     `DocumentEditor.tsx`) — it arrives after the page is sampled.
+  - **An edit keeps to its line** (`lineFit.ts`). A line is usually several
+    runs, each at its own x; an edit that grew in place covered the next run
+    (the opaque cover too), on screen and in the file. `roomAfter` gives the room
+    up to the next run on the same baseline, less up to a word space (pdf.js
+    drops the space item, so the next x is its first glyph); `fitScale` condenses
+    past it. The overlay (`scaleX`), the vector path (`cm`) and the raster path
+    (`ctx.scale`) all use it. Reflow was rejected: it redraws untouched text and
+    would slide words out from under a measured search-redaction box.

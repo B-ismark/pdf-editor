@@ -1,5 +1,6 @@
-import { memo, useEffect, useRef } from "react";
+import { memo, useEffect, useLayoutEffect, useRef } from "react";
 import { CSS_FONT } from "../pdf/style";
+import { fitScale } from "../pdf/lineFit";
 import { elementTap, lastEditPoint } from "../hooks/useDrag";
 import { focusEditable, placeCaretEnd } from "../caret";
 import { baselineOffset, fontShorthand } from "../textBaseline";
@@ -26,6 +27,9 @@ interface Props {
    * cover is painted in it so an edit inside a coloured pill, cell, or banner
    * doesn't punch a white hole through the artwork. */
   backdrop?: string;
+  /** Room before the next run on this fragment's line, in PDF units, or null
+   * when nothing follows it there (see `lineFit.ts`). */
+  room: number | null;
   /** Whether the fragment differs from its original (text or style). */
   modified: boolean;
   selected: boolean;
@@ -61,6 +65,7 @@ function EditableFragmentImpl({
   style,
   face,
   backdrop,
+  room,
   modified,
   tabStop,
   selected,
@@ -127,6 +132,28 @@ function EditableFragmentImpl({
     width: fragment.width * scale + 3,
     height: origFontPx * 1.35,
   };
+
+  // Keep the replacement to the room it has on its line, condensing it when it
+  // needs more — the same `fitScale` both export paths apply, so the file
+  // matches what this shows. Measured untransformed and to the sub-pixel
+  // (`offsetWidth` rounds to whole pixels, enough to overlap the next run by a
+  // fraction), and again whenever the text's box changes size: typing, a style
+  // change, or the document's face finishing loading.
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => {
+      el.style.transform = "";
+      if (!show) return;
+      const k = fitScale(el.getBoundingClientRect().width / scale, fragment.width, room);
+      if (k < 1) el.style.transform = `scaleX(${k})`;
+    };
+    fit();
+    if (!show) return;
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [show, scale, room, fragment.width, value, fontPx, fontFamily, fontWeight, fontStyle]);
 
   return (
     <>
