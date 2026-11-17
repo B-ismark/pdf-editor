@@ -425,7 +425,7 @@ export const DocumentEditor = memo(function DocumentEditor({
         const { width, height } = shownSize(p);
         let ocr = 0;
         for (const f of p.fragments) if (f.id.startsWith("ocr:")) ocr++;
-        return { width, height, text: p.fragments.length - ocr, ocr };
+        return { width, height, text: p.fragments.length - ocr, ocr, ocrRead: !!p.ocrRead };
       }),
     [shown],
   );
@@ -947,10 +947,18 @@ export const DocumentEditor = memo(function DocumentEditor({
     setStatus("working");
     setMessage("Reading text (OCR)…");
     try {
+      // Only pages with no text of their own: OCR on a page that already has
+      // a text layer lays a second copy of every word over the first.
+      const unread = pdf.pages.filter((pg) => !pg.fragments.some((f) => !f.id.startsWith("ocr:")));
+      if (unread.length === 0) {
+        setStatus("ready");
+        setMessage("Every page already has text — nothing to recognise.");
+        return;
+      }
       const { ocrPages } = await import("./pdf/ocr");
       const { perPage, pagesFailed } = await ocrPages(
         pdf.bytes,
-        pdf.pages,
+        unread,
         (p, t) =>
           setMessage(p === 0 ? "Starting OCR engine…" : `Reading text… page ${p}/${t}`),
         ctrl.signal,
@@ -959,12 +967,14 @@ export const DocumentEditor = memo(function DocumentEditor({
         { cacheEngine: autosaveOn },
       );
       let added = 0;
+      const read = new Set(unread.map((pg) => pg.pageIndex));
       const pages = pdf.pages.map((pg) => {
+        if (!read.has(pg.pageIndex)) return pg;
         const extra = perPage.get(pg.pageIndex) ?? [];
         added += extra.length;
         // Replace any prior OCR layer so re-running doesn't duplicate words.
         const kept = pg.fragments.filter((f) => !f.id.startsWith("ocr:"));
-        return { ...pg, fragments: [...kept, ...extra] };
+        return { ...pg, fragments: [...kept, ...extra], ocrRead: true };
       });
       // Into the document that was read, even if another is in front by now:
       // the pages are that file's, not whichever tab finished first.
@@ -2376,19 +2386,20 @@ export const DocumentEditor = memo(function DocumentEditor({
                     <Icon name="save_local" size={18} /> Save session on this device
                     {autosaveOn && <Icon name="check" size={16} className="menu__check" />}
                   </button>
-                  {/* On a desktop this is a document setting in the Inspector. */}
-                  {compact && (
-                    <button
-                      className="menu__item"
-                      onClick={() => { setMenuOpen(false); setLosslessRaster((v) => !v); }}
-                      role="menuitemcheckbox"
-                      aria-checked={losslessRaster}
-                      data-tip="Redacted pages export bit-exact, at several times the file size"
-                    >
-                      <Icon name="lossless" size={18} /> Lossless redacted pages
-                      {losslessRaster && <Icon name="check" size={16} className="menu__check" />}
-                    </button>
-                  )}
+                  {/* An app setting, like the three above: it applies to every
+                      document exported on this device, so it lives here on
+                      every screen size. The Inspector repeats it beside the
+                      document facts, labelled as a device setting. */}
+                  <button
+                    className="menu__item"
+                    onClick={() => { setMenuOpen(false); setLosslessRaster((v) => !v); }}
+                    role="menuitemcheckbox"
+                    aria-checked={losslessRaster}
+                    data-tip="Redacted pages export bit-exact, at several times the file size"
+                  >
+                    <Icon name="lossless" size={18} /> Lossless redacted pages
+                    {losslessRaster && <Icon name="check" size={16} className="menu__check" />}
+                  </button>
                   </div>
                   <div className="menu__divider" />
                   <div role="group" aria-labelledby="menu-grp-file">
@@ -2875,6 +2886,13 @@ export const DocumentEditor = memo(function DocumentEditor({
               { id: "redo", label: "Redo", hint: "Ctrl+Shift+Z", icon: "redo", disabled: !docHistory.canRedo, run: redo },
               // Document/finishing actions come from the shared source of truth.
               ...docActions.map((a) => ({ id: a.id, label: a.label, icon: a.icon, keywords: a.keywords, opens: a.opens, run: a.run })),
+              {
+                id: "lossless",
+                label: losslessRaster ? "Turn off lossless redacted pages" : "Turn on lossless redacted pages",
+                icon: "lossless",
+                keywords: "redaction quality bit-exact png export setting",
+                run: () => setLosslessRaster((v) => !v),
+              },
               { id: "dim", label: dimPages ? "Undim pages" : "Dim pages", icon: "contrast", run: () => setDimPages((v) => !v) },
               { id: "theme", label: `Theme: ${themeLabel}`, icon: themeIcon, keywords: "dark light system", run: theme.cycle },
               { id: "download", label: "Download PDF", hint: "", icon: "download", run: download },

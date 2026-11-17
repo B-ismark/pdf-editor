@@ -98,6 +98,9 @@ export interface PageData {
    * Null when pdf.js has no reference for it (a page stored as a direct
    * object), which the exporter refuses rather than guesses. */
   ref: { num: number; gen: number } | null;
+  /** True once OCR has read this page (whether or not it found words), so the
+   * Inspector stops offering to read it again. */
+  ocrRead?: boolean;
 }
 
 /** The parsed document plus its original bytes (needed to re-export). */

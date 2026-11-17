@@ -817,7 +817,7 @@ body {
   background: var(--outline-variant);
   margin: 4px auto 8px;
 }
-.props__title { color: var(--on-surface); }
+.props__title { color: var(--on-surface); margin: 0; }
 .props__empty { color: var(--on-surface-variant); margin: 8px 0; }
 /* Inline validation copy (e.g. a link URL we refuse to export). */
 .props__warn { color: var(--error); }
@@ -975,6 +975,8 @@ body {
   overflow: hidden auto;
   animation: panel-in var(--dur-med2) var(--ease-emphasized-decelerate);
 }
+/* Focus moving up through a long panel stops below the sticky heading. */
+.inspector { scroll-padding-top: 56px; }
 .inspector .props { padding-top: 0; }
 .inspector .props::before { display: none; }
 /* The heading carries "Hide panel", so it stays put while a long panel scrolls. */
@@ -1046,8 +1048,8 @@ body {
 }
 
 /* The privacy line at the foot of the document panel. */
-.doclist__note {
-  margin: 18px 12px 0;
+.docpanel__note {
+  margin: 18px 0 0;
   padding-top: 14px;
   border-top: 1px solid var(--outline-variant);
   color: var(--on-surface-variant);
