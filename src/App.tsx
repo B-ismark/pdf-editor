@@ -8,6 +8,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { TooltipHost } from "./components/TooltipHost";
 import { FindBar } from "./components/FindBar";
 import { PageNav } from "./components/PageNav";
+import { PageJump } from "./components/PageJump";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
 import { findMatches, extractText, type FindMatch } from "./pdf/find";
@@ -44,6 +45,7 @@ import {
   type OverlayKind,
 } from "./overlays";
 import { DEFAULT_STYLE, isFragmentModified, resolveFragmentStyle } from "./pdf/style";
+import { keepOnPage, onPage, placeAt, placedSize, rotatedExtent } from "./pdf/placement";
 
 // On-demand modals — each pulls in heavy code (pdf-lib, canvas rendering) that
 // isn't needed until the user opens it, so they're code-split out of the
@@ -222,6 +224,79 @@ function aModalIsOpen(): boolean {
   return !!document.querySelector('[aria-modal="true"]');
 }
 
+/**
+ * A stamp the page can hold. The page's MediaBox cuts off whatever hangs past
+ * it in the downloaded file, which the overlay used to show in full. A move
+ * stops at the edge; a resize or rotation that would grow it off the page is
+ * refused (the handle stops), while one that shrinks it always goes through, so
+ * a stamp already over the edge from an older session can still be fixed.
+ */
+function keepStampOnPage(prev: Stamp, next: Stamp, page: { width: number; height: number } | undefined): Stamp {
+  if (!page) return next;
+  const { width: pw, height: ph } = page;
+  const sized = next.width !== prev.width || next.height !== prev.height || (next.rotation ?? 0) !== (prev.rotation ?? 0);
+  if (sized) {
+    if (onPage(next, pw, ph)) return next;
+    const a = rotatedExtent(prev.width, prev.height, prev.rotation);
+    const b = rotatedExtent(next.width, next.height, next.rotation);
+    return b.w > a.w + 0.01 || b.h > a.h + 0.01 ? prev : next;
+  }
+  return { ...next, ...keepOnPage(next, pw, ph) };
+}
+
+/** Pull the given stamps back onto their page. The paths that move overlays
+ * in bulk (paste/duplicate, align, distribute) shift them by a delta without
+ * going through `onChangeStamp`, so this is their page-edge guard. */
+function keepStampsOnPage(
+  d: DocState,
+  ids: Iterable<string>,
+  pages: { viewBox: { width: number; height: number } }[] | undefined,
+): DocState {
+  const want = new Set(ids);
+  if (!pages || !d.stamps.some((s) => want.has(s.id))) return d;
+  return {
+    ...d,
+    stamps: d.stamps.map((s) => {
+      const vb = want.has(s.id) ? pages[s.pageIndex]?.viewBox : undefined;
+      return vb ? { ...s, ...keepOnPage(s, vb.width, vb.height) } : s;
+    }),
+  };
+}
+
+/** Shrink one shared move so every stamp in the group stays on its page — the
+ * group moves as a block and stops when its first stamp reaches an edge,
+ * rather than each stamp stopping on its own and the layout shearing. */
+function limitGroupMove(
+  d: DocState,
+  ids: Set<string>,
+  dx: number,
+  dy: number,
+  pages: { viewBox: { width: number; height: number } }[] | undefined,
+): { dx: number; dy: number } {
+  if (!pages) return { dx, dy };
+  let ax = dx;
+  let ay = dy;
+  for (const s of d.stamps) {
+    const vb = ids.has(s.id) ? pages[s.pageIndex]?.viewBox : undefined;
+    if (!vb) continue;
+    const k = keepOnPage({ ...s, x: s.x + dx, y: s.y + dy }, vb.width, vb.height);
+    const cx = k.x - s.x;
+    const cy = k.y - s.y;
+    if (dx > 0) ax = Math.min(ax, Math.max(0, cx));
+    else if (dx < 0) ax = Math.max(ax, Math.min(0, cx));
+    if (dy > 0) ay = Math.min(ay, Math.max(0, cy));
+    else if (dy < 0) ay = Math.max(ay, Math.min(0, cy));
+  }
+  return { dx: ax, dy: ay };
+}
+
+/** The prompt while an image or signature waits to be placed. A finger taps and
+ * has no Esc key; a pointer clicks, and can back out with Esc. */
+function placeHint(what: string): string {
+  const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
+  return touch ? `Tap where ${what} goes.` : `Click where ${what} goes. Esc cancels.`;
+}
+
 export function App() {
   const [pdf, setPdf] = useState<LoadedPdf | null>(null);
   const [fileName, setFileName] = useState("document.pdf");
@@ -320,6 +395,8 @@ export function App() {
   // dismissible without leaving the tool.
   const [drawbarOpen, setDrawbarOpen] = useState(true);
   const [cmdOpen, setCmdOpen] = useState(false);
+  // The zoom pill's page chip is a number field (go to page).
+  const [pageJumpOpen, setPageJumpOpen] = useState(false);
   const [multi, setMulti] = useState<string[]>([]);
   // Adaptive Workspace: the right Inspector collapses to an edge tab (desktop)
   // to hand the canvas maximum room; it's never empty (properties when
@@ -636,6 +713,7 @@ export function App() {
     setEditingId(null);
     setAutoFocusId(null);
     setPendingStamp(null);
+    setPageJumpOpen(false);
     setFindOpen(false);
     setFindQuery("");
     setSheetOpen(false);
@@ -1363,13 +1441,21 @@ export function App() {
     [selection, doc],
   );
 
+  // Said once each time a piece of text first crosses the edge, not per key.
+  const onSpill = useCallback(() => {
+    setMessage("Text runs past the page edge. The download cuts it off there.");
+  }, []);
+
   const onPlaceStamp = useCallback(
-    (pageIndex: number, xLeft: number, yTop: number) => {
-      if (!pendingStamp) return;
-      const width = Math.min(220, pendingStamp.w * 0.75);
-      const height = width * (pendingStamp.h / pendingStamp.w);
+    (pageIndex: number, cx: number, cy: number) => {
+      const page = pdf?.pages[pageIndex];
+      if (!pendingStamp || !page) return;
+      // Centred on the click and kept on the page — the same `placeAt` the
+      // page's ghost preview draws with, so what you aimed is what you get.
+      const { width: pw, height: ph } = page.viewBox;
+      const box = placeAt(placedSize(pendingStamp, pw, ph), cx, cy, pw, ph);
       const id = nextId("st");
-      const stamp: Stamp = { id, pageIndex, x: xLeft, y: yTop - height, width, height, dataUrl: pendingStamp.dataUrl };
+      const stamp: Stamp = { id, pageIndex, ...box, dataUrl: pendingStamp.dataUrl };
       doc.set((d) => ({ ...d, stamps: [...d.stamps, stamp] }));
       setPendingStamp(null);
       // Switch to Select so the just-placed stamp is immediately movable/
@@ -1378,17 +1464,20 @@ export function App() {
       setSelection({ kind: "stamp", id });
       setMessage("");
     },
-    [pendingStamp, doc],
+    [pendingStamp, doc, pdf],
   );
 
   const onChangeStamp = useCallback(
     (id: string, patch: Partial<Stamp>, key: string) => {
       doc.set(
-        (d) => ({ ...d, stamps: d.stamps.map((s) => (s.id === id ? { ...s, ...patch } : s)) }),
+        (d) => ({
+          ...d,
+          stamps: d.stamps.map((s) => (s.id === id ? keepStampOnPage(s, { ...s, ...patch }, pdf?.pages[s.pageIndex]?.viewBox) : s)),
+        }),
         key,
       );
     },
-    [doc],
+    [doc, pdf],
   );
 
   const onDeleteStamp = useCallback(
@@ -1406,7 +1495,7 @@ export function App() {
       const stamp = await prepareImageStamp(file);
       setPendingStamp(stamp);
       setStatus("ready");
-      setMessage("Tap the page to place the image.");
+      setMessage(placeHint("the image"));
     } catch (err) {
       // Previously an unreadable or unsupported file (HEIC, SVG, a renamed
       // non-image) fell through `img.onerror` with no handler at all: no stamp,
@@ -1484,6 +1573,24 @@ export function App() {
   const backGuard = useRef(false);
   const consumingGuard = useRef(false);
   const dismissable = compact && (editingId != null || sheetOpen || selection != null);
+  // On a phone the zoom pill yields to the top-centre contextual bar (find,
+  // multi-select, a selection). The page field lives in it, so a hidden pill
+  // closes the field — otherwise it would reopen, focused, keyboard up, the
+  // moment the pill came back.
+  const zoomHidden =
+    compact && (findOpen || multi.length >= 2 || (selection != null && selection.kind !== "stamp" && !sheetOpen));
+  useEffect(() => {
+    if (zoomHidden) setPageJumpOpen(false);
+  }, [zoomHidden]);
+  /** "Go to page…": on a phone, first put away whatever is hiding the pill. */
+  const openPageJump = useCallback(() => {
+    if (compact) {
+      setSelection(null);
+      setMulti([]);
+      closeFind();
+    }
+    setPageJumpOpen(true);
+  }, [compact, closeFind]);
   useEffect(() => {
     if (dismissable && !backGuard.current) {
       backGuard.current = true;
@@ -1696,10 +1803,10 @@ export function App() {
       const def = OVERLAYS[item.kind];
       const id = nextId(def.idPrefix);
       const copy = { ...def.translate(item.obj, PASTE_DX, PASTE_DY), id };
-      doc.set((d) => addOverlay(d, item.kind, copy));
+      doc.set((d) => keepStampsOnPage(addOverlay(d, item.kind, copy), [id], pdf?.pages));
       setSelection({ kind: item.kind, id });
     },
-    [doc],
+    [doc, pdf],
   );
 
   const duplicateSelection = useCallback(() => {
@@ -1753,9 +1860,9 @@ export function App() {
   /** Apply per-id {dx,dy} deltas to every overlay object in one undo step. */
   const applyDeltas = useCallback(
     (deltas: Map<string, { dx: number; dy: number }>) => {
-      doc.set((d) => applyOverlayDeltas(d, deltas));
+      doc.set((d) => keepStampsOnPage(applyOverlayDeltas(d, deltas), deltas.keys(), pdf?.pages));
     },
-    [doc],
+    [doc, pdf],
   );
 
   /** Shift the whole multi-selection by one delta, as a single undo step. */
@@ -1767,10 +1874,14 @@ export function App() {
   const moveMulti = useCallback(
     (dx: number, dy: number, key: string) => {
       if (!dx && !dy) return;
-      const deltas = new Map(multiRef.current.map((id) => [id, { dx, dy }] as const));
-      doc.set((d) => applyOverlayDeltas(d, deltas), key);
+      const ids = multiRef.current;
+      doc.set((d) => {
+        const m = limitGroupMove(d, new Set(ids), dx, dy, pdf?.pages);
+        if (!m.dx && !m.dy) return d;
+        return applyOverlayDeltas(d, new Map(ids.map((id) => [id, m] as const)));
+      }, key);
     },
-    [doc],
+    [doc, pdf],
   );
 
   /** Restack the selected annotation(s) within the annotation layer. Strokes
@@ -1968,6 +2079,12 @@ export function App() {
         openFind();
         return;
       }
+      if (e.key === "Escape" && pendingStamp) {
+        e.preventDefault();
+        setPendingStamp(null);
+        setMessage("");
+        return;
+      }
       if (e.key === "Escape" && findOpen) {
         e.preventDefault();
         closeFind();
@@ -2134,6 +2251,7 @@ export function App() {
     moveMulti,
     arrangeSelection,
     canArrange,
+    pendingStamp,
   ]);
 
   const runExport = useCallback(async () => {
@@ -2303,7 +2421,7 @@ export function App() {
   };
 
   const appBar = (
-    <header className="appbar">
+    <header className={`appbar${menuOpen ? " appbar--menu" : ""}`}>
       {/* With a document open the brand is the way back to the start screen —
           it looks like a home link, so it has to behave like one. With nothing
           open it's already home, and stays inert text. */}
@@ -2369,7 +2487,14 @@ export function App() {
           <span className="appbar__changes label-medium">
             {changeCount > 0 ? `${changeCount} change${changeCount === 1 ? "" : "s"}` : ""}
           </span>
-          <button className="btn btn--filled appbar__download" onClick={download} disabled={busy}>
+          <button
+            className="btn btn--filled appbar__download"
+            onClick={download}
+            disabled={busy}
+            // On a phone the label is hidden and only the icon shows; without
+            // this the button is announced as just "button".
+            aria-label={status === "exporting" ? "Exporting…" : "Download"}
+          >
             {status === "exporting" ? (
               <span className="spinner spinner--sm spinner--on-primary" aria-hidden="true" />
             ) : (
@@ -2664,6 +2789,23 @@ export function App() {
       }}
     >
       <TooltipHost />
+      {/* The document is one Tab stop per page, but a long file is still many
+          pages between the app bar and the tools; this jumps straight there.
+          Hidden until focused, and the first Tab stop on the page. */}
+      <button
+        type="button"
+        className="skiplink"
+        onClick={() =>
+          // The active tool, else the first: one selector list would return
+          // whichever comes first in the DOM, which is always "Select".
+          (
+            document.querySelector<HTMLElement>(".tooldock .tooldock__btn--on") ??
+            document.querySelector<HTMLElement>(".tooldock .tooldock__btn")
+          )?.focus()
+        }
+      >
+        Skip to tools
+      </button>
       {appBar}
       {(isWide || tabs.length > 1) && (
         <DocTabs
@@ -2724,7 +2866,7 @@ export function App() {
                 pageNumbers={pageNumbers}
                 watermark={watermark}
                 multiIds={multiByPage.get(page.pageIndex) ?? NO_IDS}
-                placing={!!pendingStamp}
+                placing={pendingStamp}
                 findMatches={matchesByPage.get(page.pageIndex)}
                 activeFindId={activeMatch?.pageIndex === page.pageIndex ? activeMatch.id : null}
                 selection={selectionPage === page.pageIndex ? selection : null}
@@ -2751,6 +2893,7 @@ export function App() {
                 onMoveMulti={moveMulti}
                 onAddAnnotation={onAddAnnotation}
                 onPlaceStamp={onPlaceStamp}
+                onSpill={onSpill}
               />
             ))}
             </div>
@@ -2760,11 +2903,17 @@ export function App() {
               yields to whichever top-centre contextual bar is showing (find /
               multi-select / selection) so the two never overlap on a narrow
               screen; the bottom tool cluster never reaches it. */}
-          {!(compact && (findOpen || multi.length >= 2 || (selection && selection.kind !== "stamp" && !sheetOpen))) && (
+          {!zoomHidden && (
           <div className="zoombar" role="group" aria-label="Zoom">
             <button className="icon-btn" onClick={vp.zoomOut} aria-label="Zoom out" data-tip="Zoom out">
               <Icon name="remove" size={18} />
             </button>
+            {pdf.pages.length > 1 && (
+              <>
+                <PageJump pageCount={pdf.pages.length} docKey={pdf} editing={pageJumpOpen} onEditingChange={setPageJumpOpen} />
+                <span className="zoombar__sep" aria-hidden="true" />
+              </>
+            )}
             <button className="zoombar__label label-medium" onClick={vp.resetZoom} data-tip="Fit to width">
               {Math.round(vp.zoom * 100)}%
             </button>
@@ -2992,7 +3141,7 @@ export function App() {
               setSigOpen(false);
               setPendingStamp(sig);
               setStatus("ready");
-              setMessage("Tap the page to place your signature.");
+              setMessage(placeHint("your signature"));
             }}
           />
         </Suspense>
@@ -3104,6 +3253,9 @@ export function App() {
               })),
               { id: "duplicate", label: "Duplicate selection", hint: "Ctrl+D", icon: "duplicate", disabled: !selection || selection.kind === "fragment", run: duplicateSelection },
               { id: "find", label: "Find in document", hint: "Ctrl+F", icon: "search", run: openFind },
+              ...(pdf && pdf.pages.length > 1
+                ? [{ id: "goto", label: "Go to page…", icon: "go_to_page", keywords: "jump page number", run: openPageJump }]
+                : []),
               { id: "pages", label: navOpen ? "Hide page thumbnails" : "Show page thumbnails", icon: navOpen ? "panel_close" : "panel_open", run: () => setNavOpen((v) => !v) },
               { id: "undo", label: "Undo", hint: "Ctrl+Z", icon: "undo", disabled: !docHistory.canUndo, run: undo },
               { id: "redo", label: "Redo", hint: "Ctrl+Shift+Z", icon: "redo", disabled: !docHistory.canRedo, run: redo },

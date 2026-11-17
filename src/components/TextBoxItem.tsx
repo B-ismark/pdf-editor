@@ -94,7 +94,13 @@ function TextBoxItemImpl({
         const px = s.x + dx / scale;
         const py = s.y - dy / scale;
         const sn = snapBox(px, py, wPdf, hPdf, pageWidth, H, 6 / scale);
-        onChange(box.id, { x: sn.x, y: sn.y }, key);
+        // Stop at the page edge: the exported page cuts off whatever hangs
+        // past it. `y` is the first line's baseline, so the box reaches
+        // `size` above it and its remaining lines below it.
+        const below = Math.max(0, (ref.current?.offsetHeight ?? 0) / scale - hPdf);
+        const x = Math.max(0, Math.min(Math.max(0, pageWidth - wPdf), sn.x));
+        const y = Math.max(below, Math.min(H - hPdf, sn.y));
+        onChange(box.id, { x, y }, key);
         setGuides(sn.gx, sn.gy);
       },
       onEnd: clearGuides,

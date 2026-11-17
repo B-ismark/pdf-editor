@@ -32,6 +32,9 @@ import { annotationBox, intersects, linkBox, redactionBox, stampBox, textBoxBox,
 import type { LinkAnnot, PageNumberOptions, Stamp, WatermarkOptions } from "../pdf/types";
 import type { FindMatch } from "../pdf/find";
 import { LinkItem } from "./LinkItem";
+import { placeCaretEnd } from "../caret";
+import type { PreparedStamp } from "../pdf/imageStamp";
+import { placeAt, placedSize } from "../pdf/placement";
 import { FormFieldLayer } from "./FormFieldLayer";
 
 /** Annotation spec minus the fields the App assigns (id, pageIndex). */
@@ -60,7 +63,9 @@ interface Props {
   watermark: WatermarkOptions | null;
   /** Ids currently in a multi-selection (highlighted, not individually chromed). */
   multiIds: Set<string>;
-  placing: boolean;
+  /** The image or signature waiting to be placed, or null. While set, a layer
+   * above every overlay takes the click — text included — and shows a ghost. */
+  placing: PreparedStamp | null;
   /** Search hits on this page (PDF units), and the id of the active one. */
   findMatches?: FindMatch[];
   activeFindId?: string | null;
@@ -94,7 +99,10 @@ interface Props {
    * key coalesces a whole drag into one undo step. */
   onMoveMulti: (dx: number, dy: number, key: string) => void;
   onAddAnnotation: (pageIndex: number, spec: AnnotSpec) => void;
-  onPlaceStamp: (pageIndex: number, xLeft: number, yTop: number) => void;
+  /** Typed text (an edit or a text box) has newly run past the page edge. */
+  onSpill: () => void;
+  /** Place the pending stamp centred on (cx, cy), PDF units. */
+  onPlaceStamp: (pageIndex: number, cx: number, cy: number) => void;
 }
 
 const MIN_DRAG = 6;
@@ -116,7 +124,7 @@ function PageViewInner(props: Props) {
     annotations, stamps, links, formValues, pageNumbers, watermark, multiIds, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, onSelect, onEditText, onFinishEdit,
     onChangeFragmentText, onChangeTextBoxText, onChangeTextBox, onChangeRedaction, onChangeLink,
     onChangeNoteText, onMoveAnnotation, onChangeStamp, onDeleteStamp, onAddTextBox, onAddRedaction, onAddLink, onChangeFormValue, onMarquee, onMoveMulti, onAddAnnotation,
-    onPlaceStamp,
+    onPlaceStamp, onSpill,
   } = props;
 
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -214,11 +222,6 @@ function PageViewInner(props: Props) {
     if (ev.target !== overlayRef.current) return;
     const { x, y } = local(ev.clientX, ev.clientY);
 
-    if (placing) {
-      ev.preventDefault();
-      onPlaceStamp(page.pageIndex, x / scale, H - y / scale);
-      return;
-    }
     if (tool === "select") {
       onSelect(null);
       // Mouse: rubber-band select. Touch keeps deselect + page-pan behaviour.
@@ -249,6 +252,43 @@ function PageViewInner(props: Props) {
       tool === "redact" ? "redact" : tool === "whiteout" ? "whiteout" : tool === "link" ? "link" : drawTool;
     setG({ mode, x0: x, y0: y, x1: x, y1: y, pts: [{ x, y }] });
   };
+
+  // Typed text that runs past the page edge. The exported page cuts it off at
+  // its MediaBox, and the overlay is clipped just past the edge to match; the
+  // text itself is marked and the app says why once, when it first spills.
+  // Only edited fragments and text boxes are measured — source text is the
+  // file's own business — so this stays a handful of reads per keystroke.
+  // A passive effect, not a layout one: children's effects run first, and the
+  // fragment re-seeds its text on undo in its own effect — measuring before
+  // that would read the text being undone.
+  const spilling = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const ov = overlayRef.current;
+    if (!ov) return;
+    // An edit undone back to the original leaves `edits`; clear its mark too.
+    ov.querySelectorAll(".is-spill").forEach((el) => el.classList.remove("is-spill"));
+    const r = ov.getBoundingClientRect();
+    const now = new Set<string>();
+    const check = (id: string, el: Element | null) => {
+      if (!(el instanceof HTMLElement)) return;
+      const b = el.getBoundingClientRect();
+      const spill = b.width > 0 && (b.right > r.right + 1 || b.left < r.left - 1 || b.bottom > r.bottom + 1 || b.top < r.top - 1);
+      el.classList.toggle("is-spill", spill);
+      if (spill) now.add(id);
+    };
+    for (const id in edits) check(id, ov.querySelector(`.fragment[data-el-id="${CSS.escape(id)}"]`));
+    for (const b of textBoxes) check(b.id, ov.querySelector(`[data-el-id="${CSS.escape(b.id)}"] .textbox`));
+    const fresh = [...now].some((id) => !spilling.current.has(id));
+    spilling.current = now;
+    if (fresh) onSpill();
+  // `pageFonts`: the real fonts land after paint and change the text's width.
+  }, [edits, textBoxes, scale, near, pageFonts, onSpill]);
+
+  // The page is one Tab stop (the audit counted ~300 stops before the chrome
+  // on a 12-page file). It's the fragment you last left, else the first.
+  const [lastFocused, setLastFocused] = useState<string | null>(null);
+  const tabStopId =
+    lastFocused && page.fragments.some((f) => f.id === lastFocused) ? lastFocused : (page.fragments[0]?.id ?? null);
 
   const markTool = tool === "draw" && isMarkTool(drawTool) && !placing;
 
@@ -359,9 +399,7 @@ function PageViewInner(props: Props) {
     });
   };
 
-  const cursor = placing
-    ? "copy"
-    : tool === "text"
+  const cursor = tool === "text"
       ? "text"
       : tool === "redact" || tool === "whiteout" || tool === "link" || tool === "draw"
         ? "crosshair"
@@ -394,6 +432,13 @@ function PageViewInner(props: Props) {
             setG(null);
           }}
           onPointerLeave={() => setGhost(null)}
+          onFocus={(ev) => {
+            const id = (ev.target as HTMLElement).classList.contains("fragment") ? (ev.target as HTMLElement).dataset.id : undefined;
+            if (id) setLastFocused(id);
+          }}
+          onKeyDown={(ev) =>
+            fragmentArrowNav(ev, selection?.kind === "fragment" ? (id) => onSelect({ kind: "fragment", id }) : undefined)
+          }
         >
           {findMatches && findMatches.length > 0 && (
             <div className="findlayer" aria-hidden="true">
@@ -477,6 +522,7 @@ function PageViewInner(props: Props) {
                 onEdit={(id) => onEditText({ kind: "fragment", id })}
                 onDone={compact && editingId === fragment.id ? onFinishEdit : undefined}
                 onChangeText={onChangeFragmentText}
+                tabStop={fragment.id === tabStopId}
               />
             );
           })}
@@ -624,6 +670,16 @@ function PageViewInner(props: Props) {
 
           {/* Live draw preview */}
           {g && <DrawPreview g={g} color={drawStyle.color} width={drawStyle.width} scale={scale} />}
+
+          {placing && (
+            <PlaceLayer
+              stamp={placing}
+              pageW={Wpdf}
+              pageH={H}
+              scale={scale}
+              onPlace={(cx, cy) => onPlaceStamp(page.pageIndex, cx, cy)}
+            />
+          )}
 
           {/* Where a tap would drop a mark, at the size it would be. */}
           {markTool && ghost && !g && (
@@ -780,4 +836,160 @@ function DrawPreview({ g, color, width, scale }: { g: Gesture; color: string; wi
       )}
     </svg>
   );
+}
+
+/** A touch that travels further than this is a scroll, not a tap. */
+const TAP_SLOP = 10;
+
+/**
+ * The layer that takes the click while an image or signature is being placed.
+ *
+ * It sits above every overlay, so a click on text places the stamp instead of
+ * selecting the fragment underneath (a signature line is almost always next to
+ * text). A pointer gets a translucent ghost at the exact box the click would
+ * create — same `placeAt` as the drop. A finger has no hover, so it places on
+ * lift, and only if it didn't move: a swipe over the page still scrolls.
+ */
+function PlaceLayer({
+  stamp,
+  pageW,
+  pageH,
+  scale,
+  onPlace,
+}: {
+  stamp: PreparedStamp;
+  pageW: number;
+  pageH: number;
+  scale: number;
+  onPlace: (cx: number, cy: number) => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const down = useRef<{ id: number; x: number; y: number } | null>(null);
+  // Fingers currently on the layer. A second one makes it a pinch, which never
+  // places — even if the finger that lifts last didn't move.
+  const fingers = useRef(new Set<number>());
+  const size = placedSize(stamp, pageW, pageH);
+  const toPdf = (ev: React.PointerEvent) => {
+    const r = ref.current!.getBoundingClientRect();
+    return { x: (ev.clientX - r.left) / scale, y: pageH - (ev.clientY - r.top) / scale };
+  };
+  const box = at && placeAt(size, at.x, at.y, pageW, pageH);
+  const lift = (ev: React.PointerEvent) => {
+    fingers.current.delete(ev.pointerId);
+    const d = down.current;
+    if (d?.id === ev.pointerId) down.current = null;
+    return d?.id === ev.pointerId ? d : null;
+  };
+  // Touch events are deliberately *not* stopped here: the viewer pans and
+  // pinches in JS (`.viewer__scroll` is touch-action:none), so swallowing them
+  // would pin the user to whatever page was on screen when they armed the
+  // stamp. A tap is told apart from a swipe by distance, on release.
+  return (
+    <div
+      ref={ref}
+      className="placelayer"
+      data-testid="place-layer"
+      onPointerDown={(ev) => {
+        if (ev.pointerType !== "touch") {
+          ev.stopPropagation();
+          if (ev.button !== 0) return; // right/middle click: not a placement
+          ev.preventDefault();
+          const p = toPdf(ev);
+          onPlace(p.x, p.y);
+          return;
+        }
+        fingers.current.add(ev.pointerId);
+        down.current = fingers.current.size === 1 ? { id: ev.pointerId, x: ev.clientX, y: ev.clientY } : null;
+      }}
+      onPointerMove={(ev) => {
+        if (ev.pointerType !== "touch") {
+          ev.stopPropagation();
+          setAt(toPdf(ev));
+        }
+      }}
+      onPointerUp={(ev) => {
+        if (ev.pointerType !== "touch") {
+          ev.stopPropagation();
+          return;
+        }
+        const d = lift(ev);
+        if (!d) return;
+        if (Math.hypot(ev.clientX - d.x, ev.clientY - d.y) > TAP_SLOP) return;
+        const p = toPdf(ev);
+        onPlace(p.x, p.y);
+      }}
+      onPointerCancel={(ev) => {
+        lift(ev);
+      }}
+      onPointerLeave={() => setAt(null)}
+    >
+      {box && (
+        <img
+          className="placelayer__ghost"
+          src={stamp.dataUrl}
+          alt=""
+          draggable={false}
+          style={{
+            left: box.x * scale,
+            top: (pageH - box.y - box.height) * scale,
+            width: box.width * scale,
+            height: box.height * scale,
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Whether the caret sits at the very start or end of an editable's text. */
+function caretAt(el: HTMLElement, edge: "start" | "end"): boolean {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0 || !sel.isCollapsed) return false;
+  const caret = sel.getRangeAt(0);
+  if (!el.contains(caret.startContainer)) return false;
+  const r = document.createRange();
+  r.selectNodeContents(el);
+  if (edge === "start") r.setEnd(caret.startContainer, caret.startOffset);
+  else r.setStart(caret.startContainer, caret.startOffset);
+  return r.toString().length === 0;
+}
+
+/**
+ * Arrow keys move between fragments, across pages too: Up/Down always (a
+ * fragment is one line, so they have nothing else to do), Left/Right once the
+ * caret is at the start/end. Arriving from the right puts the caret at the
+ * end, so Left keeps walking backwards through the text as one run.
+ */
+function fragmentArrowNav(ev: React.KeyboardEvent, select?: (id: string) => void) {
+  const el = ev.target as HTMLElement;
+  if (!el.classList.contains("fragment") || ev.altKey || ev.metaKey || ev.ctrlKey || ev.shiftKey) return;
+  // Not editable (a phone outside edit mode): there's no caret to walk, so
+  // Left/Right step like Up/Down — and are consumed, so they never fall through
+  // to App's nudge and shove some other selected object across the page.
+  const caretless = !el.isContentEditable;
+  const back = ev.key === "ArrowUp" || (ev.key === "ArrowLeft" && (caretless || caretAt(el, "start")));
+  const fwd = ev.key === "ArrowDown" || (ev.key === "ArrowRight" && (caretless || caretAt(el, "end")));
+  if (!back && !fwd) return;
+  const all = Array.from(document.querySelectorAll<HTMLElement>(".page .fragment[tabindex]"));
+  const next = all[all.indexOf(el) + (fwd ? 1 : -1)];
+  ev.preventDefault();
+  ev.stopPropagation();
+  if (!next) return;
+  // The selected fragment is the one the Inspector styles; if the selection
+  // stayed behind, typing would go to one fragment and styling to another.
+  if (select && next.dataset.id) select(next.dataset.id);
+  next.focus({ preventScroll: true });
+  next.scrollIntoView({ block: "nearest", inline: "nearest" });
+  if (back) placeCaretEnd(next);
+  else {
+    const sel = window.getSelection();
+    if (sel) {
+      const r = document.createRange();
+      r.selectNodeContents(next);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+  }
 }

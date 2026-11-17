@@ -86,3 +86,44 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   these for any new draggable/selectable overlay. Stamps have no properties
   sheet — they're edited directly on the canvas (drag/resize handle/delete
   badge).
+- **Placing an image or signature** goes through `.placelayer`, a layer
+  `PageView` mounts above every overlay while `placing` is set. It has to sit
+  on top: a signature line is almost always next to text, and a click that
+  reached the fragment selected it instead of placing (the bug this replaced).
+  The ghost and the drop both come from `pdf/placement.ts` (`placedSize`,
+  `placeAt`), centred on the pointer and clamped to the page, so the preview
+  can't promise a spot the click then misses. A pointer places on a primary
+  press (right/middle clicks don't place); a finger places on lift, only if it
+  didn't travel and no second finger joined. The layer must **not** stop touch
+  events: the viewer pans and pinches in JS on `.viewer__scroll`
+  (`touch-action: none`), so swallowing them pins you to the page that was on
+  screen when you armed the stamp. Esc cancels.
+- **The page edge is the file's edge.** The exported page cuts off anything
+  past its MediaBox, so the overlay matches it:
+  - stamps can't be dragged off (`keepStampOnPage` in App: a move stops at
+    the edge; a resize or rotation that would *grow* it off is refused, one
+    that shrinks it always goes through). The bulk paths don't go through
+    `onChangeStamp`, so they have their own guards: paste/duplicate and
+    align/distribute pull each stamp back (`keepStampsOnPage`), and a group
+    move is shortened so the whole group stops when its first stamp reaches
+    the edge (`limitGroupMove`) instead of shearing apart. Known limit: the
+    clamp uses the page *as displayed* (`viewBox`), which is right for
+    unrotated pages; a non-square `/Rotate`d page may still clip a stamp;
+  - text boxes stop at the edge when dragged (`TextBoxItem`);
+  - typed text that runs past (an edit or a text box) can't be stopped, so
+    it's marked with a wavy rule (`.is-spill`, set by `PageView`'s spill
+    effect, re-run when the document's real fonts arrive) and the snackbar
+    says it once.
+  `.page__overlay` clips at 16px past the edge (`overflow-clip-margin`), so
+  handles on an object at the edge stay grabbable but spilled text can't widen
+  the scroll surface. Anything new that draws outside the page inside the
+  overlay will be clipped there — the phone's "done" tick moves above the
+  text's end when it wouldn't fit, for that reason.
+- **The page is one Tab stop.** Each page's fragments use a roving tabindex
+  (the stop is the fragment you last left, else the first). Up/Down move
+  between fragments, across pages; Left/Right do too once the caret is at the
+  start/end, or always when the fragment isn't editable (a phone outside edit
+  mode), so they never fall through to App's nudge. If the fragment you leave
+  is selected, the selection moves with you. A "Skip to tools" button is the
+  first Tab stop and lands on the active tool. Don't give a new
+  per-fragment control its own tab stop.

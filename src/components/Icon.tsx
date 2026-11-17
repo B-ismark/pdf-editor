@@ -8,6 +8,7 @@ import {
   AlignVerticalJustifyCenter,
   AlignVerticalJustifyEnd,
   AlignVerticalJustifyStart,
+  ArrowDownToLine,
   ArrowUpRight,
   BadgeCheck,
   BringToFront,
@@ -197,6 +198,8 @@ const MAP: Record<string, LucideIcon> = {
   dark_mode: Moon,
   system_mode: Monitor,
   search: Search,
+  /** Jump to a page by number (the zoom pill's page chip, "Go to page…"). */
+  go_to_page: ArrowDownToLine,
   command: Command,
   /** The properties/inspector panel. */
   sliders: SlidersHorizontal,
