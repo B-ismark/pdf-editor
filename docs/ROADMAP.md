@@ -53,9 +53,9 @@ Read only the section a package points at, not the whole folder.
   - The phone Download button has no accessible name.
   - Tab visits every fragment before it reaches the chrome.
   - Add a page indicator with go-to-page.
-- [ ] **4. Saved means saved** (S–M). (UX #6, #8, #10)
+- [x] **4. Saved means saved** (S–M). (UX #6, #8, #10) Done: guarded by `saved` and `password` specs (and `tabs` for discard); notes in `docs/notes/tabs.md`, `privacy-and-export.md`, `shell.md`. `@cantoo/pdf-lib` is in, used only to decrypt at open — package 5's swap can build on it.
   - Add a real "saved" state after download.
-  - "Discard & close" must erase the stored session.
+  - "Discard & close" must erase the stored session. (Already true from the tabs work: `tabs.spec` "a discarded document is gone from the device at once".)
   - Add a password prompt on open (pdf.js `onPassword`).
   - Ask for consent before storing signatures.
 - [ ] **5. Foundation** (L). (TECH §4, PRODUCT §3.3)

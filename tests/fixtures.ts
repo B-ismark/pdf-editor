@@ -36,6 +36,10 @@ export interface Fixtures {
   /** One page of runs where a search target sits behind narrow, wide or
    * accented glyphs — see {@link SEARCH_REDACT}. */
   searchRedact: string;
+  /** Two pages of known text that open only with {@link LOCKED_PASSWORD}. */
+  locked: string;
+  /** Opens without a password but is encrypted (owner password only). */
+  ownerLocked: string;
   /** Three pages carrying every catalog-level structure export must keep — see
    * {@link STRUCTURED}. */
   structured: string;
@@ -229,8 +233,27 @@ async function build(): Promise<Fixtures> {
     damagedTree: write("damaged-tree.pdf", damagedTreePdf()),
     sharedResources: write("shared-resources.pdf", await sharedResourcesPdf()),
     sharedImage: write("shared-image.pdf", await sharedImagePdf()),
+    locked: write("locked.pdf", await lockedPdf(LOCKED_PASSWORD)),
+    ownerLocked: write("owner-locked.pdf", await lockedPdf("")),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
+}
+
+export const LOCKED_PASSWORD = "open sesame";
+export const LOCKED_TEXT = "Locked statement";
+
+/** A small text PDF encrypted with `userPassword` (empty: owner password only,
+ * so it opens without asking but is still encrypted). Made with the same
+ * library the app decrypts with — pdf-lib 1.17 can't encrypt. */
+async function lockedPdf(userPassword: string): Promise<Uint8Array> {
+  const lib = await import("@cantoo/pdf-lib");
+  const doc = await lib.PDFDocument.create();
+  const font = await doc.embedFont(lib.StandardFonts.Helvetica);
+  for (let p = 0; p < 2; p++) {
+    doc.addPage([595, 842]).drawText(`${LOCKED_TEXT} page ${p + 1}`, { x: 60, y: 760, size: 20, font });
+  }
+  doc.encrypt({ userPassword, ownerPassword: "owner-secret" });
+  return doc.save();
 }
 
 async function textPdf(pageCount: number): Promise<Uint8Array> {

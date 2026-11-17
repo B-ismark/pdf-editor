@@ -55,12 +55,15 @@ export function SignatureDialog({ onCreate, onClose }: Props) {
   const [typed, setTyped] = useState("");
   const [uploaded, setUploaded] = useState<{ dataUrl: string; w: number; h: number } | null>(null);
   const { sigs, save, remove } = useSignatures();
+  // Off unless asked: a signature is a likeness of the user's hand, and
+  // keeping it in the browser past this visit is their call, not a default.
+  const [remember, setRemember] = useState(false);
 
   const ctx = () => canvasRef.current?.getContext("2d") ?? null;
 
-  /** Persist to the gallery, then hand off for placement. */
+  /** Keep it in the gallery if the user said so, then hand off for placement. */
   const commit = (sig: { dataUrl: string; w: number; h: number }) => {
-    save(sig);
+    if (remember) save(sig);
     onCreate(sig);
   };
 
@@ -233,6 +236,18 @@ export function SignatureDialog({ onCreate, onClose }: Props) {
             </div>
           )}
         </div>
+
+        <label className="sigremember">
+          <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
+          <span>
+            <span className="body-medium">Remember this signature on this device</span>
+            <span className="sigremember__hint body-small">
+              {remember
+                ? "Kept in Saved signatures in this browser, never uploaded. Remove it there any time."
+                : "Not kept for next time: it lives only in this document, and in the document's session copy if “Save session on this device” is on."}
+            </span>
+          </span>
+        </label>
 
         <div className="dialog__actions">
           <button className="btn" onClick={onClose}>Cancel</button>

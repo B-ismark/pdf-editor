@@ -243,3 +243,21 @@ export async function renderPageToCanvas(
   }
   return canvas;
 }
+
+/** "/Encrypt" — appears in the trailer (or xref-stream dictionary) of every
+ * encrypted file. Those dictionaries are never compressed, so a byte scan finds
+ * it; a stray match in some uncompressed content only costs a needless parse. */
+const MARK = [0x2f, 0x45, 0x6e, 0x63, 0x72, 0x79, 0x70, 0x74];
+
+/** Whether a file may be encrypted, and so must go through `unlockPdf`
+ * (`pdf/decrypt.ts`) before anything else reads it. */
+export function mayBeEncrypted(bytes: ArrayBuffer): boolean {
+  const b = new Uint8Array(bytes);
+  const last = b.length - MARK.length;
+  outer: for (let i = 0; i <= last; i++) {
+    if (b[i] !== 0x2f) continue;
+    for (let k = 1; k < MARK.length; k++) if (b[i + k] !== MARK[k]) continue outer;
+    return true;
+  }
+  return false;
+}

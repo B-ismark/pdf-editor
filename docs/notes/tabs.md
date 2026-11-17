@@ -34,3 +34,23 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   deleted by another window (BroadcastChannel `pdf-editor-autosave`) writes its
   live copy back. A session dismissed with "Not now" is deliberately kept until
   "Delete", so it is offered again alongside later work.
+- **"Unsaved" means "not in a file the user has", not "changed since open".**
+  `changeCount` counts edits since the document was opened; `unsaved` is
+  `changeCount > 0` *and* the live state isn't the one last downloaded
+  (`SavedMark`: the `DocState` object plus `baked`, compared by identity —
+  every edit makes a new state object, and undo/redo hand back the very
+  objects in the history, so undoing to what was downloaded is saved again).
+  `unsaved` is what the tab's dot and the app-bar counter ("Downloaded")
+  read. **A download can't be confirmed** — the page only clicks a link, and a
+  cancelled "Save as…" looks identical — so downloaded work is never let go
+  silently: closing it still asks, as a plain "Close" with the honest caveat
+  rather than "Discard & close", and the leave prompt stays off only while the
+  session copy holds the work (autosave on, not a password-opened document).
+  The rest of the app reads `unsaved` the same way; Organise's "you'll lose edits" and
+  autosave still read `changeCount`, deliberately — a downloaded document is
+  still work worth restoring after a crash. Every path that hands the user the
+  whole document sets the mark (Download, Download all, Compress, certificate
+  signing), taking the state *before* its first await so an edit made while
+  the file builds isn't counted as downloaded. Export-as-images and Extract
+  pages don't: neither is the document. The mark is per tab (`OpenDoc.saved`)
+  and is cleared by anything that loads new bytes into the tab.

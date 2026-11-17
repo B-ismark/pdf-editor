@@ -2131,6 +2131,26 @@ body {
   gap: 8px;
 }
 .sigsaved { display: flex; flex-direction: column; gap: 8px; }
+.pwform { display: flex; flex-direction: column; gap: 16px; }
+.pwform input[aria-invalid] { border-color: var(--error); }
+.pwform__error { margin: -8px 0 0; color: var(--error); }
+.sigremember {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 4px 0;
+  cursor: pointer;
+}
+.sigremember input {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin: 2px 0 0;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.sigremember > span { display: flex; flex-direction: column; gap: 2px; }
+.sigremember__hint { color: var(--on-surface-variant); }
 .sigsaved__row { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
 .sigsaved__item { position: relative; flex: none; }
 .sigsaved__use {

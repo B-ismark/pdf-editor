@@ -113,6 +113,35 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   image — one call per page wrote a shared image once per page. A page the
   plan uses twice can share the call: the copier clones the page leaf on every
   request (only its resources are shared), so the two slots are two objects.
+- **Encrypted files are decrypted once, at open — never later.** pdf-lib 1.17
+  can't read encryption: it saved an owner-locked file's still-encrypted
+  streams under a trailer with no `/Encrypt`, so the download was unreadable.
+  `openFile` scans for `/Encrypt` (`mayBeEncrypted`, in the loader so the scan
+  doesn't pull the decrypter into the main chunk) and runs `pdf/decrypt.ts`,
+  which lazy-loads `@cantoo/pdf-lib`, tries the empty password, and asks
+  (`PasswordDialog`) only if that fails. Everything downstream — pdf.js, font
+  extraction, the exporter, autosave — gets plain bytes and never sees a
+  password. Three traps: `doc.isEncrypted` and the trailer's `/Encrypt` both
+  read empty once the loader has decrypted, so "was it encrypted" is
+  `context.isDecrypted`; the decrypted context still holds the old encrypt
+  dictionary, object streams and xref stream, so everything unreachable from
+  Root/Info is deleted before saving; and a document that took a real password
+  is `locked` (per tab, carried through Organise/finishing rebuilds) and
+  treated as clean by autosave, so no plain copy of it is left on the device.
+  **Locked is contagious through Organise:** pulling a locked tab's pages in via
+  "From open tabs" makes the result locked too (`organizeTookLocked`), or a
+  merge would be a way round it. The reachability sweep is an explicit-stack
+  loop, not recursion — outline `/Next` chains run thousands deep and a
+  recursive walk overflowed, stranding the app on a spinner; any throw in the
+  sweep or save is `failed`, and `openFile` catches whatever escapes `unlock`.
+  Cancel during "Checking…" can't stop the decrypt, so its result is dropped.
+  Known limits, invisible today because export rewrites metadata anyway: the
+  Info dictionary and `/ID` of an xref-stream file aren't carried over, and XMP
+  in a file with `EncryptMetadata false` comes out undecodable. Organise's "Add
+  PDF" doesn't decrypt (open the file as a tab instead), and a session saved
+  before this change restores without decryption.
+  The download says "This copy has no password." Re-encrypting on export is
+  package 7.
 - **Download via `src/download.ts`.** It attaches the anchor before clicking and
   defers `revokeObjectURL`; revoking synchronously races the browser's fetch of
   the blob and cancels downloads on Firefox/Safari.
