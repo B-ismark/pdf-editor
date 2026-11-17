@@ -12,9 +12,38 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   size, so scroll anchors are exact) — only the contents are windowed. Two
   traps: the observer's `root` must be the *scrolling ancestor*, since
   `rootMargin` doesn't expand an intervening clip; and `PageView` is `memo`'d,
-  so props passed from `App` must be referentially stable (per-page overlay
-  arrays are bucketed once via `bucketByPage`, and absent `DocState` fields use
-  the shared `NO_LINKS` / `NO_FORM_VALUES` constants, never fresh literals).
+  so props passed from `App` must be referentially stable — see the next point.
+- **A page re-renders only when *its* props change. Keep it that way.** On a
+  150-page file one stray prop means 150 page renders per keystroke, and
+  `rendering.spec.ts` ("page memo") counts them. The rules:
+  - **Per-page data comes from `hooks/usePageBuckets.ts`.** `usePageArrays`
+    (overlays), `usePageRecords` (fragment `edits`) and `usePageSets` (the
+    multi-selection) keep each page's bucket object until that page's contents
+    change. A plain re-bucket hands every page a fresh array per change. Pages
+    with nothing get the shared `NO_ITEMS` / `NO_EDITS` / `NO_IDS`; absent
+    `DocState` fields use `NO_LINKS` / `NO_FORM_VALUES`. Never a fresh literal.
+  - **Selection-shaped props go only to their own page.** `selection`,
+    `editingId`, `autoFocusId` and `activeFindId` are passed as `null` to every
+    page but the one the id lives on (`pageOf`). Don't pass a global value.
+  - **`doc` in `App` is the history's verbs only, and is stable.** Callbacks that
+    write the document depend on `[doc]`. Anything that *reads* it uses
+    `docHistory.state` and lists that as a dependency, or goes stale. (`history`
+    is taken: it's the browser's, used for the phone Back guard.)
+  - **A callback handed to pages must not depend on state that's replaced on
+    every click.** `moveMulti` reads `multi` through a ref because each selection
+    change resets `multi` to a fresh `[]`.
+  - `formValues` is still one record for the document: typing in a form field
+    re-renders every page. Bucket it if that ever matters.
+- **`useRenderWindow` starts `near = false`** and seeds the true value in a
+  layout effect (one rect check before first paint). Starting at `true` mounted
+  every page's content for one frame. Elements that aren't rendered at all
+  (`display: none`) are skipped by the seed: their 0×0 rect at the origin reads
+  as on screen.
+- **Thumbnails give everything back.** A thumbnail waits `SETTLE_MS` in the
+  window before rendering, so a fling doesn't queue every page it passes.
+  Leaving the window aborts an in-flight render (`renderPageToCanvas` takes an
+  `AbortSignal` and cancels the pdf.js task), and removes and zeroes a finished
+  canvas. Their slots have a fixed aspect ratio, so this doesn't move layout.
 - **pdf-lib is lazy-loaded.** `exporter.ts`, `finishOps.ts`, and the
   `Organize`/`FinishDialog`/`SignatureDialog` components are `import()`-ed /
   `React.lazy`-ed on demand so pdf-lib stays out of the initial bundle. **Keep
