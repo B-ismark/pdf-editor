@@ -35,7 +35,16 @@ export function EditDoneButton({
     const rects = range.getClientRects();
     // Empty element (no text yet) has no caret rects — anchor to its own box.
     const r = rects.length ? rects[rects.length - 1] : el.getBoundingClientRect();
-    setPos({ left: r.right - o.left, top: r.top - o.top + r.height / 2 });
+    // The overlay clips 16px past the page edge (to match the exported page),
+    // so a tick for text ending near the edge would be cut off. There it sits
+    // above the end of the text instead, inside the page.
+    const TICK = 24;
+    const left = r.right - o.left + 8;
+    if (left + TICK > o.width + 12) {
+      setPos({ left: o.width - TICK - 4, top: Math.max(TICK / 2, r.top - o.top - TICK / 2 - 4) });
+    } else {
+      setPos({ left, top: r.top - o.top + r.height / 2 });
+    }
   };
 
   useEffect(() => {
@@ -67,7 +76,7 @@ export function EditDoneButton({
       className="edit-done"
       aria-label="Done editing"
       data-tip="Done"
-      style={{ left: `${pos.left + 8}px`, top: `${pos.top}px` }}
+      style={{ left: `${pos.left}px`, top: `${pos.top}px` }}
       onPointerDown={(e) => {
         e.preventDefault();
         e.stopPropagation();

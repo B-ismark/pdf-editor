@@ -45,7 +45,7 @@ Read only the section a package points at, not the whole folder.
 - [x] **2. Fast on long documents** (S–M). (TECH 2.3, 2.4) Done: one page re-renders per keystroke instead of all of them; the first frame and the page rail stay windowed. Guarded by `rendering.spec.ts`; notes in `docs/notes/rendering.md`.
   - The `PageView` memo is defeated on every keystroke and selection. Make the `doc` callbacks stable and pass per-page edits and selection as props.
   - `useRenderWindow` starts every element as "near". Fix the initial state and make thumbnail renders cancellable.
-- [ ] **3. Phone and canvas fixes** (M). (UX #3, #4, #7, #9 and the P1 a11y list)
+- [x] **3. Phone and canvas fixes** (M). (UX #3, #4, #7, #9 and the P1 a11y list) Done: guarded by `placement`, `edge`, `keyboard` and `phone` specs; notes in `docs/notes/canvas-tools.md` and `shell.md`.
   - Phone: the zoom pill covers the first ⋯ menu item.
   - Phone: the drawbar overflows (471px of content in 366px).
   - A signature can't be placed on text. Add a ghost preview while placing.

@@ -42,6 +42,10 @@ interface Props {
   /** When set (mobile edit mode), a "done" checkmark is shown; commits the edit. */
   onDone?: () => void;
   onChangeText: (id: string, text: string) => void;
+  /** This page's one Tab stop. The page is a single composite widget: Tab
+   * enters it here and leaves it for the next page or the chrome; the arrow
+   * keys move between fragments (see `PageView`). */
+  tabStop: boolean;
 }
 
 /**
@@ -58,6 +62,7 @@ function EditableFragmentImpl({
   face,
   backdrop,
   modified,
+  tabStop,
   selected,
   interactive,
   editing,
@@ -150,6 +155,7 @@ function EditableFragmentImpl({
         role={interactive ? "textbox" : undefined}
         aria-multiline="false"
         aria-label={interactive ? `Editable text: ${fragment.original}` : undefined}
+        tabIndex={interactive ? (tabStop ? 0 : -1) : undefined}
         style={{
           left: `${left}px`,
           top: `${top}px`,

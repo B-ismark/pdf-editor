@@ -86,3 +86,31 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   these for any new draggable/selectable overlay. Stamps have no properties
   sheet — they're edited directly on the canvas (drag/resize handle/delete
   badge).
+- **Placing an image or signature** goes through `.placelayer`, a layer
+  `PageView` mounts above every overlay while `placing` is set. It has to sit
+  on top: a signature line is almost always next to text, and a click that
+  reached the fragment selected it instead of placing (the bug this replaced).
+  The ghost and the drop both come from `pdf/placement.ts` (`placedSize`,
+  `placeAt`), centred on the pointer and clamped to the page, so the preview
+  can't promise a spot the click then misses. A pointer places on press; a
+  finger places on lift, and only if it didn't travel (a swipe still scrolls).
+  Esc cancels.
+- **The page edge is the file's edge.** The exported page cuts off anything
+  past its MediaBox, so the overlay matches it:
+  - stamps can't be dragged off (`keepStampOnPage` in App: a move stops at
+    the edge; a resize or rotation that would *grow* it off is refused, one
+    that shrinks it always goes through);
+  - text boxes stop at the edge when dragged (`TextBoxItem`);
+  - typed text that runs past (an edit or a text box) can't be stopped, so
+    it's marked with a wavy rule (`.is-spill`, set by `PageView`'s spill
+    effect) and the snackbar says it once.
+  `.page__overlay` clips at 16px past the edge (`overflow-clip-margin`), so
+  handles on an object at the edge stay grabbable but spilled text can't widen
+  the scroll surface. Anything new that draws outside the page inside the
+  overlay will be clipped there — the phone's "done" tick moves above the
+  text's end when it wouldn't fit, for that reason.
+- **The page is one Tab stop.** Each page's fragments use a roving tabindex
+  (the stop is the fragment you last left, else the first). Up/Down move
+  between fragments, across pages; Left/Right do too once the caret is at the
+  start/end. A "Skip to tools" button follows the app bar. Don't give a new
+  per-fragment control its own tab stop.

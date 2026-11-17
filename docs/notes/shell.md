@@ -138,3 +138,14 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   before first paint (no flash). `useTheme` cycles system/light/dark.
 - **Finishing ops rebuild the document**, which bakes in (and resets) current
   edits — they call `bakeCurrent()` then reopen the result. Expected.
+- **The app bar raises itself above the zoom pill while the ⋯ menu is open**
+  (`.appbar--menu`, z 56). The menu lives inside the bar's stacking context
+  (z 20), so no z-index on the menu itself can out-rank the pill (55); the
+  bar stays below scrims and sheets (60+).
+- **The page chip** (`PageJump`, in the zoom pill) reads `useActivePage`, which
+  takes the document's identity as well as its page count — two tabs with the
+  same count would otherwise keep observing the previous file's pages. The
+  field opens empty with the current page as placeholder; out of range clamps
+  to the document. "Go to page…" in the palette opens the same field.
+- **Phone drawbar** is a two-row grid under 600px (tools 4×2 | colour, width,
+  collapse), so all of it fits in 360px with 48px targets.

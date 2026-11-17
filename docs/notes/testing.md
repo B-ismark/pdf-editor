@@ -53,6 +53,18 @@ type-checking can't see, and each exists because it broke once:
   mis-mapped coordinates; and scrolling reads back no pixels;
 - `find.spec.ts` — the active match is on screen and clear of the find bar;
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
+  every ⋯ menu item takes its own tap (the pill used to cover the first); the
+  draw options fit a phone with every control on screen at a full touch
+  target; the icon-only Download button has a name;
+- `placement.spec.ts` — a signature clicked onto text is placed (not swallowed
+  by the fragment), centred on the click exactly where the ghost showed, kept
+  on the page at the edge, and Esc backs out;
+- `edge.spec.ts` — a stamp or text box dragged past the page edge stops at it;
+  an edit typed past the edge is marked, announced, doesn't widen the scroll
+  surface, and loses the mark when undone;
+- `keyboard.spec.ts` — Tab reaches the tool dock after at most one stop per
+  page, Skip to tools jumps there, arrow keys walk fragments with one roving
+  stop per page, and the zoom pill's page chip (and "Go to page…") jumps;
 - `shell.spec.ts` — the app bar fits its own controls at 360/390/430px with the
   primary action at full size and, on a pointer, sized to the bar it sits in with
   the ⋯ menu carrying a visible container, the overflow menu ends inside the
