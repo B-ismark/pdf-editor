@@ -119,7 +119,9 @@ const pageItems = <T,>(map: Map<number, T[]>, pageIndex: number): T[] =>
  * the three surfaces can't drift apart. */
 interface DocAction {
   id: string;
-  group: "organise" | "text" | "finish";
+  /** `export` makes a file and leaves the document alone: those live in the
+   * Export menu (the Download caret), not with the actions that change it. */
+  group: "organise" | "text" | "finish" | "export";
   label: string;
   icon: string;
   keywords?: string;
@@ -137,6 +139,39 @@ const DOC_GROUPS: { key: DocAction["group"]; label: string }[] = [
   { key: "text", label: "Text" },
   { key: "finish", label: "Finish" },
 ];
+/** Keyboard for a `role="menu"` list (ARIA menu pattern): arrows, Home/End
+ * walk the items, Escape closes and returns focus to the button that opened
+ * it, Tab closes and lets focus move on. Shared by the ⋯ and Export menus. */
+function menuKeys(
+  list: { current: HTMLElement | null },
+  button: { current: HTMLElement | null },
+  close: () => void,
+) {
+  return (e: ReactKeyboardEvent) => {
+    const items = Array.from(
+      list.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)') ?? [],
+    );
+    if (items.length === 0) return;
+    const idx = items.indexOf(document.activeElement as HTMLButtonElement);
+    const focusAt = (n: number) => {
+      e.preventDefault();
+      items[(n + items.length) % items.length].focus();
+    };
+    if (e.key === "ArrowDown") focusAt(idx + 1);
+    else if (e.key === "ArrowUp") focusAt(idx - 1);
+    else if (e.key === "Home") focusAt(0);
+    else if (e.key === "End") focusAt(items.length - 1);
+    else if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+      button.current?.focus();
+    } else if (e.key === "Tab") {
+      close();
+    }
+  };
+}
+
+const EXPORT_GROUP: { key: DocAction["group"]; label: string } = { key: "export", label: "Export" };
 
 /** The Inspector's two jobs, each with its own tab. */
 type PanelTab = "document" | "properties";
@@ -431,6 +466,10 @@ export const DocumentEditor = memo(function DocumentEditor({
   const [signCertOpen, setSignCertOpen] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuListRef = useRef<HTMLDivElement>(null);
+  // The Export menu, from the caret beside Download.
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportBtnRef = useRef<HTMLButtonElement>(null);
+  const exportListRef = useRef<HTMLDivElement>(null);
   const nextId = (prefix: string) => `${prefix}-${idCounter.current++}`;
 
   const vp = useViewport(fitRef.current);
@@ -1023,15 +1062,16 @@ export const DocumentEditor = memo(function DocumentEditor({
       { id: "image", group: "organise", label: "Add image", icon: "image", keywords: "picture photo stamp", opens: "dialog", run: () => imageInputRef.current?.click() },
       { id: "ocr", group: "text", label: "Recognise text (OCR)", icon: "scan_text", keywords: "scan searchable image ocr", run: runOcr },
       { id: "copytext", group: "text", label: "Copy all text", icon: "content_copy", keywords: "clipboard", run: copyAllText },
-      { id: "exporttext", group: "text", label: "Export text (.txt)", icon: "text_download", keywords: "save txt plain", run: exportTextFile },
       { id: "numbers", group: "finish", label: "Page numbers", icon: "page_numbers", keywords: "pagination folio", opens: "dialog", run: () => { setSelection(null); setFinishTab("numbers"); } },
       { id: "watermark", group: "finish", label: "Watermark", icon: "watermark", keywords: "draft stamp", opens: "dialog", run: () => { setSelection(null); setFinishTab("watermark"); } },
-      { id: "eximg", group: "finish", label: "Export as images", icon: "images", keywords: "png zip export", run: exportImages },
-      { id: "compress", group: "finish", label: "Compress PDF", icon: "compress", keywords: "shrink reduce size optimise", opens: "dialog", run: openCompress },
-      { id: "sign-cert", group: "finish", label: "Sign with certificate", icon: "certificate", keywords: "digital signature pades certificate p12 sign", opens: "dialog", run: () => { setSelection(null); setSignCertOpen(true); } },
+      { id: "compress", group: "export", label: "Compress PDF", icon: "compress", keywords: "shrink reduce size optimise", opens: "dialog", run: openCompress },
+      { id: "sign-cert", group: "export", label: "Sign with certificate", icon: "certificate", keywords: "digital signature pades certificate p12 sign", opens: "dialog", run: () => { setSelection(null); setSignCertOpen(true); } },
+      { id: "eximg", group: "export", label: "Export as images", icon: "images", keywords: "png zip export", run: exportImages },
+      { id: "exporttext", group: "export", label: "Export text (.txt)", icon: "text_download", keywords: "save txt plain", run: exportTextFile },
     ],
     [runOcr, copyAllText, exportTextFile, exportImages, openCompress],
   );
+  const exportActions = useMemo(() => docActions.filter((a) => a.group === "export"), [docActions]);
 
   const onChangeFragmentText = useCallback(
     (id: string, text: string) => {
@@ -1785,36 +1825,27 @@ export const DocumentEditor = memo(function DocumentEditor({
     setMulti(newIds);
   }, [multi, multiItems, doc, shownBySource]);
 
-  // Move focus into the overflow menu when it opens (ARIA menu pattern).
+  // Move focus into a menu when it opens (ARIA menu pattern).
   useEffect(() => {
     if (!menuOpen) return;
     menuListRef.current
       ?.querySelector<HTMLElement>('[role^="menuitem"]')
       ?.focus();
   }, [menuOpen]);
+  useEffect(() => {
+    if (!exportOpen) return;
+    exportListRef.current?.querySelector<HTMLElement>('[role^="menuitem"]:not(:disabled)')?.focus();
+  }, [exportOpen]);
+  // Only one menu at a time: opening one closes the other.
+  useEffect(() => {
+    if (menuOpen) setExportOpen(false);
+  }, [menuOpen]);
+  useEffect(() => {
+    if (exportOpen) setMenuOpen(false);
+  }, [exportOpen]);
 
-  const onMenuKeyDown = useCallback((e: React.KeyboardEvent) => {
-    const items = Array.from(
-      menuListRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]') ?? [],
-    );
-    if (items.length === 0) return;
-    const idx = items.indexOf(document.activeElement as HTMLButtonElement);
-    const focusAt = (n: number) => {
-      e.preventDefault();
-      items[(n + items.length) % items.length].focus();
-    };
-    if (e.key === "ArrowDown") focusAt(idx + 1);
-    else if (e.key === "ArrowUp") focusAt(idx - 1);
-    else if (e.key === "Home") focusAt(0);
-    else if (e.key === "End") focusAt(items.length - 1);
-    else if (e.key === "Escape") {
-      e.preventDefault();
-      setMenuOpen(false);
-      menuBtnRef.current?.focus();
-    } else if (e.key === "Tab") {
-      setMenuOpen(false);
-    }
-  }, []);
+  const onMenuKeyDown = useMemo(() => menuKeys(menuListRef, menuBtnRef, () => setMenuOpen(false)), []);
+  const onExportKeyDown = useMemo(() => menuKeys(exportListRef, exportBtnRef, () => setExportOpen(false)), []);
 
   const undo = useCallback(() => {
     doc.undo();
@@ -1859,6 +1890,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       if (mod && key === "o" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         setMenuOpen(false);
+        setExportOpen(false);
         onOpenAnother();
         return;
       }
@@ -2168,21 +2200,82 @@ export const DocumentEditor = memo(function DocumentEditor({
           <span className="appbar__changes label-medium" role="status">
             {unsaved ? `${changeCount} change${changeCount === 1 ? "" : "s"}` : changeCount > 0 ? "Downloaded" : ""}
           </span>
-          <button
-            className="btn btn--filled appbar__download"
-            onClick={download}
-            disabled={busy}
-            // On a phone the label is hidden and only the icon shows; without
-            // this the button is announced as just "button".
-            aria-label={status === "exporting" ? "Exporting…" : "Download"}
-          >
-            {status === "exporting" ? (
-              <span className="spinner spinner--sm spinner--on-primary" aria-hidden="true" />
-            ) : (
-              <Icon name="download" size={16} />
+          {/* A split button: the main half is the one-click Download it always
+              was; the caret beside it opens Export, every other way to make a
+              file from this document. None of them changes the document. On a
+              phone there's no room for a second control in this row, so the
+              Export group heads the ⋯ menu instead. */}
+          <div className={`splitbtn appbar__export${compact ? "" : " splitbtn--split"}`}>
+            <button
+              className="btn btn--filled appbar__download"
+              onClick={download}
+              disabled={busy}
+              // On a phone the label is hidden and only the icon shows; without
+              // this the button is announced as just "button".
+              aria-label={status === "exporting" ? "Exporting…" : "Download"}
+            >
+              {status === "exporting" ? (
+                <span className="spinner spinner--sm spinner--on-primary" aria-hidden="true" />
+              ) : (
+                <Icon name="download" size={16} />
+              )}
+              <span>{status === "exporting" ? "Exporting…" : "Download"}</span>
+            </button>
+            {!compact && (
+              <div className="menu">
+                <button
+                  ref={exportBtnRef}
+                  className="btn btn--filled splitbtn__caret"
+                  onClick={() => setExportOpen((v) => !v)}
+                  aria-label="Export options"
+                  aria-haspopup="menu"
+                  aria-expanded={exportOpen}
+                  data-tip="More ways to export"
+                >
+                  <Icon name="chevron_down" size={16} />
+                </button>
+                {exportOpen && (
+                  <>
+                    <div className="menu__scrim" onClick={() => setExportOpen(false)} />
+                    <div className="menu__list" role="menu" aria-label="Export" ref={exportListRef} onKeyDown={onExportKeyDown}>
+                      <button
+                        className="menu__item"
+                        role="menuitem"
+                        disabled={busy}
+                        onClick={() => { setExportOpen(false); void download(); }}
+                      >
+                        <Icon name="download" size={18} />
+                        <span className="menu__itemlabel">Download PDF</span>
+                      </button>
+                      {exportActions.map((a) => (
+                        <button
+                          key={a.id}
+                          className="menu__item"
+                          role="menuitem"
+                          disabled={busy}
+                          aria-haspopup={a.opens ? "dialog" : undefined}
+                          onClick={() => { setExportOpen(false); a.run(); }}
+                        >
+                          <Icon name={a.icon} size={18} />
+                          <span className="menu__itemlabel">{a.label}</span>
+                          {a.opens && <Icon name="opens_dialog" size={16} className="opens-mark" />}
+                        </button>
+                      ))}
+                      {tabs.length > 1 && (
+                        <>
+                          <div className="menu__divider" role="separator" />
+                          <button className="menu__item" role="menuitem" disabled={busy} onClick={() => { setExportOpen(false); onDownloadAll(); }}>
+                            <Icon name="download_all" size={18} />
+                            <span className="menu__itemlabel">Download all ({tabs.length}) as ZIP</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
-            <span>{status === "exporting" ? "Exporting…" : "Download"}</span>
-          </button>
+          </div>
           <div className="menu">
             <button ref={menuBtnRef} className="icon-btn appbar__more" onClick={() => setMenuOpen((v) => !v)} aria-label="More actions" aria-haspopup="menu" aria-expanded={menuOpen} data-tip="More actions">
               <Icon name="more_vert" size={18} />
@@ -2196,7 +2289,7 @@ export const DocumentEditor = memo(function DocumentEditor({
                       so the menu read as one 13-item wall while the panel showed
                       three short lists — the same commands, twice, filed
                       differently. */}
-                  {DOC_GROUPS.map((grp, gi) => (
+                  {(compact ? [EXPORT_GROUP, ...DOC_GROUPS] : DOC_GROUPS).map((grp, gi) => (
                     <Fragment key={grp.key}>
                       {gi > 0 && <div className="menu__divider" />}
                       {/* `role="group"` with a labelled heading, not a bare span:
@@ -2283,7 +2376,8 @@ export const DocumentEditor = memo(function DocumentEditor({
                     <button className="menu__item" onClick={() => { setMenuOpen(false); onOpenAnother(); }} role="menuitem">
                       <Icon name="note_add" size={18} /> Open another PDF
                     </button>
-                    {tabs.length > 1 && (
+                    {/* On a desktop this lives in the Export menu. */}
+                    {compact && tabs.length > 1 && (
                       <button className="menu__item" onClick={() => { setMenuOpen(false); onDownloadAll(); }} role="menuitem" disabled={busy}>
                         <Icon name="download_all" size={18} /> Download all ({tabs.length}) as ZIP
                       </button>

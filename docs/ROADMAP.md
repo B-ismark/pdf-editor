@@ -64,7 +64,7 @@ Read only the section a package points at, not the whole folder.
 - [ ] **6. New layout** (L, 2–3 sessions). (PRODUCT §3.2)
   - [x] First: split the `App.tsx` workspace shell from a per-document `DocumentEditor` (moved from package 5). Notes in `docs/notes/tabs.md`.
   - [x] A Pages sidebar replaces the rail, with live, undoable page operations (move, turn, delete). Organise becomes its grid view, opened from the sidebar. Guarded by the `sidebar` spec.
-  - Download becomes an Export split button that holds every "produce a file" action.
+  - [x] Download becomes an Export split button that holds every "produce a file" action. Guarded by `shell.spec` ("Export split button"); notes in `docs/notes/shell.md`.
   - The Inspector becomes properties only, showing document settings when nothing is selected.
   - The command palette is generated from one command registry.
 - [ ] **7. Privacy features** (M). (PRODUCT §2.1)

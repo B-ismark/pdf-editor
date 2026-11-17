@@ -39,13 +39,19 @@ test("the Inspector, the ⋯ menu and the palette mark the same actions", async 
 
   expect(menu, "the ⋯ menu marks what the Inspector marks").toEqual(panel);
 
+  // The Export menu (Download's caret) marks its own the same way.
+  await page.click('[aria-label="Export options"]');
+  const exporting = await page.locator('[role="menu"][aria-label="Export"] .menu__item').evaluateAll(marked);
+  await page.keyboard.press("Escape");
+  expect(exporting).toEqual(["Compress PDF", "Sign with certificate"]);
+
   // The palette holds every command, not just these, and only renders the rows
   // matching the query — so it is searched one label at a time rather than
   // listed. Comparing its unfiltered rows is what made the first version of
   // this test fail on an action that was marked correctly but scrolled off.
   await page.keyboard.press("Control+k");
   await expect(page.locator(".cmdk")).toBeVisible();
-  for (const label of panel) {
+  for (const label of [...panel, ...exporting]) {
     await page.fill(".cmdk input", label);
     const row = page.locator(".cmdk__item", { hasText: label }).first();
     await expect(row.locator(".opens-mark"), `palette marks "${label}"`).toHaveCount(1);
@@ -65,16 +71,19 @@ test("an action that acts immediately carries no mark", async ({ page }) => {
   await open(page, f.sample);
 
   const row = (label: string) => page.locator(".doclist__item", { hasText: label });
+  const item = (label: string) => page.locator(".menu__item", { hasText: label });
 
   // Opens a dialog.
-  await expect(row("Compress PDF").locator(".opens-mark")).toHaveCount(1);
-  await expect(row("Compress PDF")).toHaveAttribute("aria-haspopup", "dialog");
-
+  await expect(row("Page numbers").locator(".opens-mark")).toHaveCount(1);
+  await page.click('[aria-label="Export options"]');
+  await expect(item("Compress PDF").locator(".opens-mark")).toHaveCount(1);
+  await expect(item("Compress PDF")).toHaveAttribute("aria-haspopup", "dialog");
   // Runs there and then. A mark here would promise a dialog that never comes,
   // which is worse than no mark at all.
+  await expect(item("Export as images").locator(".opens-mark")).toHaveCount(0);
+  await page.keyboard.press("Escape");
   await expect(row("Copy all text").locator(".opens-mark")).toHaveCount(0);
   await expect(row("Copy all text")).not.toHaveAttribute("aria-haspopup", /.*/);
-  await expect(row("Export as images").locator(".opens-mark")).toHaveCount(0);
   expectClean(w);
 });
 

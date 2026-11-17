@@ -186,6 +186,30 @@ body {
   font-size: 0.8125rem;
 }
 
+/* Download as a split button (M3 "connected button group" shape): the two
+   halves are one pill, joined by a 2px gap, with the inner corners tightened so
+   they read as two parts of one control rather than two buttons. The main half
+   is unchanged; the caret opens the Export menu. Phones show the main half
+   only (see the phone rule). */
+.splitbtn { display: inline-flex; flex: none; align-items: center; gap: 2px; margin-left: 4px; }
+.splitbtn > .appbar__download { margin-left: 0; }
+.splitbtn > .menu { display: flex; }
+.splitbtn--split > .appbar__download {
+  border-top-right-radius: var(--radius-xs);
+  border-bottom-right-radius: var(--radius-xs);
+  padding-right: 12px;
+}
+.splitbtn__caret {
+  flex: none;
+  height: 38px;
+  width: 32px;
+  padding: 0 2px 0 0;
+  border-top-left-radius: var(--radius-xs);
+  border-bottom-left-radius: var(--radius-xs);
+}
+.splitbtn__caret[aria-expanded="true"] svg { transform: rotate(180deg); }
+.splitbtn__caret svg { transition: transform var(--dur-short2) var(--ease-standard); }
+
 /* The overflow menu holds every document action there is, and it was a bare
    glyph pressed against the window edge next to a filled pill — the loudest
    thing in the row standing beside the quietest. A container is what says

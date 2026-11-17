@@ -65,9 +65,10 @@ test("typing then undo/redo re-seeds the editable overlay", async ({ page }) => 
 
 test("export as images downloads a single ZIP for a multi-page doc", async ({ page }) => {
   await openSample(page);
+  await page.getByRole("button", { name: "Export options" }).click();
   const [download] = await Promise.all([
     page.waitForEvent("download", { timeout: 20_000 }),
-    page.getByRole("button", { name: /Export as images/ }).first().click(),
+    page.getByRole("menuitem", { name: /Export as images/ }).click(),
   ]);
   expect(download.suggestedFilename()).toMatch(/\.zip$/);
 });

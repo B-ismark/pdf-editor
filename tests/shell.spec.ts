@@ -356,3 +356,79 @@ test("user-facing counts are written as English", async ({ page }) => {
   // "1 page(s) · 9 text fragments" — a placeholder for copy, not copy.
   await expect(page.locator(".snackbar__msg")).toHaveText(/^12 pages · \d+ text fragments$/);
 });
+
+/**
+ * Download is a split button. The main half is the one-click download it always
+ * was; the caret opens Export, which holds every action that makes a file
+ * without changing the document. Those used to be scattered across "Text" and
+ * "Finish" in the ⋯ menu and the Inspector, filed beside actions that edit the
+ * document, so "make me a file" had no one place to look.
+ */
+test.describe("Export split button", () => {
+  const OUTPUTS = ["Compress PDF", "Sign with certificate", "Export as images", "Export text (.txt)"];
+
+  test("the caret opens Export, which holds every way to make a file", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    const w = watch(page);
+    const f = await fixtures();
+    await open(page, f.sample);
+    const caret = page.getByRole("button", { name: "Export options" });
+    await expect(caret).toHaveAttribute("aria-haspopup", "menu");
+    await caret.click();
+    await expect(caret).toHaveAttribute("aria-expanded", "true");
+    const menu = page.getByRole("menu", { name: "Export" });
+    const items = menu.getByRole("menuitem");
+    await expect(items).toHaveText(["Download PDF", ...OUTPUTS]);
+    // Focus goes in, the arrows walk it, Escape gives it back to the caret.
+    await expect(items.first()).toBeFocused();
+    await page.keyboard.press("ArrowDown");
+    await expect(items.nth(1)).toBeFocused();
+    await page.keyboard.press("ArrowUp");
+    await page.keyboard.press("ArrowUp");
+    await expect(items.last()).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(menu).toHaveCount(0);
+    await expect(caret).toBeFocused();
+
+    // Each output has one home: not the ⋯ menu, not the Inspector.
+    for (const label of OUTPUTS) {
+      await expect(page.locator(".doclist__item", { hasText: label })).toHaveCount(0);
+    }
+    await page.getByRole("button", { name: "More actions" }).click();
+    for (const label of OUTPUTS) {
+      await expect(page.locator(".menu__item", { hasText: label })).toHaveCount(0);
+    }
+    await page.keyboard.press("Escape");
+    await caret.click();
+
+    // "Download PDF" in the menu is the main half's action.
+    await Promise.all([page.waitForEvent("download"), menu.getByRole("menuitem", { name: "Download PDF" }).click()]);
+    await expect(menu).toHaveCount(0);
+    expectClean(w);
+  });
+
+  test("with several documents open, Download all is an export too", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    const f = await fixtures();
+    await open(page, f.sample);
+    await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', f.typeset);
+    await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+    await page.getByRole("button", { name: "More actions" }).click();
+    await expect(page.locator(".menu__item", { hasText: "Download all" })).toHaveCount(0);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Export options" }).click();
+    await expect(page.getByRole("menu", { name: "Export" }).getByRole("menuitem").last()).toHaveText("Download all (2) as ZIP");
+  });
+
+  test("on a phone there's no second control: Export heads the ⋯ menu", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    await open(page, (await fixtures()).sample);
+    await expect(page.getByRole("button", { name: "Export options" })).toHaveCount(0);
+    await page.getByRole("button", { name: "More actions" }).click();
+    const group = page.getByRole("group", { name: "Export" });
+    await expect(group.getByRole("menuitem")).toHaveText(OUTPUTS);
+    await expect(page.locator('[role="menu"] [role="group"]').first()).toHaveAccessibleName("Export");
+    await ctx.close();
+  });
+});
