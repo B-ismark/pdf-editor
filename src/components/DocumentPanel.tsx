@@ -96,9 +96,9 @@ const POSITION: Record<NumberPosition, string> = {
  * The Inspector with nothing selected: the document's own properties.
  *
  * Facts first (what this file is), then the settings that apply to every page
- * and travel with the document (page numbers, watermark), then the one export setting (an app
- * preference, shown here too because it changes what this file exports). Then
- * Commands that make a file live in Export; commands that change the
+ * and travel with the document (page numbers, watermark), then the one export
+ * setting (an app preference, shown here too because it changes what this file
+ * exports). Commands that make a file live in Export; commands that change the
  * pages live in the Pages sidebar and the ⋯ menu. This panel only *describes*,
  * and edits what it describes, which is why it can be the panel's resting state
  * without the old problem of controls vanishing the moment you click the page.
