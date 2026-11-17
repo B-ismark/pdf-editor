@@ -5,6 +5,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useImperativeHandle,
   useMemo,
   useRef,
@@ -27,12 +28,12 @@ import { PageJump } from "./components/PageJump";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
 import { findMatches, extractText, type FindMatch } from "./pdf/find";
-import { isIdentityPlan, quarterTurn, resolvePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
+import { isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
 import { boxCX, boxCY } from "./pdf/bbox";
 import { findUnsafeCovers, type CoverWarning } from "./pdf/redactionSafety";
 import { downloadBytes, downloadText } from "./download";
 import { plural } from "./plural";
-import type { PageNumberOptions, WatermarkOptions } from "./pdf/types";
+import type { PageNumberOptions, PageRef, WatermarkOptions } from "./pdf/types";
 import { useHistory } from "./hooks/useHistory";
 import { EMPTY_DOC, aModalIsOpen, toAB, type EditorHandle, type LiveDoc, type OpenDoc, type SavedMark, type Status } from "./workspace";
 import { usePageArrays, usePageRecords, usePageSets } from "./hooks/usePageBuckets";
@@ -367,6 +368,18 @@ export const DocumentEditor = memo(function DocumentEditor({
   const plan = useMemo(() => (pdf ? resolvePlan(planned, pdf.pages.length) : []), [pdf, planned]);
   const shown = useMemo(() => (pdf ? shownPages(pdf.pages, plan) : []), [pdf, plan]);
   const shownBySource = useMemo(() => new Map(shown.map((p) => [p.pageIndex, p])), [shown]);
+  /** Apply a page plan (reorder, turn, delete) as one undoable edit. Stored
+   * only when it changes something, so an arrangement put back by hand reads as
+   * the document as loaded. The sidebar and the grid both come through here. */
+  const applyPlan = (next: PageRef[]): boolean => {
+    if (!pdf || next.length === 0 || samePlan(next, plan)) return false;
+    const pages = isIdentityPlan(next, pdf.pages.length) ? undefined : next.map((p) => ({ index: p.index, rotate: quarterTurn(p.rotate) }));
+    doc.set((d) => ({ ...d, pages }));
+    return true;
+  };
+  const arrangePages = (next: PageRef[], note: string) => {
+    if (applyPlan(next)) setMessage(note);
+  };
   /** The turn the page holding object `id` is shown at (0 if not found). */
   const turnOfObject = useCallback(
     (id: string | undefined): number => {
@@ -578,7 +591,22 @@ export const DocumentEditor = memo(function DocumentEditor({
     }
     return m;
   }, [matches]);
-  const activeMatch = matches[findActive] ?? null;
+  // The active match is a hit, not a slot in the list: when the list is rebuilt
+  // under it (a page moved, turned or deleted in the sidebar) it stays on the
+  // same hit wherever that now sorts, and only falls back to the slot when the
+  // hit itself has gone.
+  const findSeen = useRef<{ matches: FindMatch[]; id: string | null }>({ matches, id: null });
+  const activeIndex = useMemo(() => {
+    const seen = findSeen.current;
+    if (seen.matches === matches || seen.id == null) return findActive;
+    const i = matches.findIndex((m) => m.id === seen.id);
+    return i >= 0 ? i : findActive;
+  }, [matches, findActive]);
+  const activeMatch = matches[activeIndex] ?? null;
+  useLayoutEffect(() => {
+    findSeen.current = { matches, id: activeMatch?.id ?? null };
+    if (activeIndex !== findActive) setFindActive(activeIndex);
+  }, [matches, activeMatch, activeIndex, findActive]);
 
   // Keep the active index in range as the result set changes.
   useEffect(() => {
@@ -598,8 +626,16 @@ export const DocumentEditor = memo(function DocumentEditor({
   // highlight element, because the overlay for a far-off page isn't mounted
   // (rendering is windowed) — but the page *frame* always is, since layout stays
   // eager, so its rect is reliable.
+  // Only when the active match becomes a different hit: the list being rebuilt
+  // around the same one — a page turned or moved in the sidebar — mustn't throw
+  // the view back to it from wherever you are working.
+  const scrolledTo = useRef<string | null>(null);
   useEffect(() => {
-    if (!activeMatch || !pdf) return;
+    if (!activeMatch || !pdf) {
+      scrolledTo.current = null;
+      return;
+    }
+    if (activeMatch.id === scrolledTo.current) return;
     const scroller = document.querySelector<HTMLElement>(".viewer__scroll");
     const pageEl = document.querySelector<HTMLElement>(
       `[data-page-index="${activeMatch.pageIndex}"]`,
@@ -615,6 +651,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     const yInPage = Math.min(corners[0].y, corners[1].y) * vp.scale;
     const offsetFromScrollTop =
       pageEl.getBoundingClientRect().top - scroller.getBoundingClientRect().top + yInPage;
+    scrolledTo.current = activeMatch.id;
     scroller.scrollTo({
       top: scroller.scrollTop + offsetFromScrollTop - scroller.clientHeight / 3,
       behavior: "smooth",
@@ -2364,6 +2401,11 @@ export const DocumentEditor = memo(function DocumentEditor({
             <PageNav
               bytes={pdf.bytes}
               pages={plan}
+              onArrange={arrangePages}
+              onGrid={() => {
+                setSelection(null);
+                setOrganizeOpen(true);
+              }}
               onClose={compact ? () => setNavOpen(false) : undefined}
             />
           </>
@@ -2491,7 +2533,7 @@ export const DocumentEditor = memo(function DocumentEditor({
             <FindBar
               query={findQuery}
               count={matches.length}
-              active={matches.length ? findActive + 1 : 0}
+              active={matches.length ? activeIndex + 1 : 0}
               onQuery={(q) => {
                 setFindQuery(q);
                 setFindActive(0);
@@ -2762,12 +2804,7 @@ export const DocumentEditor = memo(function DocumentEditor({
             onArrange={(next) => {
               setOrganizeOpen(false);
               setSelection(null);
-              const same = next.length === plan.length && next.every((p, i) => p.index === plan[i].index && quarterTurn(p.rotate) === quarterTurn(plan[i].rotate));
-              if (same) return;
-              // Stored only when it changes something, so an arrangement put
-              // back by hand reads as the document as loaded.
-              const pages = isIdentityPlan(next, pdf.pages.length) ? undefined : next.map((p) => ({ index: p.index, rotate: quarterTurn(p.rotate) }));
-              doc.set((d) => ({ ...d, pages }));
+              applyPlan(next);
             }}
             bakeMain={async (finishing) => {
               // The same guard as Download: baked in, a whiteout cover stops

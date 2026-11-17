@@ -43,6 +43,43 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
 - Page-number and watermark previews stay in user space, as the export draws
   them.
 
+## The Pages sidebar
+
+- `PageNav` (the left sidebar) edits the plan live: move (drag, Alt+↑/↓), turn
+  and delete, through the pure helpers `movePages` / `turnPages` / `dropPages`
+  in `pagePlan.ts` and the editor's `applyPlan`, the one path the grid
+  (Organise) uses too. One action, one undo step; nothing is stored when the
+  plan comes out the same (`samePlan`).
+- **Pages are picked by source index**, not position, so a move keeps the
+  selection and an undo that takes a page away just drops it from the set.
+- A drop gap counts positions *before* the move (`movePages`), which is what
+  the bar drawn between two thumbnails means.
+- `dropPages` never empties the plan; the sidebar disables Delete when every
+  page is picked.
+- Touch: a swipe scrolls; press and hold (400ms) picks a page, and moving after
+  the hold drags it. A non-passive `touchmove` stops the list scrolling under a
+  held page. The click the browser sends after a drag or a hold is swallowed by
+  page and time, not for one tick: a touch click can arrive well after
+  `pointerup`.
+- The grid view is Organise, opened from the sidebar header. Merge and Extract
+  live there: they make a different file rather than change this one.
+- **Focus and keys.** Canvas objects take pointer presses without moving focus,
+  so the sidebar blurs its own focus on any `pointerdown` outside it; otherwise
+  Delete meant for a selected box would delete a picked page. Delete/Backspace
+  act only on *picked* pages, never on a row that merely has focus. Refocusing a
+  row after an action is a counter (`refocus()`), not a flag: a flag set by a
+  key that changed nothing lingered and stole focus on a later render.
+- **A drag reads the present, not the press.** The drop uses `live.current`
+  (this render's `move` and selection). A plan change mid-drag (Ctrl+Z) calls the
+  drag off; so do Escape and letting go off the list (`gapAt` returns null).
+- Picks are pruned when an undo/redo removes their page, so they don't come back
+  pre-selected. The "N pages selected" live region is always mounted, so the
+  first count is announced.
+- **Find**: the active match is held by hit id, not list slot, so a reorder
+  keeps it on the same hit; and the view scrolls only when the active hit
+  *changes*. Before, any rebuild of the match list (a sidebar action, or just
+  text arriving for newly rendered pages) threw the view back to it.
+
 ## Export
 
 - `exportPdf` takes `pages`. It draws on every kept source page in user space,
