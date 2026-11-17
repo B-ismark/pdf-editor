@@ -39,7 +39,9 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
 
   for (let p = 0; p < doc.numPages; p++) {
     const page = await doc.getPage(p + 1);
-    const viewport = page.getViewport({ scale: 1 });
+    // Unturned: the page's own user space, which is what text transforms and
+    // every overlay object are measured in. The turn is applied at render.
+    const viewport = page.getViewport({ scale: 1, rotation: 0 });
     const content = await page.getTextContent();
     const fragments: TextFragment[] = [];
 
@@ -132,6 +134,9 @@ export function renderPage(
   pageIndex: number,
   canvas: HTMLCanvasElement,
   scale: number,
+  /** Clockwise degrees to show the page at — absolute, not added to the
+   * page's own `/Rotate` (`PageData.rotation` already includes it). */
+  rotation: number,
 ): RenderHandle {
   let cancelled = false;
   let task: { cancel: () => void } | null = null;
@@ -141,7 +146,7 @@ export function renderPage(
     if (cancelled) return;
     const page = await doc.getPage(pageIndex + 1);
     if (cancelled) return;
-    const viewport = page.getViewport({ scale });
+    const viewport = page.getViewport({ scale, rotation });
     const ctx = canvas.getContext("2d");
     if (!ctx) throw new Error("Could not get 2D canvas context");
 
@@ -208,6 +213,10 @@ export async function renderPageToCanvas(
    * turn came. Rejects with an `AbortError`, stops pdf.js mid-paint, and frees
    * the half-drawn canvas. */
   signal?: AbortSignal,
+  /** Clockwise degrees, absolute. Omitted: the page as the file shows it (its
+   * own `/Rotate`). Pass 0 for the page's unturned user space — what anything
+   * drawing overlay objects onto the raster needs. */
+  rotation?: number,
 ): Promise<HTMLCanvasElement> {
   const aborted = () => new DOMException("Render abandoned", "AbortError");
   if (signal?.aborted) throw aborted();
@@ -220,7 +229,7 @@ export async function renderPageToCanvas(
   if (signal?.aborted) throw aborted();
   const page = await doc.getPage(pageIndex + 1);
   if (signal?.aborted) throw aborted();
-  const viewport = page.getViewport({ scale });
+  const viewport = page.getViewport(rotation === undefined ? { scale } : { scale, rotation });
   const canvas = document.createElement("canvas");
   canvas.width = Math.ceil(viewport.width);
   canvas.height = Math.ceil(viewport.height);

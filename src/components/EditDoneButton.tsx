@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { Icon } from "./Icon";
+import { toLocal } from "../hooks/useDrag";
 
 /**
  * A subtle "done editing" tick that trails the end of a text element while it
@@ -28,7 +29,9 @@ export function EditDoneButton({
     if (!el) return;
     const overlay = el.closest(".page__overlay") as HTMLElement | null;
     if (!overlay) return;
-    const o = overlay.getBoundingClientRect();
+    // In the overlay's own (unturned) frame: on a turned page its screen box
+    // is rotated, so client-rect arithmetic would put the tick off to a side.
+    const W = overlay.offsetWidth;
     const range = document.createRange();
     range.selectNodeContents(el);
     range.collapse(false);
@@ -39,11 +42,19 @@ export function EditDoneButton({
     // so a tick for text ending near the edge would be cut off. There it sits
     // above the end of the text instead, inside the page.
     const TICK = 24;
-    const left = r.right - o.left + 8;
-    if (left + TICK > o.width + 12) {
-      setPos({ left: o.width - TICK - 4, top: Math.max(TICK / 2, r.top - o.top - TICK / 2 - 4) });
+    // The caret at the end of the text, mapped into the overlay frame. Client
+    // rects are axis-aligned screen boxes, so on a quarter-turned page the
+    // caret's line height is its rect's *width*; its centre survives the turn.
+    const sideways = Number(overlay.dataset.rotation ?? 0) % 180 !== 0;
+    const lineH = sideways ? r.width : r.height;
+    const end = toLocal(overlay, r.left + r.width / 2, r.top + r.height / 2);
+    // A caret rect is a line; an empty element's own box has width to clear.
+    const halfW = rects.length ? 0 : (sideways ? r.height : r.width) / 2;
+    const left = end.x + halfW + 8;
+    if (left + TICK > W + 12) {
+      setPos({ left: W - TICK - 4, top: Math.max(TICK / 2, end.y - lineH / 2 - TICK / 2 - 4) });
     } else {
-      setPos({ left, top: r.top - o.top + r.height / 2 });
+      setPos({ left, top: end.y });
     }
   };
 

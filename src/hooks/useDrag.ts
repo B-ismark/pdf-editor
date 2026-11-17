@@ -5,9 +5,50 @@ import type React from "react";
 export const dragState = { active: false };
 
 interface DragHandlers {
-  /** Called on each move with the total CSS-pixel delta from the start. */
+  /** Called on each move with the total CSS-pixel delta from the start — in
+   * the page's own (unturned) frame, unless `screen` is set. */
   onMove: (dx: number, dy: number) => void;
   onEnd?: () => void;
+  /** Report raw screen deltas even on a turned page. For gestures measured
+   * against screen positions (the rotate handle's angle about a centre it
+   * reads off the screen). */
+  screen?: boolean;
+}
+
+/** The clockwise turn of the page overlay an element sits in, 0 outside one. */
+export function turnOf(el: Element | null | undefined): number {
+  const host = el?.closest?.("[data-rotation]") as HTMLElement | null | undefined;
+  return host ? Number(host.dataset.rotation) || 0 : 0;
+}
+
+/** A screen delta expressed in the frame of an overlay turned `deg` clockwise.
+ * Exact for the quarter turns a page can have, so no rounding creeps in. */
+export function unturn(dx: number, dy: number, deg: number): { x: number; y: number } {
+  switch (((deg % 360) + 360) % 360) {
+    case 90:
+      return { x: dy, y: -dx };
+    case 180:
+      return { x: -dx, y: -dy };
+    case 270:
+      return { x: -dy, y: dx };
+    default:
+      return { x: dx, y: dy };
+  }
+}
+
+/**
+ * A client point as an offset from `el`'s top-left *in its own layout* — i.e.
+ * undoing the turn of the page overlay it sits in. A turned overlay's
+ * bounding rect is the turned box, so measuring from its left/top would mix
+ * up the axes; its centre is the one point a turn about the centre leaves
+ * alone, so measure from there and turn the offset back.
+ */
+export function toLocal(el: HTMLElement, clientX: number, clientY: number): { x: number; y: number } {
+  const r = el.getBoundingClientRect();
+  const deg = turnOf(el);
+  if (!deg) return { x: clientX - r.left, y: clientY - r.top };
+  const d = unturn(clientX - (r.left + r.width / 2), clientY - (r.top + r.height / 2), deg);
+  return { x: d.x + el.offsetWidth / 2, y: d.y + el.offsetHeight / 2 };
 }
 
 /**
@@ -18,15 +59,22 @@ interface DragHandlers {
  */
 export function startPointerDrag(
   e: React.PointerEvent,
-  { onMove, onEnd }: DragHandlers,
+  { onMove, onEnd, screen }: DragHandlers,
 ): void {
   e.preventDefault();
   e.stopPropagation();
   const startX = e.clientX;
   const startY = e.clientY;
   dragState.active = true;
+  // On a turned page every object lives in the page's unturned frame, so a
+  // drag to the right on screen is a drag along whichever of its axes now
+  // points right. Turned once here, every caller's geometry stays as it was.
+  const deg = screen ? 0 : turnOf(e.currentTarget as Element);
 
-  const move = (ev: PointerEvent) => onMove(ev.clientX - startX, ev.clientY - startY);
+  const move = (ev: PointerEvent) => {
+    const d = unturn(ev.clientX - startX, ev.clientY - startY, deg);
+    onMove(d.x, d.y);
+  };
   const up = () => {
     dragState.active = false;
     window.removeEventListener("pointermove", move);

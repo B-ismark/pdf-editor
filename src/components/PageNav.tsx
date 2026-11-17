@@ -4,14 +4,17 @@ import { Icon } from "./Icon";
 
 interface Props {
   bytes: ArrayBuffer;
-  pageCount: number;
+  /** The pages in shown order: source index and the turn the plan adds. */
+  pages: { index: number; rotate: number }[];
   /** Close affordance (mobile overlay). Omitted on the desktop rail. */
   onClose?: () => void;
 }
 
 /** Thumbnail rail for jumping around a multi-page document. */
-export function PageNav({ bytes, pageCount, onClose }: Props) {
-  const active = useActivePage(pageCount, bytes);
+export function PageNav({ bytes, pages, onClose }: Props) {
+  const pageCount = pages.length;
+  // Keyed on the list itself: a reorder keeps the count but moves every position.
+  const active = useActivePage(pageCount, pages);
 
   const jump = (index: number) => {
     scrollToPage(index);
@@ -30,9 +33,9 @@ export function PageNav({ bytes, pageCount, onClose }: Props) {
         )}
       </div>
       <div className="pagenav__list">
-        {Array.from({ length: pageCount }, (_, i) => (
+        {pages.map((p, i) => (
           <button
-            key={i}
+            key={p.index}
             className={`pagenav__item${i === active ? " pagenav__item--on" : ""}`}
             onClick={() => jump(i)}
             aria-current={i === active ? "page" : undefined}
@@ -42,7 +45,7 @@ export function PageNav({ bytes, pageCount, onClose }: Props) {
             aria-label={`Page ${i + 1} of ${pageCount}${i === active ? " (current)" : ""}`}
           >
             <span className="pagenav__thumb">
-              <Thumbnail bytes={bytes} index={i} rotation={0} />
+              <Thumbnail bytes={bytes} index={p.index} rotation={p.rotate} />
               <span className="pagenav__num label-small" aria-hidden="true">
                 {i + 1}
               </span>

@@ -188,36 +188,6 @@ function span(
 type Rect = { x: number; y: number; width: number; height: number };
 
 /**
- * Map a box from the page's unrotated space (where pdf.js reports text) into
- * the space the page is displayed — and redacted — in, which `/Rotate` turns.
- * `view` is the *displayed* size.
- */
-function toDisplay(r: Rect, rotation: number, view: { width: number; height: number }): Rect {
-  const corners = [
-    [r.x, r.y],
-    [r.x + r.width, r.y],
-    [r.x, r.y + r.height],
-    [r.x + r.width, r.y + r.height],
-  ].map(([x, y]) => {
-    switch (rotation) {
-      case 90:
-        return [y, view.height - x];
-      case 180:
-        return [view.width - x, view.height - y];
-      case 270:
-        return [view.width - y, x];
-      default:
-        return [x, y];
-    }
-  });
-  const xs = corners.map((c) => c[0]);
-  const ys = corners.map((c) => c[1]);
-  const x = Math.min(...xs);
-  const y = Math.min(...ys);
-  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
-}
-
-/**
  * The whole fragment's padded box, through its own transform — for text whose
  * glyph positions this module can't reason about: rotated or skewed by its
  * matrix (`Tm`), mirrored, or right-to-left. Covering the whole run is
@@ -247,7 +217,8 @@ function wholeFragmentBox(frag: TextFragment, size: number): Rect {
  * edits are searchable too). Each match's rectangle is measured from glyph
  * advances (see {@link span}) and padded to the ink, because "Redact all
  * matches" turns these rectangles into redactions verbatim — and returned in
- * the page's *displayed* orientation, which is where redactions live.
+ * the page's unturned user space, which is where redactions (like every
+ * overlay object) live; the overlay turns with the page.
  *
  * `fontFor` supplies the document's own face for a fragment once it has been
  * harvested (`pdf/fontInfo.ts`); without it the generic family stands in.
@@ -265,7 +236,6 @@ export function findMatches(
   const out: FindMatch[] = [];
 
   for (const page of pages) {
-    const rotation = ((page.rotation % 360) + 360) % 360;
     for (const frag of page.fragments) {
       const text = fragmentText(frag.id, frag.original, edits);
       const { hay, start, end } = foldCase(text);
@@ -304,7 +274,6 @@ export function findMatches(
         } else {
           box = wholeFragmentBox(frag, tall);
         }
-        if (rotation) box = toDisplay(box, rotation, page.viewBox);
         out.push({ id: `${frag.id}#${at}`, pageIndex: page.pageIndex, fragmentId: frag.id, ...box });
         from = at + q.length;
       }

@@ -128,6 +128,11 @@ type-checking can't see, and each exists because it broke once:
   owner-locked file with a 30,000-item outline opens (the unlocker's recursive
   walk overflowed); and Cancel during "Checking…" opens nothing. Fixtures are
   encrypted with `@cantoo/pdf-lib`;
+- `pages.spec.ts` — reorder, turn and delete in Organise keep a text box with
+  its page, take one undo, and export exactly the planned pages in order and
+  turned, with no page object left for the deleted one; on a `/Rotate` page new
+  text lands where it was placed and reads upright; on a turned page a drag
+  moves the way the pointer went;
 - `overlays.spec.ts` — a marquee'd group moves as one (one undo step) and
   survives the drag, a plain click on a member selects just that one, arrows
   nudge the group, and a buried stroke can be raised — in the overlay's paint

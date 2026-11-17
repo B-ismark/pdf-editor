@@ -4,7 +4,8 @@ import { useRenderWindow } from "../hooks/useRenderWindow";
 import { isFragmentModified, keepsSourceTypeface, resolveFragmentStyle } from "../pdf/style";
 import { usePageFonts } from "../hooks/usePageFonts";
 import { usePageColors } from "../hooks/usePageColors";
-import { offerPageCanvas } from "../pdf/fragmentColors";
+import { offerPageCanvas, readPageColors } from "../pdf/fragmentColors";
+import { shownSize, uprightFor } from "../pdf/pagePlan";
 import { isBoxAnnotation } from "../pdf/types";
 import { DEFAULT_MARK_SIZE, MARK_PATHS } from "../pdf/marks";
 import type {
@@ -25,7 +26,7 @@ import { AnnotationLayer } from "./AnnotationLayer";
 import { NoteItem } from "./NoteItem";
 import { StampItem } from "./StampItem";
 import { AnnotationFrame } from "./AnnotationFrame";
-import { dragState, startPointerDrag } from "../hooks/useDrag";
+import { dragState, startPointerDrag, toLocal } from "../hooks/useDrag";
 import { isMarkTool } from "./DrawToolbar";
 import { useGuides } from "../hooks/useSnap";
 import { annotationBox, intersects, linkBox, redactionBox, stampBox, textBoxBox, type Box } from "../pdf/bbox";
@@ -46,7 +47,10 @@ type SelKind = NonNullable<Selection>["kind"];
 
 interface Props {
   bytes: ArrayBuffer;
+  /** The page as shown: `rotation` is its total turn (see `pagePlan.ts`). */
   page: PageData;
+  /** Zero-based position in the shown order — what a page number counts. */
+  position: number;
   scale: number;
   tool: Tool;
   drawTool: AnnotationTool;
@@ -89,7 +93,7 @@ interface Props {
   onMoveAnnotation: (annot: Annotation, key: string) => void;
   onChangeStamp: (id: string, patch: Partial<Stamp>, key: string) => void;
   onDeleteStamp: (id: string) => void;
-  onAddTextBox: (pageIndex: number, x: number, y: number) => void;
+  onAddTextBox: (pageIndex: number, x: number, y: number, rotation: number) => void;
   onAddRedaction: (pageIndex: number, x: number, y: number, width: number, height: number, cover?: boolean) => void;
   onAddLink: (pageIndex: number, x: number, y: number, width: number, height: number) => void;
   onChangeFormValue: (name: string, value: string | boolean) => void;
@@ -120,7 +124,7 @@ export const PageView = memo(PageViewInner);
 
 function PageViewInner(props: Props) {
   const {
-    bytes, page, scale, tool, drawTool, drawStyle, edits, textBoxes, redactions,
+    bytes, page, position, scale, tool, drawTool, drawStyle, edits, textBoxes, redactions,
     annotations, stamps, links, formValues, pageNumbers, watermark, multiIds, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, onSelect, onEditText, onFinishEdit,
     onChangeFragmentText, onChangeTextBoxText, onChangeTextBox, onChangeRedaction, onChangeLink,
     onChangeNoteText, onMoveAnnotation, onChangeStamp, onDeleteStamp, onAddTextBox, onAddRedaction, onAddLink, onChangeFormValue, onMarquee, onMoveMulti, onAddAnnotation,
@@ -159,7 +163,7 @@ function PageViewInner(props: Props) {
     let handle: ReturnType<typeof renderPage> | null = null;
     const timer = setTimeout(() => {
       if (cancelled) return;
-      handle = renderPage(bytes, page.pageIndex, canvas, scale);
+      handle = renderPage(bytes, page.pageIndex, canvas, scale, page.rotation);
       handle.promise
         .then(() => {
           if (!cancelled) {
@@ -180,7 +184,7 @@ function PageViewInner(props: Props) {
       // this canvas without colliding with a live render() operation.
       handle?.cancel();
     };
-  }, [bytes, page.pageIndex, scale, near]);
+  }, [bytes, page.pageIndex, page.rotation, scale, near]);
 
   // The document's own fonts, readable only after the page has painted. Until
   // then fragments fall back to pdf.js's generic family — the overlay for an
@@ -204,19 +208,27 @@ function PageViewInner(props: Props) {
   );
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
-    if (anyShown && painted && canvas) offerPageCanvas(bytes, page, canvas);
+    if (!anyShown || !painted || !canvas) return;
+    // A turned page's canvas is turned, but its fragments are measured in the
+    // unturned page; read those from an unturned render of their own instead.
+    if (page.rotation === 0) offerPageCanvas(bytes, page, canvas);
+    else void readPageColors(bytes, page);
   }, [anyShown, painted, bytes, page]);
 
-  const W = page.viewBox.width * scale;
-  const Hpx = page.viewBox.height * scale;
+  // The slot is the page as shown; the overlay inside it is the page's own
+  // unturned user space, turned with the canvas. Everything on the overlay is
+  // therefore laid out exactly as on an unturned page, and turns with it.
+  const shown = shownSize(page);
+  const W = shown.width * scale;
+  const Hpx = shown.height * scale;
   const H = page.viewBox.height;
   const Wpdf = page.viewBox.width;
+  const turn = page.rotation;
+  /** The turn that makes something new read upright on this page. */
+  const upright = uprightFor(turn);
   const guides = useGuides();
 
-  const local = (cx: number, cy: number) => {
-    const r = overlayRef.current!.getBoundingClientRect();
-    return { x: cx - r.left, y: cy - r.top };
-  };
+  const local = (cx: number, cy: number) => toLocal(overlayRef.current!, cx, cy);
 
   const onDown = (ev: React.PointerEvent) => {
     if (ev.target !== overlayRef.current) return;
@@ -235,12 +247,24 @@ function PageViewInner(props: Props) {
     }
     if (tool === "text") {
       ev.preventDefault();
-      onAddTextBox(page.pageIndex, x / scale, H - y / scale - 16);
+      // The baseline goes 16pt below the click *as the page is shown*, which
+      // on a turned page is along a turned axis of the overlay.
+      const rad = (upright * Math.PI) / 180;
+      const ax = x - 16 * scale * Math.round(Math.sin(rad));
+      const ay = y + 16 * scale * Math.round(Math.cos(rad));
+      onAddTextBox(page.pageIndex, ax / scale, H - ay / scale, upright);
       return;
     }
     if (tool === "draw" && drawTool === "note") {
       ev.preventDefault();
-      onAddAnnotation(page.pageIndex, { kind: "note", x: x / scale, y: H - y / scale, text: "", color: drawStyle.color } as AnnotSpec);
+      onAddAnnotation(page.pageIndex, {
+        kind: "note",
+        x: x / scale,
+        y: H - y / scale,
+        text: "",
+        color: drawStyle.color,
+        ...(upright ? { rotation: upright } : null),
+      } as AnnotSpec);
       return;
     }
     // Gesture-based: redact, highlight, rect, line, arrow, pen
@@ -339,7 +363,7 @@ function PageViewInner(props: Props) {
       onAddLink(page.pageIndex, left / scale, H - (top + h) / scale, w / scale, h / scale);
     } else if (cur.mode === "highlight" || cur.mode === "rect") {
       if (w < MIN_DRAG || h < MIN_DRAG) return;
-      const base = { x: left / scale, y: H - (top + h) / scale, width: w / scale, height: h / scale, color };
+      const base = { ...uprightBox(left / scale, H - (top + h) / scale, w / scale, h / scale, upright), color };
       onAddAnnotation(
         page.pageIndex,
         (cur.mode === "highlight" ? { kind: "highlight", ...base } : { kind: "rect", ...base, strokeWidth: width }) as AnnotSpec,
@@ -351,12 +375,13 @@ function PageViewInner(props: Props) {
       const drag = w >= MIN_DRAG && h >= MIN_DRAG;
       const centre = toPdf(cur.x0, cur.y0);
       const box = drag
-        ? { x: left / scale, y: H - (top + h) / scale, width: w / scale, height: h / scale }
+        ? uprightBox(left / scale, H - (top + h) / scale, w / scale, h / scale, upright)
         : {
             x: centre.x - DEFAULT_MARK_SIZE / 2,
             y: centre.y - DEFAULT_MARK_SIZE / 2,
             width: DEFAULT_MARK_SIZE,
             height: DEFAULT_MARK_SIZE,
+            ...(upright ? { rotation: upright } : null),
           };
       onAddAnnotation(page.pageIndex, { kind: cur.mode, ...box, color, strokeWidth: width } as AnnotSpec);
     } else if (cur.mode === "line" || cur.mode === "arrow") {
@@ -412,6 +437,8 @@ function PageViewInner(props: Props) {
       ref={frameRef}
       className="page"
       data-page-index={page.pageIndex}
+      data-page-pos={position}
+      data-turn={turn || undefined}
       style={{ width: W, height: Hpx }}
       aria-busy={!painted && !error}
     >
@@ -423,7 +450,21 @@ function PageViewInner(props: Props) {
         <div
           ref={overlayRef}
           className="page__overlay"
-          style={{ cursor, touchAction: tool === "select" ? undefined : "none" }}
+          data-rotation={turn || undefined}
+          style={{
+            cursor,
+            touchAction: tool === "select" ? undefined : "none",
+            ...(turn
+              ? {
+                  inset: "auto",
+                  width: Wpdf * scale,
+                  height: H * scale,
+                  left: (W - Wpdf * scale) / 2,
+                  top: (Hpx - H * scale) / 2,
+                  transform: `rotate(${turn}deg)`,
+                }
+              : null),
+          }}
           onPointerDown={onDown}
           onPointerMove={onMove}
           onPointerUp={onUp}
@@ -462,7 +503,7 @@ function PageViewInner(props: Props) {
           <FinishPreview
             pageNumbers={pageNumbers}
             watermark={watermark}
-            pageNumber={(pageNumbers?.start ?? 1) + page.pageIndex}
+            pageNumber={(pageNumbers?.start ?? 1) + position}
             scale={scale}
           />
 
@@ -547,6 +588,7 @@ function PageViewInner(props: Props) {
               id={n.id}
               x={n.x}
               y={n.y}
+              rotation={n.rotation}
               text={n.text}
               color={n.color}
               scale={scale}
@@ -676,6 +718,7 @@ function PageViewInner(props: Props) {
               stamp={placing}
               pageW={Wpdf}
               pageH={H}
+              turn={turn}
               scale={scale}
               onPlace={(cx, cy) => onPlaceStamp(page.pageIndex, cx, cy)}
             />
@@ -854,12 +897,15 @@ function PlaceLayer({
   stamp,
   pageW,
   pageH,
+  turn,
   scale,
   onPlace,
 }: {
   stamp: PreparedStamp;
   pageW: number;
   pageH: number;
+  /** The page's turn: a stamp is placed upright as the page is shown. */
+  turn: number;
   scale: number;
   onPlace: (cx: number, cy: number) => void;
 }) {
@@ -869,12 +915,13 @@ function PlaceLayer({
   // Fingers currently on the layer. A second one makes it a pinch, which never
   // places — even if the finger that lifts last didn't move.
   const fingers = useRef(new Set<number>());
-  const size = placedSize(stamp, pageW, pageH);
+  const upright = uprightFor(turn);
+  const size = placedSize(stamp, pageW, pageH, upright);
   const toPdf = (ev: React.PointerEvent) => {
-    const r = ref.current!.getBoundingClientRect();
-    return { x: (ev.clientX - r.left) / scale, y: pageH - (ev.clientY - r.top) / scale };
+    const p = toLocal(ref.current!, ev.clientX, ev.clientY);
+    return { x: p.x / scale, y: pageH - p.y / scale };
   };
-  const box = at && placeAt(size, at.x, at.y, pageW, pageH);
+  const box = at && placeAt(size, at.x, at.y, pageW, pageH, upright);
   const lift = (ev: React.PointerEvent) => {
     fingers.current.delete(ev.pointerId);
     const d = down.current;
@@ -935,11 +982,28 @@ function PlaceLayer({
             top: (pageH - box.y - box.height) * scale,
             width: box.width * scale,
             height: box.height * scale,
+            ...(upright ? { transform: `rotate(${upright}deg)` } : null),
           }}
         />
       )}
     </div>
   );
+}
+
+/**
+ * A box drawn by dragging, as a box kind stores it on a turned page.
+ *
+ * It's given the page's upright turn so its contents (a tick, an image, a
+ * text) read the right way up as shown. A box turns about its centre, so on a
+ * quarter turn its own width and height swap to keep covering the area that
+ * was dragged out.
+ */
+function uprightBox(x: number, y: number, w: number, h: number, upright: number) {
+  if (!upright) return { x, y, width: w, height: h };
+  if (upright % 180 === 0) return { x, y, width: w, height: h, rotation: upright };
+  const cx = x + w / 2;
+  const cy = y + h / 2;
+  return { x: cx - h / 2, y: cy - w / 2, width: h, height: w, rotation: upright };
 }
 
 /** Whether the caret sits at the very start or end of an editable's text. */

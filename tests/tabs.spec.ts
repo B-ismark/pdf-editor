@@ -234,7 +234,7 @@ test.describe("document tabs", () => {
     await page.locator('.organize [aria-label="Rotate"]').first().click();
     await page.locator(".organize .btn--filled").click();
     await expect(page.locator(".organize")).toHaveCount(0);
-    // Its doc state is empty — the rotation is in the bytes — but it's a change.
+    // The turn is a page plan in the doc state now, not new bytes, and still a change.
     await expect(activeTab(page).locator(".doctab__dirty")).toHaveCount(1);
     await expect.poll(async () => (await storeKeys(page)).length, { timeout: 15_000 }).toBe(2);
   });

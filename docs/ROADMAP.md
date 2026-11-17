@@ -58,11 +58,11 @@ Read only the section a package points at, not the whole folder.
   - "Discard & close" must erase the stored session. (Already true from the tabs work: `tabs.spec` "a discarded document is gone from the device at once".)
   - Add a password prompt on open (pdf.js `onPassword`).
   - Ask for consent before storing signatures.
-- [ ] **5. Foundation** (L). (TECH §4, PRODUCT §3.3)
-  - Split the `App.tsx` workspace shell from a per-document `DocumentEditor`.
-  - Add a page plan to `DocState`, so page operations stop discarding edits.
+- [x] **5. Foundation** (L). (TECH §4, PRODUCT §3.3) Done: guarded by the `pages` spec (and `sign` for the engine swap); notes in `docs/notes/pages.md`. The shell split moved to package 6, where the layout work needs it.
+  - Add a page plan to `DocState`, so page operations stop discarding edits. Turned pages are edited properly: markup turns with the page, and `/Rotate` pages place overlays correctly.
   - Swap pdf-lib for `@cantoo/pdf-lib`.
 - [ ] **6. New layout** (L, 2–3 sessions). (PRODUCT §3.2)
+  - First: split the `App.tsx` workspace shell from a per-document `DocumentEditor` (moved from package 5).
   - A Pages sidebar replaces the rail, with live, undoable page operations. Organise becomes its grid view.
   - Download becomes an Export split button that holds every "produce a file" action.
   - The Inspector becomes properties only, showing document settings when nothing is selected.

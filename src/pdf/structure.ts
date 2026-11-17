@@ -1,4 +1,4 @@
-import { PDFArray, PDFDict, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFStream, PDFString, decodePDFRawStream, type PDFDocument, type PDFObject } from "@cantoo/pdf-lib";
+import { PDFArray, PDFDict, PDFHexString, PDFName, PDFNull, PDFNumber, PDFRawStream, PDFRef, PDFStream, PDFString, decodePDFRawStream, type PDFDocument, type PDFObject } from "@cantoo/pdf-lib";
 
 /**
  * Whole-document bookkeeping for exporting *in place*.
@@ -496,4 +496,131 @@ export function assertNoStructureTree(doc: PDFDocument): void {
     });
   };
   for (const [, obj] of doc.context.enumerateIndirectObjects()) check(obj, 0);
+}
+
+/** The page an outline item or link points at, through `/Dest` or a `/GoTo`. */
+function linkTarget(doc: PDFDocument, item: PDFDict): PDFRef | undefined {
+  const direct = destPage(doc, item.get(PDFName.of("Dest")));
+  if (direct) return direct;
+  const action = deref(doc, item.get(PDFName.of("A")));
+  if (action instanceof PDFDict && String(action.get(PDFName.of("S"))) === "/GoTo") {
+    return destPage(doc, action.get(PDFName.of("D")));
+  }
+  return undefined;
+}
+
+/**
+ * Cut every thread to pages the user deleted.
+ *
+ * Deleting a page is a promise that it isn't in the file — and editing in place
+ * means a removed page is still in pdf-lib's context, reachable from anything
+ * that names it. So: bookmarks that open it go (their children move up a
+ * level, so a section whose heading page was deleted keeps its subsections),
+ * links on kept pages that jump to it go, and any other reference left — a
+ * named destination, an `/OpenAction`, a widget's `/P` — is replaced with
+ * null, so `collectGarbage` can sweep the page and everything only it used.
+ *
+ * Call after the pages have been removed from the page tree.
+ */
+export function cutDeletedPages(doc: PDFDocument, gone: Set<PDFRef>): void {
+  if (gone.size === 0) return;
+  pruneOutline(doc, gone);
+
+  for (const page of doc.getPages()) {
+    const annots = deref(doc, page.node.get(PDFName.of("Annots")));
+    if (!(annots instanceof PDFArray)) continue;
+    for (let i = annots.size() - 1; i >= 0; i--) {
+      const a = deref(doc, annots.get(i));
+      if (!(a instanceof PDFDict) || String(a.get(PDFName.of("Subtype"))) !== "/Link") continue;
+      const target = linkTarget(doc, a);
+      if (target && gone.has(target)) annots.remove(i);
+    }
+  }
+
+  const seen = new Set<PDFObject>();
+  const walk = (obj: PDFObject | undefined) => {
+    if (!obj || seen.has(obj)) return;
+    seen.add(obj);
+    eachChild(obj, (child, replace) => {
+      if (child instanceof PDFRef) {
+        if (gone.has(child)) replace(PDFNull);
+      } else {
+        walk(child);
+      }
+    });
+  };
+  for (const [ref, obj] of doc.context.enumerateIndirectObjects()) {
+    if (!gone.has(ref)) walk(obj);
+  }
+}
+
+/** Remove outline items that open a deleted page, splicing their children into
+ * their place, and relink what's left. */
+function pruneOutline(doc: PDFDocument, gone: Set<PDFRef>): void {
+  const rootRef = doc.catalog.get(PDFName.of("Outlines"));
+  const root = deref(doc, rootRef);
+  if (!(root instanceof PDFDict)) return;
+  let hit = false;
+  forEachOutlineItem(doc, (item) => {
+    const t = linkTarget(doc, item);
+    if (t && gone.has(t)) hit = true;
+  });
+  if (!hit) return;
+
+  interface Kept { ref: PDFRef; dict: PDFDict; visible: number; open: boolean }
+  const seen = new Set<PDFDict>();
+  let budget = 100_000;
+
+  /** The kept items of one level, each already relinked to its own kept kids. */
+  const level = (parent: PDFDict, depth: number): Kept[] => {
+    const out: Kept[] = [];
+    let cur = parent.get(PDFName.of("First"));
+    while (cur instanceof PDFRef && budget-- > 0) {
+      const item = deref(doc, cur);
+      if (!(item instanceof PDFDict) || seen.has(item)) break;
+      seen.add(item);
+      const next = item.get(PDFName.of("Next"));
+      const kids = depth < 64 ? level(item, depth + 1) : [];
+      const target = linkTarget(doc, item);
+      if (target && gone.has(target)) {
+        out.push(...kids);
+      } else {
+        const count = item.get(PDFName.of("Count"));
+        const open = !(count instanceof PDFNumber && count.asNumber() < 0);
+        const visible = link(cur, item, kids);
+        if (kids.length) item.set(PDFName.of("Count"), PDFNumber.of(open ? visible : -visible));
+        else item.delete(PDFName.of("Count"));
+        out.push({ ref: cur, dict: item, visible, open });
+      }
+      cur = next;
+    }
+    return out;
+  };
+
+  /** Point `parent` at `kids` and the kids at each other; returns how many
+   * items show under `parent` when it is open. */
+  const link = (parentRef: PDFObject | undefined, parent: PDFDict, kids: Kept[]): number => {
+    if (kids.length === 0) {
+      parent.delete(PDFName.of("First"));
+      parent.delete(PDFName.of("Last"));
+      return 0;
+    }
+    parent.set(PDFName.of("First"), kids[0].ref);
+    parent.set(PDFName.of("Last"), kids[kids.length - 1].ref);
+    let visible = 0;
+    kids.forEach((k, i) => {
+      if (parentRef instanceof PDFRef) k.dict.set(PDFName.of("Parent"), parentRef);
+      if (i > 0) k.dict.set(PDFName.of("Prev"), kids[i - 1].ref);
+      else k.dict.delete(PDFName.of("Prev"));
+      if (i < kids.length - 1) k.dict.set(PDFName.of("Next"), kids[i + 1].ref);
+      else k.dict.delete(PDFName.of("Next"));
+      visible += 1 + (k.open ? k.visible : 0);
+    });
+    return visible;
+  };
+
+  const top = level(root, 0);
+  const visible = link(rootRef, root, top);
+  if (top.length) root.set(PDFName.of("Count"), PDFNumber.of(visible));
+  else root.delete(PDFName.of("Count"));
 }

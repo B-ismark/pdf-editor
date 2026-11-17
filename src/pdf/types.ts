@@ -80,12 +80,15 @@ export interface FormField {
 /** Everything needed to render and edit one page. */
 export interface PageData {
   pageIndex: number;
-  /** Unscaled page dimensions in PDF units (== points). */
+  /** Unscaled page dimensions in PDF units (== points), *unrotated*: the
+   * page's own user space, the one fragment transforms and every overlay
+   * object are stored in. The page as shown is this turned by `rotation`. */
   viewBox: { width: number; height: number };
-  /** `/Rotate`, in degrees (0/90/180/270). `viewBox` is the *rotated* viewport,
-   * but a fragment's `transform` is unrotated text space — nothing reconciles
-   * the two, which is why rotated text isn't repositioned in the overlay and
-   * why `fragmentColors.ts` refuses to sample these pages at all. */
+  /** Clockwise turn the page is shown at, in degrees (0/90/180/270). For a
+   * page straight from the loader this is the file's own `/Rotate`; for a page
+   * in the shown order (`pagePlan.ts`) it also includes the turn the page plan
+   * adds. The overlay is laid out unrotated and turned with the canvas, so
+   * markup stays in user space and turns with the page. */
   rotation: number;
   fragments: TextFragment[];
   /** Interactive form fields on this page (empty if none). */
@@ -123,6 +126,9 @@ export interface TextBox {
   y: number;
   text: string;
   style: TextStyle;
+  /** Clockwise screen degrees about the baseline anchor (`x`, `y`). Set when
+   * a box is added on a turned page, so it reads upright as shown. */
+  rotation?: number;
 }
 
 /** A redaction region. On export the whole page is rasterised and this area
@@ -181,7 +187,9 @@ export type Annotation =
   | (AnnotBase & { kind: "check" | "cross"; x: number; y: number; width: number; height: number; color: string; strokeWidth: number; rotation?: number })
   | (AnnotBase & { kind: "line" | "arrow"; x1: number; y1: number; x2: number; y2: number; color: string; strokeWidth: number })
   | (AnnotBase & { kind: "pen"; pts: { x: number; y: number }[]; color: string; strokeWidth: number })
-  | (AnnotBase & { kind: "note"; x: number; y: number; text: string; color: string });
+  // `rotation`: clockwise screen degrees about the top-left anchor (`x`, `y`),
+  // given to a note added on a turned page so it reads upright as shown.
+  | (AnnotBase & { kind: "note"; x: number; y: number; text: string; color: string; rotation?: number });
 
 /** The annotation kinds that are an axis-aligned (optionally rotated) box.
  * Grouped because four separate call sites — the selection frame, the bounding
@@ -263,8 +271,24 @@ export interface WatermarkOptions {
   angle: number;
 }
 
+/**
+ * One page of the document as it will be shown and exported.
+ *
+ * `index` is the *source* page (the loaded file's page index — the same index
+ * every overlay object's `pageIndex` refers to), so reordering or deleting is a
+ * change to the plan alone and never touches the markup on a page. `rotate` is
+ * the clockwise turn added on top of the page's own `/Rotate`.
+ */
+export interface PageRef {
+  index: number;
+  rotate: number;
+}
+
 /** The full editable document state tracked by the undo/redo history. */
 export interface DocState {
+  /** Page order, deletions and added turns. Absent means every source page,
+   * in file order, unturned — which is how older sessions restore. */
+  pages?: PageRef[];
   edits: Edits;
   textBoxes: TextBox[];
   redactions: Redaction[];

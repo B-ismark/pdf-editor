@@ -1,4 +1,4 @@
-import { LineCapStyle, PDFCheckBox, PDFDocument, PDFRef, PDFString, PDFTextField, StandardFonts, degrees, rgb, type PDFFont, type PDFPage } from "@cantoo/pdf-lib";
+import { LineCapStyle, PDFCheckBox, PDFDocument, PDFPage, PDFRef, PDFString, PDFTextField, StandardFonts, degrees, rgb, type PDFFont } from "@cantoo/pdf-lib";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
 import {
@@ -10,8 +10,10 @@ import {
   pruneFieldsOnPages,
   retargetPageRefs,
   retitleOutlinesInto,
+  cutDeletedPages,
 } from "./structure";
-import { alignPageTree } from "./pageTree";
+import { alignPageTree, setPageList } from "./pageTree";
+import { quarterTurn, resolvePlan } from "./pagePlan";
 import { safeLinkUrl } from "./url";
 import { markPolylines, markStroke } from "./marks";
 import { createSourceFontEmbedder, type SourceFontEmbedder } from "./fontEmbed";
@@ -43,6 +45,7 @@ import type {
   LinkAnnot,
   LoadedPdf,
   PageNumberOptions,
+  PageRef,
   Redaction,
   Stamp,
   TextBox,
@@ -95,6 +98,9 @@ export interface ExportInput {
   /** Encode redacted pages losslessly (PNG only), never as JPEG. Costs several
    *  times the file size; for users who need the raster bit-exact. */
   losslessRaster?: boolean;
+  /** The page plan: which source pages go out, in what order, turned how far
+   *  beyond their own `/Rotate`. Absent means every page, as loaded. */
+  pages?: PageRef[];
 }
 
 /** Draw a page number onto a finished page (vector or rasterised alike). */
@@ -317,17 +323,27 @@ function drawVectorAnnots(page: PDFPage, annots: Annotation[], helv: PDFFont): v
       const text = sanitize(a.text || " ", helv);
       const w = helv.widthOfTextAtSize(text, NOTE_SIZE) + NOTE_PAD * 2;
       const h = NOTE_SIZE + NOTE_PAD * 2;
+      // Turned about its top-left anchor, as the overlay is. pdf-lib turns each
+      // primitive about its own origin, so place each origin by turning its
+      // offset from the anchor.
+      const rot = a.rotation ?? 0;
+      const th = (-rot * Math.PI) / 180;
+      const at = (dx: number, dy: number) => ({
+        x: a.x + dx * Math.cos(th) - dy * Math.sin(th),
+        y: a.y + dx * Math.sin(th) + dy * Math.cos(th),
+      });
+      const turn = rot ? { rotate: degrees(-rot) } : {};
       page.drawRectangle({
-        x: a.x,
-        y: a.y - h,
+        ...at(0, -h),
         width: w,
         height: h,
         color,
         opacity: 0.92,
         borderColor: rgb(0, 0, 0),
         borderWidth: 0.5,
+        ...turn,
       });
-      page.drawText(text, { x: a.x + NOTE_PAD, y: a.y - h + NOTE_PAD + 1, size: NOTE_SIZE, font: helv, color: rgb(0, 0, 0) });
+      page.drawText(text, { ...at(NOTE_PAD, -h + NOTE_PAD + 1), size: NOTE_SIZE, font: helv, color: rgb(0, 0, 0), ...turn });
     }
   }
 }
@@ -409,12 +425,16 @@ function drawRasterAnnots(
       const tw = ctx.measureText(a.text || " ").width;
       const pad = NOTE_PAD * S;
       ctx.save();
+      ctx.translate(X(a.x), Y(a.y));
+      if (a.rotation) ctx.rotate((a.rotation * Math.PI) / 180);
+      ctx.save();
       ctx.globalAlpha = 0.92;
       ctx.fillStyle = a.color;
-      ctx.fillRect(X(a.x), Y(a.y), tw + pad * 2, size + pad * 2);
+      ctx.fillRect(0, 0, tw + pad * 2, size + pad * 2);
       ctx.restore();
       ctx.fillStyle = "#000";
-      ctx.fillText(a.text, X(a.x) + pad, Y(a.y) + pad);
+      ctx.fillText(a.text, pad, pad);
+      ctx.restore();
     }
     if (rotate) ctx.restore();
   }
@@ -455,6 +475,11 @@ export async function exportPdf(
   onProgress?: (page: number, total: number) => void,
 ): Promise<Uint8Array> {
   const { edits, textBoxes, redactions, annotations, stamps, links = [], formValues = {}, pageNumbers, watermark, losslessRaster = false } = input;
+  // Which source pages ship, where, and turned how far. Overlay objects keep
+  // their *source* page index, so a page's markup is drawn on it wherever it
+  // goes; pages left out of the plan were deleted and must not survive.
+  const plan = resolvePlan(input.pages, loaded.pages.length);
+  const planned = new Map(plan.map((p, pos) => [p.index, { pos, rotate: p.rotate }] as const));
   // updateMetadata: false stops pdf-lib stamping its own Producer / Creator /
   // CreationDate / ModDate on load; sanitizeDocument() then clears anything
   // else before save (see below).
@@ -464,6 +489,9 @@ export async function exportPdf(
   // would replace the wrong page.
   alignPageTree(out, loaded.pages.map((p) => p.ref));
   fillAndFlattenForm(out, formValues);
+  // The finished page for each source page, by source index: the original, or
+  // the raster that replaces it. Put in plan order once, at the end.
+  const finished: PDFPage[] = out.getPages();
   // Pages replaced by a raster: old page ref → its replacement. Everything that
   // pointed at the old page is moved over, and nothing of the old one survives.
   const replaced = new Map<PDFRef, PDFRef>();
@@ -497,7 +525,9 @@ export async function exportPdf(
 
   let done = 0;
   for (const pageData of loaded.pages) {
-    onProgress?.(++done, loaded.pages.length);
+    const slot = planned.get(pageData.pageIndex);
+    if (!slot) continue; // deleted: removed (and scrubbed) below
+    onProgress?.(++done, plan.length);
     // Let the browser paint progress / stay responsive between pages (the
     // per-page render + encode is the heavy, main-thread part).
     await yieldToUI();
@@ -527,27 +557,26 @@ export async function exportPdf(
       pageEdited && !needsRaster ? await readPageColors(loaded.bytes, pageData) : NO_COLORS;
 
     // Both paths produce a finished PDFPage; page numbers, watermark, and link
-    // annotations are then applied uniformly on top. `done` is the 1-based
-    // output position, so the page-number label follows the (possibly
-    // reordered) export order rather than the original page index.
+    // annotations are then applied uniformly on top. The page number is the
+    // page's position in the plan, not its source index — after a reorder the
+    // two differ, and the reader counts positions.
     const applyPageLayers = (page: PDFPage) => {
-      if (pageNumbers) drawPageNumber(page, helv, String(pageNumbers.start + done - 1), pageNumbers);
+      if (pageNumbers) drawPageNumber(page, helv, String(pageNumbers.start + slot.pos), pageNumbers);
       if (watermark && wmFont) drawWatermark(page, wmFont, watermark);
       addLinkAnnots(out, page, pageLinks);
     };
 
     if (needsRaster) {
-      const oldRef = out.getPage(i).ref;
-      const rasterPage = await rasterisePage(out, i, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, pageEdited, await getJpegEncoder());
-      // The raster went in at `i`, pushing the original to `i + 1`.
-      out.removePage(i + 1);
+      const oldRef = finished[i].ref;
+      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, pageEdited, await getJpegEncoder());
+      finished[i] = rasterPage;
       replaced.set(oldRef, rasterPage.ref);
       applyPageLayers(rasterPage);
       continue;
     }
 
     // Vector path: draw edits + text boxes on top of the original page.
-    const page = out.getPage(i);
+    const page = finished[i];
 
     for (const fragment of pageData.fragments) {
       const edit = edits[fragment.id];
@@ -596,13 +625,19 @@ export async function exportPdf(
       // Multi-line: the first line's baseline is at box.y; each subsequent line
       // steps down by the shared line height (matches the on-screen overlay).
       const lineStep = box.style.size * TEXTBOX_LINE_HEIGHT;
+      // A turned box pivots about its first baseline's start (as the overlay
+      // does); each later line steps "down" along the box's own turned axis.
+      const rot = box.rotation ?? 0;
+      const th = (-rot * Math.PI) / 180;
       box.text.split("\n").forEach((line, i) => {
+        const d = i * lineStep;
         page.drawText(sanitize(line, font), {
-          x: box.x,
-          y: box.y - i * lineStep,
+          x: box.x + d * Math.sin(th),
+          y: box.y - d * Math.cos(th),
           size: box.style.size,
           font,
           color: rgb(c.r, c.g, c.b),
+          ...(rot ? { rotate: degrees(-rot) } : {}),
         });
       });
     }
@@ -630,17 +665,32 @@ export async function exportPdf(
 
   await embedder?.destroy();
 
+  // Arrange the pages as planned: each turned by its own `/Rotate` plus the
+  // plan's turn, in plan order. Deleted pages, and originals a raster
+  // replaced, drop out of the page list here and are cut loose and swept below.
+  const gone = new Set<PDFRef>();
+  loaded.pages.forEach((pd, i) => {
+    const slot = planned.get(pd.pageIndex);
+    if (!slot) gone.add(finished[i].ref);
+    else finished[i].setRotation(degrees(quarterTurn(pd.rotation + slot.rotate)));
+  });
+  setPageList(out, plan.map((p) => finished[p.index]));
+
   // Order matters. Fields and annotations are found by the *old* page refs, so
   // they go before the refs move; bookmarks are matched to the *new* refs, so
   // after. The sanitiser unhooks things from the catalog, so it goes before the
   // sweep; and resource narrowing and the sweep need pdf-lib's lazily-embedded
   // fonts and images to exist as objects, so they go after `flush()`.
-  const anyReplaced = replaced.size > 0;
+  // Deleted pages are treated like replaced ones with no replacement: their
+  // fields and comment threads are cut, every reference to them is cut, and
+  // the structure tree (which repeats their text) goes.
+  const anyReplaced = replaced.size > 0 || gone.size > 0;
   if (anyReplaced) {
-    const oldPages = new Set(replaced.keys());
+    const oldPages = new Set([...replaced.keys(), ...gone]);
     pruneFieldsOnPages(out, oldPages);
     detachAnnotsOfPages(out, oldPages);
     retargetPageRefs(out, replaced);
+    cutDeletedPages(out, gone);
     retitleOutlinesInto(out, new Set(replaced.values()));
     dropStructureTree(out);
   }
@@ -662,8 +712,6 @@ export async function exportPdf(
  * then add it to the output document as a full-page image. */
 async function rasterisePage(
   out: PDFDocument,
-  /** Position in `out` to insert the raster page at. */
-  at: number,
   loaded: LoadedPdf,
   pageIndex: number,
   edits: Edits,
@@ -680,7 +728,9 @@ async function rasterisePage(
 ): Promise<PDFPage> {
   const pageData = loaded.pages[pageIndex];
   const H = pageData.viewBox.height;
-  const canvas = await renderPageToCanvas(loaded.bytes, pageIndex, REDACT_SCALE);
+  // In user space (no turn): every overlay object is stored there, and the
+  // page's turn is put back on the replacement as `/Rotate` below.
+  const canvas = await renderPageToCanvas(loaded.bytes, pageIndex, REDACT_SCALE, undefined, 0);
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not get 2D canvas context");
   const S = REDACT_SCALE;
@@ -694,7 +744,7 @@ async function rasterisePage(
   // sample, and it costs a full-page `getImageData` plus the per-fragment
   // tallies (63ms median, 146ms worst on a 4.6M px canvas) — which on a
   // redacted-but-unedited document is the whole bill for data no one reads.
-  if (pageEdited) offerPageCanvas(loaded.bytes, pageData, canvas);
+  if (pageEdited) offerPageCanvas(loaded.bytes, pageData, canvas, 0);
   const pageColors = pageEdited ? peekPageColors(loaded.bytes, pageIndex) : NO_COLORS;
 
   const drawText = (
@@ -703,6 +753,7 @@ async function rasterisePage(
     yBaseline: number,
     style: TextStyle,
     face?: FragmentFont | null,
+    rotation = 0,
   ) => {
     if (!text) return;
     ctx.font = cssFont(style, style.size * S, face);
@@ -712,9 +763,14 @@ async function rasterisePage(
     // Single-line callers (edited fragments) have no "\n", so this is a no-op
     // for them.
     const lineStep = style.size * TEXTBOX_LINE_HEIGHT;
+    // Turned text boxes pivot about the first baseline's start, as on screen.
+    ctx.save();
+    ctx.translate(x * S, (H - yBaseline) * S);
+    if (rotation) ctx.rotate((rotation * Math.PI) / 180);
     text.split("\n").forEach((line, i) => {
-      ctx.fillText(line, x * S, (H - (yBaseline - i * lineStep)) * S);
+      ctx.fillText(line, 0, i * lineStep * S);
     });
+    ctx.restore();
   };
 
   // Edited fragments: cover original glyphs in white, then redraw.
@@ -753,7 +809,7 @@ async function rasterisePage(
   }
 
   // New text boxes.
-  for (const box of boxes) drawText(box.text, box.x, box.y, box.style);
+  for (const box of boxes) drawText(box.text, box.x, box.y, box.style, null, box.rotation ?? 0);
 
   // Annotations sit above content but below redactions.
   drawRasterAnnots(ctx, annots, H, S);
@@ -788,10 +844,11 @@ async function rasterisePage(
   const image = await embedPageRaster(out, canvas, encodeJpeg);
   const wPt = pageData.viewBox.width;
   const hPt = pageData.viewBox.height;
-  const page = out.insertPage(at, [wPt, hPt]);
-  // A page inserted into an existing tree inherits /Rotate, /CropBox and
-  // /Resources from its parent node. The raster is already the page as seen,
-  // rotation included, so pin what it would otherwise inherit.
+  // Not in the page tree yet: the exporter swaps it in for the original when
+  // it sets the final page list. Pin what a page could otherwise inherit from
+  // a parent node; the raster is the page unturned, and its turn is set after.
+  const page = PDFPage.create(out);
+  page.setSize(wPt, hPt);
   page.setRotation(degrees(0));
   page.setCropBox(0, 0, wPt, hPt);
   page.drawImage(image, { x: 0, y: 0, width: wPt, height: hPt });

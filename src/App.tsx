@@ -12,6 +12,7 @@ import { PageJump } from "./components/PageJump";
 import { CommandPalette, type Command } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
 import { findMatches, extractText, type FindMatch } from "./pdf/find";
+import { isIdentityPlan, quarterTurn, resolvePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown } from "./pdf/pagePlan";
 import { boxCX, boxCY } from "./pdf/bbox";
 import { findUnsafeCovers, type CoverWarning } from "./pdf/redactionSafety";
 import { useAutosave } from "./hooks/useAutosave";
@@ -367,6 +368,24 @@ export function App() {
   const formValues = docHistory.state.formValues ?? NO_FORM_VALUES;
   const pageNumbers = docHistory.state.pageNumbers ?? null;
   const watermark = docHistory.state.watermark ?? null;
+  // The pages as shown: plan order, each with its total turn. Every view that
+  // walks pages in order (the viewer, the rail, find, page numbers, export)
+  // walks this; anything that looks a page *up* by an object's `pageIndex`
+  // still uses `pdf.pages`, since overlay objects keep their source index.
+  const planned = docHistory.state.pages;
+  const plan = useMemo(() => (pdf ? resolvePlan(planned, pdf.pages.length) : []), [pdf, planned]);
+  const shown = useMemo(() => (pdf ? shownPages(pdf.pages, plan) : []), [pdf, plan]);
+  const shownBySource = useMemo(() => new Map(shown.map((p) => [p.pageIndex, p])), [shown]);
+  /** The turn the page holding object `id` is shown at (0 if not found). */
+  const turnOfObject = useCallback(
+    (id: string | undefined): number => {
+      if (!id) return 0;
+      const s = docHistory.state;
+      const owner = [...s.textBoxes, ...s.redactions, ...s.annotations, ...s.stamps, ...(s.links ?? [])].find((o) => o.id === id);
+      return owner ? (shownBySource.get(owner.pageIndex)?.rotation ?? 0) : 0;
+    },
+    [docHistory.state, shownBySource],
+  );
   // Remembered across sessions so the user's choices aren't reset each time.
   const [drawTool, setDrawTool] = usePersistentState("pref.drawTool", "highlight") as [
     AnnotationTool,
@@ -550,7 +569,7 @@ export function App() {
   );
   const changeCount =
     editedFragmentCount + textBoxes.length + redactions.length + annotations.length + stamps.length + links.length + Object.keys(formValues).length +
-    (pageNumbers ? 1 : 0) + (watermark ? 1 : 0) + baked;
+    (pageNumbers ? 1 : 0) + (watermark ? 1 : 0) + (planned ? 1 : 0) + baked;
   const isSaved = savedMark != null && savedMark.doc === docHistory.state && savedMark.baked === baked;
   /** Work that only exists in this window: what the leave/close prompts guard. */
   const unsaved = changeCount > 0 && !isSaved;
@@ -583,8 +602,8 @@ export function App() {
     [pdf, fontsVersion],
   );
   const matches: FindMatch[] = useMemo(
-    () => (pdf && findOpen && findQuery ? findMatches(pdf.pages, edits, findQuery, fontFor) : []),
-    [pdf, findOpen, findQuery, edits, fontFor],
+    () => (pdf && findOpen && findQuery ? findMatches(shown, edits, findQuery, fontFor) : []),
+    [pdf, shown, findOpen, findQuery, edits, fontFor],
   );
   const matchesByPage = useMemo(() => {
     const m = new Map<number, FindMatch[]>();
@@ -621,16 +640,22 @@ export function App() {
     const pageEl = document.querySelector<HTMLElement>(
       `[data-page-index="${activeMatch.pageIndex}"]`,
     );
-    const page = pdf.pages[activeMatch.pageIndex];
+    const page = shownBySource.get(activeMatch.pageIndex);
     if (!scroller || !pageEl || !page) return;
-    const yInPage = (page.viewBox.height - (activeMatch.y + activeMatch.height)) * vp.scale;
+    // Where the match shows on the (possibly turned) page: the nearest of its
+    // corners to the top, as the page is displayed.
+    const corners = [
+      userToShown(activeMatch.x, activeMatch.y, page),
+      userToShown(activeMatch.x + activeMatch.width, activeMatch.y + activeMatch.height, page),
+    ];
+    const yInPage = Math.min(corners[0].y, corners[1].y) * vp.scale;
     const offsetFromScrollTop =
       pageEl.getBoundingClientRect().top - scroller.getBoundingClientRect().top + yInPage;
     scroller.scrollTo({
       top: scroller.scrollTop + offsetFromScrollTop - scroller.clientHeight / 3,
       behavior: "smooth",
     });
-  }, [activeMatch, pdf, vp.scale]);
+  }, [activeMatch, pdf, shownBySource, vp.scale]);
 
   const nextMatch = useCallback(() => {
     setFindActive((i) => (matches.length ? (i + 1) % matches.length : 0));
@@ -680,23 +705,23 @@ export function App() {
     if (!pdf) return;
     setMenuOpen(false);
     try {
-      await navigator.clipboard.writeText(extractText(pdf.pages, edits));
+      await navigator.clipboard.writeText(extractText(shown, edits));
       setStatus("ready");
       setMessage("Document text copied to clipboard.");
     } catch {
       setStatus("error");
       setMessage("Couldn't copy — your browser blocked clipboard access.");
     }
-  }, [pdf, edits]);
+  }, [pdf, shown, edits]);
 
   /** Download all document text as a .txt file. */
   const exportTextFile = useCallback(() => {
     if (!pdf) return;
     setMenuOpen(false);
-    downloadText(extractText(pdf.pages, edits), fileName.replace(/\.pdf$/i, "") + ".txt");
+    downloadText(extractText(shown, edits), fileName.replace(/\.pdf$/i, "") + ".txt");
     setStatus("ready");
     setMessage("Text exported.");
-  }, [pdf, edits, fileName]);
+  }, [pdf, shown, edits, fileName]);
 
   // ---- Autosave to IndexedDB (debounced) + one-time restore ----
   // Every tab is saved, not just the one in front: a parked tab's state comes
@@ -802,7 +827,12 @@ export function App() {
       setLocked(t.locked);
       if (t.history) doc.restore(t.history);
       else doc.reset(EMPTY_DOC);
-      vp.setPageWidth(Math.max(...t.pdf.pages.map((p) => p.viewBox.width), 1));
+      vp.setPageWidth(
+        Math.max(
+          ...shownPages(t.pdf.pages, t.history?.entries[t.history.index]?.pages).map((p) => shownSize(p).width),
+          1,
+        ),
+      );
       // A document seen for the first time starts at its first page, not at
       // whatever scroll position the one before it was left at.
       vp.restoreView(t.view ?? { zoom: 1, ry: 0 });
@@ -1118,11 +1148,11 @@ export function App() {
   /** Export the current edits to fresh bytes so finishing ops build on them. */
   const bakeCurrent = useCallback(async (): Promise<ArrayBuffer> => {
     const { exportPdf } = await import("./pdf/exporter");
-    const out = await exportPdf(pdf!, { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster });
+    const out = await exportPdf(pdf!, { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, pages: planned });
     return toAB(out);
     // `losslessRaster` is read for the export, so it has to be a dependency —
     // otherwise this captures whatever it was when `pdf` last changed.
-  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster]);
+  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, planned]);
 
   // Page numbers and watermark are document-wide layers stored in DocState and
   // drawn at export time (see exporter.ts). Setting them is a normal, undoable
@@ -1191,7 +1221,9 @@ export function App() {
         // streams and stripped metadata, keeping selectable text — that IS the
         // lossless result, and the size to beat for the rasterising presets.
         const baked = await bakeCurrent();
-        const sizes = pdf.pages.map((p) => ({ width: p.viewBox.width, height: p.viewBox.height }));
+        // The baked file is in shown order with the turns applied, and its
+        // pages are re-imaged as shown.
+        const sizes = shown.map(shownSize);
         compressBaked.current = { buf: baked, sizes, before: baked.byteLength };
       }
       const { buf, sizes, before } = compressBaked.current;
@@ -1341,7 +1373,7 @@ export function App() {
     try {
       const baked = await bakeCurrent();
       const { renderImages } = await import("./pdf/finishOps");
-      const urls = await renderImages(baked, pdf.pages.length, 2, (p, t) =>
+      const urls = await renderImages(baked, shown.length, 2, (p, t) =>
         setMessage(`Rendering images… page ${p}/${t}`),
       );
       const base = fileName.replace(/\.pdf$/i, "");
@@ -1438,9 +1470,17 @@ export function App() {
   );
 
   const onAddTextBox = useCallback(
-    (pageIndex: number, x: number, y: number) => {
+    (pageIndex: number, x: number, y: number, rotation: number) => {
       const id = nextId("tb");
-      const box: TextBox = { id, pageIndex, x, y, text: "", style: { ...lastTextStyle } };
+      const box: TextBox = {
+        id,
+        pageIndex,
+        x,
+        y,
+        text: "",
+        style: { ...lastTextStyle },
+        ...(rotation ? { rotation } : null),
+      };
       doc.set((d) => ({ ...d, textBoxes: [...d.textBoxes, box] }));
       setTool("select");
       setSelection({ kind: "textbox", id });
@@ -1572,12 +1612,14 @@ export function App() {
 
   const onPlaceStamp = useCallback(
     (pageIndex: number, cx: number, cy: number) => {
-      const page = pdf?.pages[pageIndex];
+      const page = shownBySource.get(pageIndex);
       if (!pendingStamp || !page) return;
       // Centred on the click and kept on the page — the same `placeAt` the
       // page's ghost preview draws with, so what you aimed is what you get.
+      // On a turned page it's turned to read upright as the page is shown.
       const { width: pw, height: ph } = page.viewBox;
-      const box = placeAt(placedSize(pendingStamp, pw, ph), cx, cy, pw, ph);
+      const upright = uprightFor(page.rotation);
+      const box = placeAt(placedSize(pendingStamp, pw, ph, upright), cx, cy, pw, ph, upright);
       const id = nextId("st");
       const stamp: Stamp = { id, pageIndex, ...box, dataUrl: pendingStamp.dataUrl };
       doc.set((d) => ({ ...d, stamps: [...d.stamps, stamp] }));
@@ -1588,7 +1630,7 @@ export function App() {
       setSelection({ kind: "stamp", id });
       setMessage("");
     },
-    [pendingStamp, doc, pdf],
+    [pendingStamp, doc, shownBySource],
   );
 
   const onChangeStamp = useCallback(
@@ -2241,7 +2283,10 @@ export function App() {
           : null;
         if (move && !mod) {
           e.preventDefault();
-          moveMulti(move[0], move[1], "nudge-multi");
+          // The arrow means "that way on screen"; on a turned page that's a
+          // different direction in the page's own space.
+          const d = shownToUserDelta(move[0], move[1], turnOfObject(multi[0]));
+          moveMulti(d.dx, d.dy, "nudge-multi");
           return;
         }
       }
@@ -2283,8 +2328,7 @@ export function App() {
         : null;
       if (arrow && selection && !mod && !isTypingTarget()) {
         const step = e.shiftKey ? 10 : 1;
-        const dx = arrow[0] * step;
-        const dy = arrow[1] * step;
+        const { dx, dy } = shownToUserDelta(arrow[0] * step, arrow[1] * step, turnOfObject(selection.id));
         if (selection.kind === "redaction") {
           const r = redactions.find((x) => x.id === selection.id);
           if (r) {
@@ -2381,6 +2425,7 @@ export function App() {
     arrangeSelection,
     canArrange,
     pendingStamp,
+    turnOfObject,
   ]);
 
   const runExport = useCallback(async () => {
@@ -2392,7 +2437,7 @@ export function App() {
       const { exportPdf } = await import("./pdf/exporter");
       const out = await exportPdf(
         pdf,
-        { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster },
+        { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, pages: planned },
         (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`),
       );
       downloadBytes(out, fileName.replace(/\.pdf$/i, "") + "-edited.pdf");
@@ -2407,7 +2452,7 @@ export function App() {
       setStatus("error");
       setMessage("Couldn't build the edited PDF. Please try again.");
     }
-  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, fileName, locked]);
+  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, planned, fileName, locked]);
 
   // Guard the download: a whiteout cover only paints over content — the text
   // beneath stays recoverable. If any cover sits over live text, warn before
@@ -2415,13 +2460,13 @@ export function App() {
   // rasterise the page and are safe, so they never trip this.
   const download = useCallback(async () => {
     if (!pdf) return;
-    const warn = findUnsafeCovers(pdf, redactions);
+    const warn = findUnsafeCovers(pdf, redactions, planned);
     if (warn.count > 0) {
       setCoverWarn(warn);
       return;
     }
     await runExport();
-  }, [pdf, redactions, runExport]);
+  }, [pdf, redactions, planned, runExport]);
 
   /** Back to the start screen, with nothing open. */
   const closeAll = useCallback(() => {
@@ -2499,7 +2544,7 @@ export function App() {
     const unsafe = tabs.flatMap((t) => {
       const live = t.id === activeId && pdf;
       const state = live ? docHistory.state : t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
-      const w = findUnsafeCovers(live ? pdf : t.pdf, state.redactions);
+      const w = findUnsafeCovers(live ? pdf : t.pdf, state.redactions, state.pages);
       return w.count > 0 ? [`${live ? fileName : t.fileName} (page ${w.pages.join(", ")})`] : [];
     });
     if (unsafe.length > 0) {
@@ -3004,7 +3049,7 @@ export function App() {
             {compact && <div className="pagenav__scrim" onClick={() => setNavOpen(false)} />}
             <PageNav
               bytes={pdf.bytes}
-              pageCount={pdf.pages.length}
+              pages={plan}
               onClose={compact ? () => setNavOpen(false) : undefined}
             />
           </>
@@ -3016,11 +3061,12 @@ export function App() {
             {...vp.handlers}
           >
             <div className="doc">
-            {pdf.pages.map((page) => (
+            {shown.map((page, position) => (
               <PageView
                 key={page.pageIndex}
                 bytes={pdf.bytes}
                 page={page}
+                position={position}
                 scale={vp.scale}
                 tool={tool}
                 drawTool={drawTool}
@@ -3077,9 +3123,9 @@ export function App() {
             <button className="icon-btn" onClick={vp.zoomOut} aria-label="Zoom out" data-tip="Zoom out">
               <Icon name="remove" size={18} />
             </button>
-            {pdf.pages.length > 1 && (
+            {shown.length > 1 && (
               <>
-                <PageJump pageCount={pdf.pages.length} docKey={pdf} editing={pageJumpOpen} onEditingChange={setPageJumpOpen} />
+                <PageJump pageCount={shown.length} docKey={shown} editing={pageJumpOpen} onEditingChange={setPageJumpOpen} />
                 <span className="zoombar__sep" aria-hidden="true" />
               </>
             )}
@@ -3466,6 +3512,21 @@ export function App() {
             mainBytes={pdf.bytes}
             fileName={fileName}
             hasEdits={changeCount > 0}
+            pages={plan}
+            onArrange={(next) => {
+              setOrganizeOpen(false);
+              setSelection(null);
+              const same = next.length === plan.length && next.every((p, i) => p.index === plan[i].index && quarterTurn(p.rotate) === quarterTurn(plan[i].rotate));
+              if (same) return;
+              // Stored only when it changes something, so an arrangement put
+              // back by hand reads as the document as loaded.
+              const pages = isIdentityPlan(next, pdf.pages.length) ? undefined : next.map((p) => ({ index: p.index, rotate: quarterTurn(p.rotate) }));
+              doc.set((d) => ({ ...d, pages }));
+            }}
+            bakeMain={async () => {
+              const { exportPdf } = await import("./pdf/exporter");
+              return toAB(await exportPdf(pdf, { ...docHistory.state, pages: undefined, losslessRaster }));
+            }}
             onApply={(bytes, note) => {
               setOrganizeOpen(false);
               // The result *is* the edits, baked in: still unsaved work, so the
@@ -3500,7 +3561,7 @@ export function App() {
                   const state = t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
                   // The same guard as Download: a whiteout over live text would
                   // be merged in looking redacted while the text stays readable.
-                  const warn = findUnsafeCovers(t.pdf, state.redactions);
+                  const warn = findUnsafeCovers(t.pdf, state.redactions, state.pages);
                   if (warn.count > 0) {
                     throw Object.assign(
                       new Error(`"${t.fileName}" has whiteout over live text (page ${warn.pages.join(", ")}). Redact it instead, then add its pages.`),

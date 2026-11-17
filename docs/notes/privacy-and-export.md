@@ -67,7 +67,8 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   spread three ways (proportional, per-character, per-space) and the box takes
   the union. Text that isn't upright left-to-right (rotated by its matrix, or
   RTL) redacts the *whole fragment* — over-covering is a cosmetic cost,
-  under-covering is a leak; a `/Rotate` page is mapped into display space. Case folding keeps a
+  under-covering is a leak; boxes stay in user space on a `/Rotate` page, as
+  every overlay does. Case folding keeps a
   map back to the original indices (Turkish "İ" lower-cases to two code
   points). Don't tighten any of this without `export.spec`'s hostile-text test.
 - **Export edits the loaded file in place; it doesn't rebuild one.** That keeps
@@ -104,6 +105,10 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     bookmarks pointing at it are retitled "Page N" (a title often quotes the
     page); `/GoTo /SD` is dropped (it reaches the structure tree); and a final
     `assertNoStructureTree` fails the export if any tag survived.
+  - **A deleted page is handled like a replaced one with no replacement**
+    (`cutDeletedPages`), and pages are rearranged by rewriting the tree, never
+    with `removePage`, whose fork version deletes the page object before its
+    fields and threads can be found. See `pages.md`.
   - **Known limits, accepted:** layer names, named-destination keys and
     page-label prefixes may quote text; undecodable content and Type3/pattern/
     shading resources aren't narrowed; a page with no object of its own fails
