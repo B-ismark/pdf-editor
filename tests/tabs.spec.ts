@@ -360,6 +360,9 @@ test.describe("document tabs", () => {
   });
 
   test("Ctrl+O closes the menu it was pressed over", async ({ page }) => {
+    // A browser without the file-access picker, where Ctrl+O is the file input
+    // (the picker's own path is `saveto.spec`).
+    await page.addInitScript(() => delete (window as { showOpenFilePicker?: unknown }).showOpenFilePicker);
     const f = await fixtures();
     await open(page, f.sample);
     const more = page.locator('.icon-btn[aria-label="More actions"]');

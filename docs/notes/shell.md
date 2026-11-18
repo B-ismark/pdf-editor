@@ -245,3 +245,27 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   editor's layer. Before, the editor's own listener took a dialog's removal
   for Back, and a deselect in the same render as a dialog opening closed the
   dialog at once. `protect.spec` guards both.
+
+- **Save in place, Save as, Share, Print (8c)** live in `fileAccess.ts` and
+  `print.ts`; each is optional, asked for (`canOpenInPlace`, `canSaveAs`,
+  `canShareFiles`) and falls back — the file input to open, a download to save.
+  The Export rows hide when the browser can't (`hidden`), never show disabled.
+  - A file's *handle* (`OpenDoc.handle`) comes only from `pickFiles` (Ctrl+O /
+    Choose PDF on Chromium) or Save as, is memory-only and is lost on restore.
+    Pictures never get one — saving a PDF over a JPEG. A rebuild that replaces
+    the tab (Organise) keeps it.
+  - Permission is asked (`mayWrite`) **before** the export: the prompt needs
+    the click, and a long build outlives it. Share can't do that (the file must
+    exist first), so a `NotAllowedError` becomes the "Ready to share"
+    dialog, whose button is the fresh tap.
+  - Ctrl+S / Ctrl+P are taken from the browser only while a document is open
+    (its own "save page" / "print page" would save or print the app).
+  - Saved in place sets `SavedMark.inPlace`: the counter reads "Saved", and
+    closing doesn't ask (the write finished; a download might not have).
+  - Print draws its own raster pages into `#print-root` and hides the app under
+    `@media print` — no iframe (needs a CSP change, and a built-in viewer
+    phones lack). The `@page` size goes in a constructed sheet: the CSP allows
+    no inline `<style>`. Pages go on `afterprint`.
+  - Playwright gets no `filechooser` for `showOpenFilePicker`, so a spec that
+    opens through the input on Chromium deletes it first (`tabs.spec` Ctrl+O),
+    and `saveto.spec` stubs the pickers.

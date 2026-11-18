@@ -1,0 +1,360 @@
+import { test, expect, type Page } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { basename } from "node:path";
+import { fixtures, LOCKED_PASSWORD } from "./fixtures";
+import { dragOnPage, expectClean, open, pageTexts, pickTool, watch } from "./helpers";
+
+/**
+ * Save in place, Save as, Share and Print: the browser's own file features.
+ *
+ * Playwright can't drive the system file pickers or share sheet (it gets no
+ * `filechooser` for `showOpenFilePicker`), so each is stood in for by a stub
+ * shaped like the real API, installed before the page loads. What a stub
+ * records is what the app *gave* the browser: the bytes written to a file
+ * handle, the File handed to the share sheet, the pages laid out for print.
+ * Those bytes are then read by pdf.js in Node, independently of the app.
+ */
+
+interface StubFile {
+  name: string;
+  b64: string;
+}
+interface StubOpts {
+  /** What `showOpenFilePicker` returns. */
+  open?: StubFile[];
+  /** The name `showSaveFilePicker` returns a handle for; omit to cancel it. */
+  saveAs?: string;
+  /** What `queryPermission` / `requestPermission` answer. */
+  permission?: "granted" | "denied";
+  /** Install a share sheet; "tap" refuses the first call as a browser does
+   * once the click that asked for it has expired. */
+  share?: "ok" | "tap";
+}
+
+const asStub = (path: string): StubFile => ({ name: basename(path), b64: readFileSync(path).toString("base64") });
+
+async function installStubs(page: Page, opts: StubOpts): Promise<void> {
+  await page.addInitScript((o: StubOpts) => {
+    const w = window as unknown as Record<string, unknown>;
+    const writes: { name: string; b64: string }[] = [];
+    const calls = { open: 0, save: 0, share: 0, request: 0 };
+    const shared: { name: string; type: string; b64: string }[] = [];
+    w.__writes = writes;
+    w.__calls = calls;
+    w.__shared = shared;
+    const toB64 = async (b: Blob) => {
+      const u8 = new Uint8Array(await b.arrayBuffer());
+      let s = "";
+      for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode(...u8.subarray(i, i + 0x8000));
+      return btoa(s);
+    };
+    const fromB64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+    const handle = (name: string, b64?: string) => ({
+      kind: "file",
+      name,
+      getFile: async () => new File([fromB64(b64 ?? "")], name, { type: "application/pdf" }),
+      createWritable: async () => {
+        const parts: BlobPart[] = [];
+        return {
+          write: async (d: BlobPart) => void parts.push(d),
+          close: async () => void writes.push({ name, b64: await toB64(new Blob(parts)) }),
+          abort: async () => {},
+        };
+      },
+      queryPermission: async () => o.permission ?? "granted",
+      requestPermission: async () => {
+        calls.request++;
+        return o.permission ?? "granted";
+      },
+    });
+    const abort = () => new DOMException("The user aborted a request.", "AbortError");
+    if (o.open) {
+      const files = o.open;
+      w.showOpenFilePicker = async () => {
+        calls.open++;
+        return files.map((f) => handle(f.name, f.b64));
+      };
+    }
+    w.showSaveFilePicker = async () => {
+      calls.save++;
+      if (!o.saveAs) throw abort();
+      return handle(o.saveAs);
+    };
+    if (o.share) {
+      const nav = navigator as unknown as Record<string, unknown>;
+      let refused = false;
+      nav.canShare = (d: { files?: File[] }) => !!d.files?.length;
+      nav.share = async (d: { files: File[] }) => {
+        calls.share++;
+        if (o.share === "tap" && !refused) {
+          refused = true;
+          throw new DOMException("Must be handling a user gesture", "NotAllowedError");
+        }
+        for (const f of d.files) shared.push({ name: f.name, type: f.type, b64: await toB64(f) });
+      };
+    }
+  }, opts);
+}
+
+const writes = (page: Page) => page.evaluate(() => (window as unknown as { __writes: StubFile[] }).__writes);
+const calls = (page: Page) =>
+  page.evaluate(() => ({ ...(window as unknown as { __calls: Record<string, number> }).__calls }));
+const counter = (page: Page) => page.locator(".appbar__changes");
+const activeTab = (page: Page) => page.locator(".doctab--active");
+const exportMenu = (page: Page) => page.getByRole("menu", { name: "Export" });
+
+/** Open through the picker, as the landing page's button does on Chromium. */
+async function openPicked(page: Page, wait = true): Promise<void> {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Choose PDF" }).click();
+  if (!wait) return;
+  await page.waitForSelector(".page canvas", { timeout: 30_000 });
+  await page.waitForFunction(() => [...document.querySelectorAll("canvas")].some((c) => c.width > 1), null, {
+    timeout: 30_000,
+  });
+}
+
+async function addText(page: Page, text: string) {
+  const ov = (await page.locator(".page__overlay").first().boundingBox())!;
+  await pickTool(page, "Add text");
+  await page.mouse.click(ov.x + 150, ov.y + 150);
+  await page.keyboard.type(text, { delay: 15 });
+  await pickTool(page, "Select");
+}
+
+/** Fail the test if anything is downloaded: these saves never go to Downloads. */
+function noDownloads(page: Page): string[] {
+  const got: string[] = [];
+  page.on("download", (d) => got.push(d.suggestedFilename()));
+  return got;
+}
+
+test.describe("save in place", () => {
+  test("a file opened from the picker saves back to itself with Ctrl+S", async ({ page }) => {
+    const w = watch(page);
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.sample)] });
+    const downloads = noDownloads(page);
+    await openPicked(page);
+
+    // The Export menu offers the file by name, with the shortcut.
+    await page.getByRole("button", { name: "Export options" }).click();
+    await expect(exportMenu(page).getByRole("menuitem", { name: /^Save to sample\.pdf/ })).toBeVisible();
+    await page.keyboard.press("Escape");
+
+    await addText(page, "Written back");
+    await expect(activeTab(page).locator(".doctab__dirty")).toHaveCount(1);
+    await page.keyboard.press("Control+s");
+    await expect(counter(page)).toHaveText("Saved");
+    await expect(activeTab(page).locator(".doctab__dirty")).toHaveCount(0);
+
+    const out = await writes(page);
+    expect(out.map((x) => x.name)).toEqual(["sample.pdf"]);
+    const [text] = await pageTexts(Buffer.from(out[0].b64, "base64"), [1]);
+    expect(text).toContain("Written back");
+    expect(downloads).toEqual([]);
+
+    // It's known to be on disk, so closing doesn't ask.
+    await activeTab(page).locator(".doctab__close").click();
+    await expect(page.locator('[aria-modal="true"]')).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Choose PDF" })).toBeVisible();
+    expectClean(w);
+  });
+
+  test("when writing isn't allowed, nothing is written and it stays unsaved", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.sample)], permission: "denied" });
+    await openPicked(page);
+    await addText(page, "Not allowed");
+    await page.keyboard.press("Control+s");
+    await expect(page.getByRole("status").filter({ hasText: "wasn't allowed" }).first()).toBeVisible();
+    expect(await writes(page)).toEqual([]);
+    expect((await calls(page)).request).toBe(1);
+    await expect(activeTab(page).locator(".doctab__dirty")).toHaveCount(1);
+  });
+
+  test("a file that opened with a password warns before it's saved over without one", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.locked)] });
+    await openPicked(page, false);
+    const pw = page.getByRole("dialog", { name: "This PDF is password-protected" });
+    await pw.getByLabel("Password").fill(LOCKED_PASSWORD);
+    await pw.getByLabel("Password").press("Enter");
+    await page.waitForSelector(".page canvas", { timeout: 30_000 });
+    await addText(page, "Unlocked");
+
+    await page.keyboard.press("Control+s");
+    const warn = page.getByRole("dialog", { name: "Save without its password?" });
+    await expect(warn).toBeVisible();
+    await warn.getByRole("button", { name: "Cancel" }).click();
+    expect(await writes(page)).toEqual([]);
+
+    await page.keyboard.press("Control+s");
+    await warn.getByRole("button", { name: "Save without password" }).click();
+    await expect(counter(page)).toHaveText("Saved");
+    expect((await writes(page)).map((x) => x.name)).toEqual(["locked.pdf"]);
+  });
+});
+
+test.describe("save as", () => {
+  test("without a file to go back to, Ctrl+S asks where — and then saves there", async ({ page }) => {
+    const w = watch(page);
+    const f = await fixtures();
+    await installStubs(page, { saveAs: "report-final.pdf" });
+    const downloads = noDownloads(page);
+    await open(page, f.sample);
+    await addText(page, "First save");
+    await page.keyboard.press("Control+s");
+    await expect(counter(page)).toHaveText("Saved");
+    // The document is that file now: its tab says so, and Save goes there.
+    await expect(activeTab(page)).toContainText("report-final.pdf");
+
+    await addText(page, "Second save");
+    await page.keyboard.press("Control+s");
+    await expect(counter(page)).toHaveText("Saved");
+    expect((await calls(page)).save, "the second Ctrl+S doesn't ask again").toBe(1);
+    const out = await writes(page);
+    expect(out.map((x) => x.name)).toEqual(["report-final.pdf", "report-final.pdf"]);
+    const [text] = await pageTexts(Buffer.from(out[1].b64, "base64"), [1]);
+    expect(text).toContain("First save");
+    expect(text).toContain("Second save");
+    expect(downloads).toEqual([]);
+    expectClean(w);
+  });
+
+  test("closing the picker writes nothing and reports nothing", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, {});
+    await open(page, f.sample);
+    await addText(page, "Kept");
+    await page.keyboard.press("Control+s");
+    await expect.poll(async () => (await calls(page)).save).toBe(1);
+    expect(await writes(page)).toEqual([]);
+    await expect(counter(page)).toHaveText("1 change");
+    await expect(page.locator(".snackbar__msg")).toHaveCount(0);
+  });
+
+  test("where the browser can't pick a place, Ctrl+S downloads", async ({ page }) => {
+    const f = await fixtures();
+    await page.addInitScript(() => {
+      delete (window as { showSaveFilePicker?: unknown }).showSaveFilePicker;
+      delete (window as { showOpenFilePicker?: unknown }).showOpenFilePicker;
+    });
+    await open(page, f.sample);
+    await addText(page, "Downloaded");
+    const [d] = await Promise.all([page.waitForEvent("download"), page.keyboard.press("Control+s")]);
+    expect(d.suggestedFilename()).toMatch(/\.pdf$/);
+    await expect(counter(page)).toHaveText("Downloaded");
+    // And no "Save as…" row to promise what it can't do.
+    await page.getByRole("button", { name: "Export options" }).click();
+    await expect(exportMenu(page).getByRole("menuitem", { name: /Save/ })).toHaveCount(0);
+  });
+});
+
+test.describe("share", () => {
+  test("Share hands the finished PDF to the share sheet", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { share: "ok" });
+    await open(page, f.sample);
+    await addText(page, "Shared text");
+    await page.getByRole("button", { name: "Export options" }).click();
+    await exportMenu(page).getByRole("menuitem", { name: "Share" }).click();
+    await expect.poll(async () => (await calls(page)).share).toBe(1);
+    const shared = await page.evaluate(() => (window as unknown as { __shared: { name: string; type: string; b64: string }[] }).__shared);
+    expect(shared.map((s) => [s.name, s.type])).toEqual([["sample.pdf", "application/pdf"]]);
+    const [text] = await pageTexts(Buffer.from(shared[0].b64, "base64"), [1]);
+    expect(text).toContain("Shared text");
+  });
+
+  test("when the browser wants a fresh tap, the file is ready behind one", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { share: "tap" });
+    await open(page, f.sample);
+    await page.getByRole("button", { name: "Export options" }).click();
+    await exportMenu(page).getByRole("menuitem", { name: "Share" }).click();
+    const ready = page.getByRole("dialog", { name: "Ready to share" });
+    await expect(ready).toBeVisible();
+    await ready.getByRole("button", { name: "Share" }).click();
+    await expect(ready).toHaveCount(0);
+    expect((await calls(page)).share).toBe(2);
+  });
+
+  test("without a share sheet that takes files, there's no Share", async ({ page }) => {
+    const f = await fixtures();
+    await open(page, f.sample);
+    await page.getByRole("button", { name: "Export options" }).click();
+    await expect(exportMenu(page).getByRole("menuitem", { name: "Share" })).toHaveCount(0);
+  });
+});
+
+test.describe("print", () => {
+  test("Ctrl+P prints the edited file, a sheet per page, and nothing of the app", async ({ page }) => {
+    const w = watch(page);
+    const f = await fixtures();
+    // Record what's laid out when the dialog would open, instead of opening it.
+    await page.addInitScript(() => {
+      const w = window as unknown as Record<string, unknown>;
+      w.print = () => {
+        const imgs = [...document.querySelectorAll<HTMLImageElement>("#print-root img.print-page")];
+        const first = imgs[0];
+        w.__printed = {
+          pages: imgs.length,
+          sizes: [...new Set(imgs.map((i) => `${i.style.width} ${i.style.height}`))],
+          px: first.naturalWidth,
+          sheet: [...document.adoptedStyleSheets].map((s) => [...s.cssRules].map((r) => r.cssText).join(" ")).join(" "),
+        };
+      };
+    });
+    await open(page, f.sample);
+    await pickTool(page, "Redact");
+    await dragOnPage(page, { x: 40, y: 40 }, { x: 300, y: 200 });
+    await expect(page.locator(".redaction")).toHaveCount(1);
+    await pickTool(page, "Select");
+
+    await page.keyboard.press("Control+p");
+    await expect.poll(() => page.evaluate(() => !!(window as unknown as { __printed?: unknown }).__printed), { timeout: 60_000 }).toBe(true);
+    const printed = await page.evaluate(() => (window as unknown as { __printed: Record<string, unknown> }).__printed);
+    expect(printed.pages).toBe(12);
+    expect(printed.sizes).toEqual(["595pt 842pt"]);
+    // 150 dpi: an A4 page is 1240 pixels across.
+    expect(printed.px).toBe(Math.round((595 * 150) / 72));
+    // Sampled where the redaction was drawn, as a fraction of the page.
+    const ov = (await page.locator(".page__overlay").first().boundingBox())!;
+    const sample = (fx: number, fy: number) =>
+      page.evaluate(([fx, fy]) => {
+        const img = document.querySelector<HTMLImageElement>("#print-root img.print-page")!;
+        const c = document.createElement("canvas");
+        c.width = img.naturalWidth;
+        c.height = img.naturalHeight;
+        const g = c.getContext("2d")!;
+        g.drawImage(img, 0, 0);
+        return [...g.getImageData(Math.round(fx * c.width), Math.round(fy * c.height), 1, 1).data].slice(0, 3);
+      }, [fx, fy]);
+    const [r, g, b] = await sample(170 / ov.width, 120 / ov.height);
+    expect(r + g + b, "the redaction is in what's printed").toBeLessThan(60);
+    expect(await sample(0.97, 0.98), "and the paper around it is paper").toEqual([255, 255, 255]);
+    expect(printed.sheet).toContain("595pt 842pt");
+    // And the app didn't leave a spinner behind.
+    await expect(page.getByRole("status").filter({ hasText: "Preparing to print" })).toHaveCount(0);
+    expectClean(w);
+  });
+
+  test("under print media the app hides and only the pages show", async ({ page }) => {
+    const f = await fixtures();
+    await page.addInitScript(() => {
+      (window as unknown as Record<string, unknown>).print = () => {
+        (window as unknown as Record<string, unknown>).__held = true;
+      };
+    });
+    await open(page, f.sample);
+    await page.keyboard.press("Control+p");
+    await expect.poll(() => page.evaluate(() => !!(window as unknown as { __held?: boolean }).__held), { timeout: 60_000 }).toBe(true);
+    await page.emulateMedia({ media: "print" });
+    await expect(page.locator("#print-root")).toBeVisible();
+    await expect(page.locator(".appbar")).toBeHidden();
+    await expect(page.locator(".page canvas").first()).toBeHidden();
+    // The pages go once printing is over.
+    await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
+    await expect(page.locator("#print-root")).toHaveCount(0);
+  });
+});

@@ -34,6 +34,15 @@ import { fitCrop, isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUse
 import { boxCX, boxCY } from "./pdf/bbox";
 import { findUnsafeCovers, type CoverWarning } from "./pdf/redactionSafety";
 import { downloadBytes, downloadText } from "./download";
+import { canSaveAs, canShareFiles, mayWrite, pdfFile, pickSaveTarget, shareFile, writeTo, type FileHandle } from "./fileAccess";
+
+/** Where a finished file goes. */
+type Delivery =
+  | { kind: "download"; password?: string }
+  | { kind: "save"; target: FileHandle }
+  | { kind: "save-as"; target: FileHandle }
+  | { kind: "share" };
+const DELIVERY_VERB: Record<Delivery["kind"], string> = { download: "Download", save: "Save", "save-as": "Save", share: "Share" };
 import { onStrayBack, pushHistory, unwindHistory, type HistoryEntry } from "./hooks/useModal";
 import { plural } from "./plural";
 import type { PageNumberOptions, PageRef, WatermarkOptions } from "./pdf/types";
@@ -295,7 +304,7 @@ export interface DocumentEditorProps {
   fitRef: MutableRefObject<Fit | null>;
   onLive: (live: LiveDoc) => void;
   /** This document was handed to the user whole (Download, Compress, signing). */
-  onSaved: (id: string, mark: SavedMark) => void;
+  onSaved: (id: string, mark: SavedMark, saveAs?: { handle: FileHandle; fileName: string }) => void;
   /** OCR added text to these bytes' pages: every tab showing them gets it. */
   onPages: (bytes: ArrayBuffer, pages: LoadedPdf["pages"]) => void;
   /** Rebuild this document from new bytes (Organise's merge). */
@@ -359,7 +368,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   setLosslessRaster,
   theme,
 }: DocumentEditorProps) {
-  const { pdf, fileName, baked, saved: savedMark, locked, id: activeId } = entry;
+  const { pdf, fileName, baked, saved: savedMark, locked, id: activeId, handle } = entry;
   const [tool, setTool] = useState<Tool>("select");
   /** "This page is a picture" — offered the first time the user clicks a page
    * with no text layer to edit (a scan, or a "print to PDF" that flattened
@@ -508,9 +517,14 @@ export const DocumentEditor = memo(function DocumentEditor({
   const [organizeOpen, setOrganizeOpen] = useState<false | "grid" | "split">(false);
   const [coverWarn, setCoverWarn] = useState<CoverWarning | null>(null);
   const [protectOpen, setProtectOpen] = useState(false);
-  /** The password for the download being made, held only until it's made
-   * (or the whiteout warning in between is cancelled). Never stored. */
-  const pendingPassword = useRef<string | undefined>(undefined);
+  /** Where the file being made goes — and, for a download with a password,
+   * that password — held only until it's made (or the whiteout warning in
+   * between is cancelled). Never stored. */
+  const pendingDelivery = useRef<Delivery>({ kind: "download" });
+  /** Saving in place over a file that opened with a password: asked first. */
+  const [unlockWarn, setUnlockWarn] = useState(false);
+  /** A built file waiting for a tap to open the share sheet (see `shareFile`). */
+  const [shareReady, setShareReady] = useState<File | null>(null);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findActive, setFindActive] = useState(0);
@@ -2024,6 +2038,9 @@ export const DocumentEditor = memo(function DocumentEditor({
   }, [shownBySource, pageOf]);
 
 
+  /** Ctrl+S and Ctrl+P, defined further down; read live by the key handler. */
+  const fileKeys = useRef<{ save: () => void; print: () => void }>({ save: () => {}, print: () => {} });
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       // A modal (Organize / Finish / Compress / Command Palette) owns the
@@ -2035,6 +2052,16 @@ export const DocumentEditor = memo(function DocumentEditor({
       if (mod && key === "z") {
         e.preventDefault();
         e.shiftKey ? redo() : undo();
+        return;
+      }
+      // Ctrl/⌘+S saves the document, Ctrl/⌘+P prints it — not the browser's
+      // "save this web page" or a print of the editor's own screen.
+      if (mod && (key === "s" || key === "p") && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        setMenuOpen(false);
+        setExportOpen(false);
+        if (key === "s") fileKeys.current.save();
+        else fileKeys.current.print();
         return;
       }
       // Ctrl/⌘+O opens files into new tabs (the browser's own "open file" would
@@ -2274,49 +2301,78 @@ export const DocumentEditor = memo(function DocumentEditor({
     return hiddenRows(info, covered);
   }, [pdf, plan, planned, redactions, edits]);
 
+  /** What the exporter is given: the document as it stands. */
+  const exportInput = useCallback(
+    (password?: string) => ({ edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, pages: planned, password }),
+    [edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, planned],
+  );
+
   const runExport = useCallback(async () => {
     if (!pdf) return;
-    const password = pendingPassword.current;
-    pendingPassword.current = undefined;
+    const to = pendingDelivery.current;
+    pendingDelivery.current = { kind: "download" };
+    const password = to.kind === "download" ? to.password : undefined;
     const mark = markNow.current;
     setStatus("exporting");
     setMessage("Building edited PDF…");
+    const flattened = redactions.length > 0 ? " Redacted pages were flattened to images." : "";
+    // A copy made without the password the file opened with says so.
+    const noPassword = locked && !password ? " This copy has no password. To add one, use Download with password." : "";
     try {
       const { exportPdf } = await import("./pdf/exporter");
-      const out = await exportPdf(
-        pdf,
-        { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, pages: planned, password },
-        (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`),
-      );
-      downloadBytes(out, fileName.replace(/\.pdf$/i, "") + "-edited.pdf");
+      const out = await exportPdf(pdf, exportInput(password), (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`));
+      const editedName = fileName.replace(/\.pdf$/i, "") + "-edited.pdf";
+      if (to.kind === "save" || to.kind === "save-as") {
+        const target = to.target;
+        setMessage(`Saving to ${target.name}…`);
+        await writeTo(target, out);
+        onSaved(activeId, { ...mark, inPlace: true }, to.kind === "save-as" ? { handle: target, fileName: target.name } : undefined);
+        setStatus("ready");
+        // Over a locked file, the user agreed to this before it was built.
+        setMessage(`Saved to ${target.name}.${flattened}${to.kind === "save-as" ? noPassword : ""}`);
+        return;
+      }
+      if (to.kind === "share") {
+        const file = pdfFile(out, editedName);
+        const shared = await shareFile(file);
+        setStatus("ready");
+        if (shared === "needs-tap") {
+          setShareReady(file);
+          setMessage("Your file is ready to share.");
+        } else if (shared === "shared") {
+          onSaved(activeId, mark);
+          setMessage(`Shared ${editedName}.${flattened}${noPassword}`);
+        } else setMessage("Not shared.");
+        return;
+      }
+      downloadBytes(out, editedName);
       onSaved(activeId, mark);
       setStatus("ready");
       setMessage(
-        (redactions.length > 0
-          ? "Downloaded — redacted pages were flattened to images."
-          : "Downloaded edited PDF.") +
-          (password
-            ? " It opens only with the password you set."
-            : locked
-              ? " This copy has no password. To add one, use Download with password."
-              : ""),
+        (redactions.length > 0 ? "Downloaded — redacted pages were flattened to images." : "Downloaded edited PDF.") +
+          (password ? " It opens only with the password you set." : noPassword),
       );
     } catch (err) {
       setStatus("error");
-      setMessage(staleBuildMessage(err) ?? "Couldn't build the edited PDF. Please try again.");
+      setMessage(
+        staleBuildMessage(err) ??
+          (to.kind === "save" || to.kind === "save-as"
+            ? `Couldn't save to ${to.target.name} — it's unchanged. Try Save as… or Download.`
+            : "Couldn't build the edited PDF. Please try again."),
+      );
     }
-  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, planned, fileName, locked]);
+  }, [pdf, exportInput, redactions.length, fileName, locked, activeId, onSaved]);
 
   // Guard the download: a whiteout cover only paints over content — the text
   // beneath stays recoverable. If any cover sits over live text, warn before
   // handing back a file that looks redacted but isn't. True redactions
   // rasterise the page and are safe, so they never trip this.
-  const download = useCallback(
-    async (password?: string) => {
+  const deliver = useCallback(
+    async (to: Delivery) => {
       if (!pdf) return;
-      // Held across the whiteout warning, so "Download anyway" makes the same
-      // file that was asked for.
-      pendingPassword.current = password;
+      // Held across the whiteout warning, so "… anyway" makes the same file,
+      // sent the same place, that was asked for.
+      pendingDelivery.current = to;
       const warn = findUnsafeCovers(pdf, redactions, planned);
       if (warn.count > 0) {
         setCoverWarn(warn);
@@ -2326,6 +2382,71 @@ export const DocumentEditor = memo(function DocumentEditor({
     },
     [pdf, redactions, planned, runExport],
   );
+  const download = useCallback((password?: string) => deliver({ kind: "download", password }), [deliver]);
+
+  /** Write back to the file it came from. Permission is asked first, while the
+   * click that asked for the save still counts. */
+  const saveInPlace = useCallback(async () => {
+    if (!handle || busyRef.current) return;
+    try {
+      if (!(await mayWrite(handle))) {
+        setMessage(`Not saved — writing to ${handle.name} wasn't allowed. Try Save as… or Download.`);
+        return;
+      }
+    } catch {
+      setMessage(`Not saved — ${handle.name} can't be written to. Try Save as… or Download.`);
+      return;
+    }
+    await deliver({ kind: "save", target: handle });
+  }, [handle, deliver]);
+
+  /** Save to a file the user picks; the document is that file from then on. */
+  const saveAs = useCallback(async () => {
+    if (!pdf || busyRef.current) return;
+    let target: FileHandle | null;
+    try {
+      target = await pickSaveTarget(fileName.replace(/\.pdf$/i, "") + "-edited.pdf");
+    } catch {
+      setMessage("Couldn't open the save dialog. Use Download instead.");
+      return;
+    }
+    if (target) await deliver({ kind: "save-as", target });
+  }, [pdf, fileName, deliver]);
+
+  /** Ctrl+S: back to its own file where there is one; else wherever the user
+   * picks; else a download — never the browser's "save this web page". */
+  const save = useCallback(() => {
+    if (!pdf || busyRef.current) return;
+    if (handle) {
+      // Over a file that opened with a password, the copy written wouldn't
+      // have one: say so first.
+      if (locked) setUnlockWarn(true);
+      else void saveInPlace();
+    } else if (canSaveAs()) void saveAs();
+    else void download();
+  }, [pdf, handle, locked, saveInPlace, saveAs, download]);
+
+  const share = useCallback(() => deliver({ kind: "share" }), [deliver]);
+
+  /** Print the finished file — the edits drawn in, as they'll download. */
+  const printDoc = useCallback(async () => {
+    if (!pdf || busyRef.current) return;
+    setStatus("exporting");
+    setMessage("Preparing to print…");
+    try {
+      const { exportPdf } = await import("./pdf/exporter");
+      const out = await exportPdf(pdf, exportInput(), (p, t) => setMessage(`Preparing to print… page ${p}/${t}`));
+      const { printPdf } = await import("./print");
+      const bytes = out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
+      await printPdf(bytes, (p, t) => setMessage(`Preparing to print… drawing page ${p}/${t}`));
+      setStatus("ready");
+      setMessage("");
+    } catch (err) {
+      setStatus("error");
+      setMessage(staleBuildMessage(err) ?? "Couldn't prepare the document for printing. Please try again.");
+    }
+  }, [pdf, exportInput]);
+  fileKeys.current = { save, print: () => void printDoc() };
 
   const goHome = useCallback(() => onCloseTab(activeId), [activeId, onCloseTab]);
 
@@ -2434,6 +2555,10 @@ export const DocumentEditor = memo(function DocumentEditor({
 
     // Making a file can't start while one is being made.
     { id: "download", group: "export", label: "Download PDF", icon: "download", keywords: "save export", disabled: busy, run: () => void download() },
+    { id: "save", group: "export", label: `Save to ${handle?.name ?? ""}`, icon: "save", shortcut: "Ctrl+S", keywords: "save write file disk overwrite in place", disabled: busy, hidden: !handle, run: save },
+    { id: "save-as", group: "export", label: "Save as…", icon: "save_as", shortcut: handle ? undefined : "Ctrl+S", keywords: "save file disk new copy choose folder location", disabled: busy, hidden: !canSaveAs(), run: () => void saveAs() },
+    { id: "print", group: "export", label: "Print", icon: "print", shortcut: "Ctrl+P", keywords: "paper printer", disabled: busy, run: () => void printDoc() },
+    { id: "share", group: "export", label: "Share", icon: "share", keywords: "send message mail airdrop", disabled: busy, hidden: !canShareFiles(), run: () => void share() },
     { id: "protect", group: "export", label: "Download with password", icon: "protect", keywords: "encrypt password protect lock secure aes", opens: "dialog", disabled: busy, run: () => { setSelection(null); setProtectOpen(true); } },
     { id: "split", group: "export", label: "Split into files", icon: "split_pdf", keywords: "split cut separate divide parts pages zip", opens: "dialog", disabled: busy || shown.length < 2, run: () => { setSelection(null); setOrganizeOpen("split"); } },
     { id: "compress", group: "export", label: "Compress PDF", icon: "compress", keywords: "shrink reduce size optimise", opens: "dialog", disabled: busy, run: openCompress },
@@ -2555,7 +2680,7 @@ export const DocumentEditor = memo(function DocumentEditor({
             <Icon name="search" size={18} />
           </button>
           <span className="appbar__changes label-medium" role="status">
-            {unsaved ? `${changeCount} change${changeCount === 1 ? "" : "s"}` : changeCount > 0 ? "Downloaded" : ""}
+            {unsaved ? `${changeCount} change${changeCount === 1 ? "" : "s"}` : changeCount > 0 ? (savedMark?.inPlace ? "Saved" : "Downloaded") : ""}
           </span>
           {/* A split button: the main half is the one-click Download it always
               was; the caret beside it opens Export, every other way to make a
@@ -3126,8 +3251,8 @@ export const DocumentEditor = memo(function DocumentEditor({
       {coverWarn && (
         <ConfirmDialog
           title="Whiteout doesn't remove the text"
-          message={`${coverWarn.count} whiteout cover${coverWarn.count > 1 ? "s" : ""} (page ${coverWarn.pages.join(", ")}) sit over live text that stays readable — by copy/paste or search — in the downloaded file. For content that must be permanently removed, use the Redact tool instead. Download anyway?`}
-          confirmLabel="Download anyway"
+          message={`${coverWarn.count} whiteout cover${coverWarn.count > 1 ? "s" : ""} (page ${coverWarn.pages.join(", ")}) sit over live text that stays readable — by copy/paste or search — in the ${pendingDelivery.current.kind === "download" ? "downloaded" : pendingDelivery.current.kind === "share" ? "shared" : "saved"} file. For content that must be permanently removed, use the Redact tool instead. ${DELIVERY_VERB[pendingDelivery.current.kind]} anyway?`}
+          confirmLabel={`${DELIVERY_VERB[pendingDelivery.current.kind]} anyway`}
           cancelLabel="Go back"
           danger
           onConfirm={() => {
@@ -3135,9 +3260,44 @@ export const DocumentEditor = memo(function DocumentEditor({
             void runExport();
           }}
           onCancel={() => {
-            pendingPassword.current = undefined;
+            pendingDelivery.current = { kind: "download" };
             setCoverWarn(null);
           }}
+        />
+      )}
+
+      {unlockWarn && handle && (
+        <ConfirmDialog
+          title="Save without its password?"
+          message={`${handle.name} opens with a password. Saving here replaces it with a copy that opens without one. To keep a password on the file, use Download with password instead.`}
+          confirmLabel="Save without password"
+          cancelLabel="Go back"
+          danger
+          onConfirm={() => {
+            setUnlockWarn(false);
+            void saveInPlace();
+          }}
+          onCancel={() => setUnlockWarn(false)}
+        />
+      )}
+
+      {shareReady && (
+        <ConfirmDialog
+          title="Ready to share"
+          message={`${shareReady.name} is ready.`}
+          confirmLabel="Share"
+          onConfirm={() => {
+            const file = shareReady;
+            setShareReady(null);
+            // This tap is the one the share sheet needs.
+            void shareFile(file).then((r) => {
+              if (r === "shared") {
+                onSaved(activeId, markNow.current);
+                setMessage(`Shared ${file.name}.`);
+              } else setMessage(r === "cancelled" ? "Not shared." : "Sharing isn't available right now. Use Download instead.");
+            }).catch(() => setMessage("Couldn't share the file. Use Download instead."));
+          }}
+          onCancel={() => setShareReady(null)}
         />
       )}
 

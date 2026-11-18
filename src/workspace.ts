@@ -1,3 +1,4 @@
+import type { FileHandle } from "./fileAccess";
 import type { DocState, LoadedPdf } from "./pdf/types";
 import type { HistorySnapshot } from "./hooks/useHistory";
 
@@ -34,6 +35,8 @@ export const EMPTY_DOC: DocState = { edits: {}, textBoxes: [], redactions: [], a
 export interface SavedMark {
   doc: DocState;
   baked: number;
+  /** Written back to the document's own file, rather than downloaded. */
+  inPlace?: boolean;
 }
 
 /** A document open in the workspace. For the one in front, `history`, `view`,
@@ -61,6 +64,9 @@ export interface OpenDoc {
   locked: boolean;
   /** Has changes since its last download (or ever, if never downloaded). */
   unsaved: boolean;
+  /** The file on the user's disk it was opened from (or last saved as), where
+   * the browser lets the app write back to it. Held in memory only. */
+  handle?: FileHandle;
 }
 
 /** The document state a parked tab is at. */

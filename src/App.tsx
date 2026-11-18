@@ -17,6 +17,7 @@ import { findUnsafeCovers } from "./pdf/redactionSafety";
 import type { DocState, LoadedPdf } from "./pdf/types";
 import { lazyPart, staleBuildMessage, useStaleBuild } from "./staleBuild";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { canOpenInPlace, pickFiles, type FileHandle } from "./fileAccess";
 import {
   EMPTY_DOC,
   aModalIsOpen,
@@ -266,7 +267,7 @@ export function App() {
       name: string,
       note?: string,
       seedDoc?: DocState,
-      opts: { replace?: boolean; id?: string; quiet?: boolean; baked?: number; locked?: boolean } = {},
+      opts: { replace?: boolean; id?: string; quiet?: boolean; baked?: number; locked?: boolean; handle?: FileHandle } = {},
     ): Promise<OpenDoc | null> => {
       const { tabs, activeId } = liveTabs.current;
       const replacing = opts.replace && activeId != null;
@@ -299,6 +300,8 @@ export function App() {
           unsaved: false,
           // A rebuild of a password-opened document is still that document.
           locked: opts.locked ?? (replacing ? tabs.find((t) => t.id === id)?.locked ?? false : false),
+          // …and still saves back to the same file.
+          handle: opts.handle ?? (replacing ? tabs.find((t) => t.id === id)?.handle : undefined),
         };
         if (replacing) {
           const old = tabs.find((t) => t.id === id)?.pdf;
@@ -385,7 +388,7 @@ export function App() {
   );
 
   const openFile = useCallback(
-    async (file: File): Promise<boolean> => {
+    async (file: File, handle?: FileHandle): Promise<boolean> => {
       // Show feedback immediately — reading a large file into memory and
       // sniffing it can take a beat, and a drag-drop gives no other signal.
       setStatus("loading");
@@ -423,7 +426,7 @@ export function App() {
         }
         ({ bytes, locked } = opened);
       }
-      return (await openBytes(bytes, file.name, undefined, undefined, { locked })) != null;
+      return (await openBytes(bytes, file.name, undefined, undefined, { locked, handle })) != null;
     },
     [openBytes, unlock],
   );
@@ -462,11 +465,27 @@ export function App() {
   // another PDF", the tab strip's +, and Ctrl+O. What's picked opens in new
   // tabs, so nothing open is put at risk.
   const openInputRef = useRef<HTMLInputElement>(null);
-  const openAnother = useCallback(() => openInputRef.current?.click(), []);
+  // Where the browser can, files are opened through its own picker, which
+  // hands back the file itself — so Save can write back to it. Elsewhere, the
+  // file input: Save downloads a copy.
+  const openAnother = useStable(async () => {
+    if (!canOpenInPlace()) {
+      openInputRef.current?.click();
+      return;
+    }
+    try {
+      const picked = await pickFiles();
+      if (picked) void openFiles(picked.map((p) => p.file), new Map(picked.map((p) => [p.file, p.handle])));
+    } catch {
+      // A picker the browser refused (a policy, a sandboxed frame): the input
+      // still works.
+      openInputRef.current?.click();
+    }
+  });
 
   /** Open several files, each in its own tab (a multi-select pick or a drop). */
   const openFiles = useCallback(
-    async (files: FileList | File[] | null | undefined) => {
+    async (files: FileList | File[] | null | undefined, handles?: Map<File, FileHandle>) => {
       // A dialog (Organise, Compress, Finish…) acts on whatever document is in
       // front when it's confirmed, and so does an operation still running (OCR,
       // export). A file dropped then opens a tab that comes to the front *behind*
@@ -503,7 +522,7 @@ export function App() {
         else failed.push(...images.map((f) => f.name));
       }
       for (const f of list) {
-        if (await openFile(f)) opened++;
+        if (await openFile(f, handles?.get(f))) opened++;
         else failed.push(f.name);
       }
       if (list.length + (images.length > 0 ? 1 : 0) > 1) {
@@ -637,10 +656,14 @@ export function App() {
       // download finished (a cancelled "Save as…" looks the same from here),
       // and closing deletes the session copy that would otherwise hold the work.
       const edited = id === activeId ? frontChanges > 0 : (tabs.find((t) => t.id === id)?.changeCount ?? 0) > 0;
-      if (edited) setConfirmCloseId(id);
+      // Saved back to its own file, though, it's known to be there: the write
+      // finished before "Saved" was shown.
+      const t = tabs.find((x) => x.id === id);
+      const savedInPlace = !!t?.saved?.inPlace && !(id === activeId ? frontUnsaved : t.unsaved);
+      if (edited && !savedInPlace) setConfirmCloseId(id);
       else closeTab(id);
     },
-    [busy, activeId, frontChanges, tabs, closeTab],
+    [busy, activeId, frontChanges, frontUnsaved, tabs, closeTab],
   );
 
   /** Every open document, exported and bundled into one ZIP. */
@@ -705,7 +728,9 @@ export function App() {
   // ---- What the editor reports and asks for ----
   const onLive = useCallback((l: LiveDoc) => setLive(l), []);
   const onSaved = useCallback(
-    (id: string, mark: SavedMark) => setTabs((list) => list.map((t) => (t.id === id ? { ...t, saved: mark } : t))),
+    (id: string, mark: SavedMark, saveAs?: { handle: FileHandle; fileName: string }) =>
+      // Saved as another file: the tab is that file now, as in any editor.
+      setTabs((list) => list.map((t) => (t.id === id ? { ...t, saved: mark, ...saveAs } : t))),
     [],
   );
   // OCR added text to these bytes' pages. Every tab showing the same bytes

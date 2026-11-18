@@ -164,6 +164,14 @@ type-checking can't see, and each exists because it broke once:
   still protected and closing the warning stays in the app; on a phone with
   something selected, the dialog opens (the deselect's removal no longer
   closes it) and Back closes it without leaving the app.
+- `saveto.spec.ts` — Package 8c. With stubbed pickers / share sheet / print():
+  a picked file is written back on Ctrl+S with the edit in its bytes, no
+  download, "Saved", and closes without asking; denied permission writes
+  nothing; a password-opened file warns first. With no handle Ctrl+S is Save
+  as (asked once, then the tab is that file); a cancelled picker is silent;
+  without pickers Ctrl+S downloads. Share passes the edited PDF, and a refused
+  first call offers "Ready to share". Print lays out 12 pages at 595×842 pt,
+  150 dpi, with the redaction black; under print media only they show.
 - `crop.spec.ts` — Package 8b. A page whose CropBox starts at 100,200: the
   heading's overlay sits on its glyphs (not off the page), an edit is redrawn
   at the run's own user-space position, and a link drawn 20 points in from

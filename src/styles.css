@@ -2802,3 +2802,14 @@ body {
 @media (max-width: 480px) {
   .crop__fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ============ Print ============ */
+/* The pages print.ts draws are the only thing on paper: the app hides. */
+#print-root { display: none; }
+@media print {
+  html, body { background: #fff !important; }
+  body > :not(#print-root) { display: none !important; }
+  #print-root { display: block; }
+  .print-page { display: block; break-after: page; }
+  .print-page:last-child { break-after: auto; }
+}
