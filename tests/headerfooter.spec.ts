@@ -290,7 +290,7 @@ test("a damaged saved setting still opens, exports, and edits without renumberin
 test("Update with nothing touched changes nothing, even past what the fields hold", async ({ page }) => {
   const f = await fixtures();
   const pageNumbers: PageNumberOptions = {
-    position: "bottom-center", start: 1, size: 14, color: "#000000",
+    position: "bottom-center", size: 14, color: "#000000",
     start: 1e17, slots: { "bottom-left": "{page}", "bottom-right": "{bates}" },
     bates: { prefix: "", start: 1e17, digits: 3 },
   };
