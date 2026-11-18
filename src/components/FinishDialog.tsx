@@ -3,7 +3,7 @@ import { flushSync } from "react-dom";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
 import { useModal } from "../hooks/useModal";
-import { DEFAULT_BATES, MAX_BATES_DIGITS, POSITIONS, TOKENS, batesNumber, dateLabel, firstNumber, labelsFor, normalBates, slotsOf, textColor, textSize, uses } from "../pdf/headerFooter";
+import { DEFAULT_BATES, MAX_BATES_DIGITS, MAX_START, POSITIONS, TOKENS, batesNumber, dateLabel, firstNumber, labelsFor, normalBates, slotsOf, textColor, textSize, uses } from "../pdf/headerFooter";
 import type { BatesOptions, NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/types";
 
 interface Props {
@@ -53,7 +53,7 @@ function NumberField({ label, value, onChange, min, max }: { label: string; valu
       aria-label={label}
       value={value}
       onChange={(e) => onChange(e.target.value)}
-      onBlur={() => onChange(String(whole(value, min, max ?? Number.MAX_SAFE_INTEGER, min)))}
+      onBlur={() => onChange(String(whole(value, min, max ?? MAX_START, min)))}
     />
   );
 }
@@ -82,9 +82,9 @@ export function FinishDialog({
   const [prefix, setPrefix] = useState(storedBates.prefix);
   const [batesStartText, setBatesStartText] = useState(String(storedBates.start));
   const [digitsText, setDigitsText] = useState(String(storedBates.digits));
-  const start = whole(startText, 0, Number.MAX_SAFE_INTEGER, 0);
+  const start = whole(startText, 0, MAX_START, 0);
   const bates = useMemo<BatesOptions>(
-    () => ({ prefix, start: whole(batesStartText, 0, Number.MAX_SAFE_INTEGER, 0), digits: whole(digitsText, 1, MAX_BATES_DIGITS, 1) }),
+    () => ({ prefix, start: whole(batesStartText, 0, MAX_START, 0), digits: whole(digitsText, 1, MAX_BATES_DIGITS, 1) }),
     [prefix, batesStartText, digitsText],
   );
   // The date and file name were fixed when the setting was applied; Update

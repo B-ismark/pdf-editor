@@ -59,7 +59,7 @@ export function normalBates(b: BatesOptions): BatesOptions {
     prefix: typeof b.prefix === "string" ? b.prefix : "",
     // Finite, whole and within what a number field holds — the same range the
     // dialog clamps to, so opening it and pressing Update renumbers nothing.
-    start: Number.isFinite(b.start) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.round(b.start))) : 0,
+    start: Number.isFinite(b.start) ? Math.min(MAX_START, Math.max(0, Math.round(b.start))) : 0,
     digits: Math.max(1, Math.min(MAX_BATES_DIGITS, Math.round(b.digits) || 1)),
   };
 }
@@ -72,9 +72,17 @@ export function textColor(o: PageNumberOptions): string {
   return typeof o.color === "string" && /^#[0-9a-f]{6}$/i.test(o.color) ? o.color : "#444444";
 }
 
+/**
+ * The largest first number (page or Bates) a setting holds: twelve digits, the
+ * most a Bates number pads to, and far enough below 2^53 that counting on through
+ * any document never runs out of exact whole numbers (two pages never share one).
+ * The dialog's fields clamp to it too, so Update with nothing touched agrees.
+ */
+export const MAX_START = 999_999_999_999;
+
 /** The first page's number, read safely from a stored setting. */
 export function firstNumber(o: PageNumberOptions): number {
-  return Number.isFinite(o.start) ? Math.max(0, Math.round(o.start)) : 1;
+  return Number.isFinite(o.start) ? Math.min(MAX_START, Math.max(0, Math.round(o.start))) : 1;
 }
 
 /** Characters the header & footer font (Helvetica, WinAnsi) can write. */

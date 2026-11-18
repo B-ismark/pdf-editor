@@ -325,4 +325,6 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   doesn't validate `DocState`, and a non-text slot must not stop the page
   rendering, nor a non-numeric size the export. The dialog opens on the same
   reading (`normalBates`), so Update with nothing touched renumbers nothing;
-  it keeps the stored text size too, having no size control of its own.
+  it keeps the stored text size too, having no size control of its own. Both
+  first numbers (page and Bates) cap at `MAX_START`, twelve digits — page and
+  dialog alike, and far enough below 2^53 that no two pages share a number.

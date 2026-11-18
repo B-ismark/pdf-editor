@@ -291,17 +291,23 @@ test("Update with nothing touched changes nothing, even past what the fields hol
   const f = await fixtures();
   const pageNumbers: PageNumberOptions = {
     position: "bottom-center", start: 1, size: 14, color: "#000000",
-    slots: { "bottom-right": "{bates}" }, bates: { prefix: "", start: 1e17, digits: 3 },
+    start: 1e17, slots: { "bottom-left": "{page}", "bottom-right": "{bates}" },
+    bates: { prefix: "", start: 1e17, digits: 3 },
   };
   await restoreWith(page, f.sample, { pageNumbers });
   await page.keyboard.press("Escape");
-  const label = page.locator(".page").first().locator(".finishlayer__num");
-  const before = { text: await label.textContent(), size: await label.evaluate((e) => getComputedStyle(e).fontSize) };
+  const labels = page.locator(".page").nth(1).locator(".finishlayer__num");
+  // Capped where the fields cap, and still counting exactly on page 2.
+  await expect(labels).toHaveText(["1000000000000", "1000000000000"]);
+  const size = await labels.first().evaluate((e) => getComputedStyle(e).fontSize);
   // No size control in the dialog, so the stored size is kept as it is.
   await page.getByRole("button", { name: "Edit header & footer" }).click();
-  await page.getByRole("dialog").getByRole("button", { name: "Update" }).click();
-  await expect(label).toHaveText(before.text!);
-  expect(await label.evaluate((e) => getComputedStyle(e).fontSize)).toBe(before.size);
+  const dialog = page.getByRole("dialog");
+  await dialog.getByRole("button", { name: "Update" }).click();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText("Header & footer added.").first()).toBeVisible();
+  await expect(labels).toHaveText(["1000000000000", "1000000000000"]);
+  await expect(labels.first()).toHaveCSS("font-size", size);
 });
 
 test("a date added later is today's, not one stored but never shown", async ({ page }) => {
