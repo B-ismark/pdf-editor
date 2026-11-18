@@ -7,7 +7,7 @@ import { expectClean, open, watch } from "./helpers";
  *
  * The failure this guards against isn't a missing chevron, it's a *drifting*
  * one. The ⋯ menu, the Export menu and the command palette all list the same
- * `docActions`, and they have already drifted apart once — the palette carried
+ * command registry, and they have already drifted apart once — the palette carried
  * a hand-written copy of the tool list that no longer matched. So the assertion
  * worth making is not "Watermark has a mark" but "every surface marks exactly
  * the same set", which fails the moment someone adds an action and only wires
@@ -21,7 +21,8 @@ import { expectClean, open, watch } from "./helpers";
 const marked = (rows: Element[]) =>
   rows
     .filter((r) => r.querySelector(".opens-mark"))
-    .map((r) => (r.textContent ?? "").trim())
+    // The label, not the whole row: a row can also show its shortcut.
+    .map((r) => (r.querySelector(".menu__itemlabel, .cmdk__label")?.textContent ?? r.textContent ?? "").trim())
     .sort();
 
 test("the ⋯ menu, the Export menu and the palette mark the same actions", async ({ page }) => {
@@ -32,8 +33,9 @@ test("the ⋯ menu, the Export menu and the palette mark the same actions", asyn
   await page.click('[aria-label="More actions"]');
   const menu = await page.locator(".menu__item").evaluateAll(marked);
   await page.keyboard.press("Escape");
-  expect(menu, "the ⋯ menu marks what opens a dialog").toEqual(["Add image", "Organise pages", "Page numbers", "Watermark"]);
-  const panel = menu;
+  expect(menu, "the ⋯ menu marks what opens a dialog").toEqual(["Add image", "Organise pages", "Page numbers", "Search commands", "Watermark"]);
+  // "Search commands" is the palette itself, which doesn't list itself.
+  const panel = menu.filter((l) => l !== "Search commands");
 
   // The Export menu (Download's caret) marks its own the same way.
   await page.click('[aria-label="Export options"]');

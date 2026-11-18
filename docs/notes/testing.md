@@ -68,7 +68,7 @@ type-checking can't see, and each exists because it broke once:
 - `shell.spec.ts` — the app bar fits its own controls at 360/390/430px with the
   primary action at full size and, on a pointer, sized to the bar it sits in with
   the ⋯ menu carrying a visible container, the overflow menu ends inside the
-  window and every row is one line, the Inspector describes the document with nothing selected (facts, page numbers/watermark set and removed from it, OCR offered on a scan and only for pages without text, gone once read, focus kept after Remove and after OCR, sizes that differ only in orientation counted as one, lossless as an app setting in ⋯/palette mirrored in the panel, a marquee not shown as the document) and the selection otherwise, with "Hide panel" in both,
+  window and every row is one line, the Inspector describes the document with nothing selected (facts, page numbers/watermark set and removed from it, OCR offered on a scan and only for pages without text, gone once read, focus kept after Remove and after OCR, sizes that differ only in orientation counted as one, lossless as an app setting in ⋯/palette mirrored in the panel, a marquee not shown as the document) and the selection otherwise, with "Hide panel" in both, the command registry (every ⋯ and Export row is a palette command with the same label, icon and opens-mark; zoom, panel, pages, autosave, align run from the palette; group actions offered only with a group; Search commands in ⋯ opens the palette),
   a tooltip on an edge control stays on screen, and counts read as English; the
   Export split button's caret opens every output (and only it lists them; Download
   all joins with several tabs), keyboard-operable, and on a phone Export heads

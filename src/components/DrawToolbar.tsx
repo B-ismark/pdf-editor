@@ -12,7 +12,9 @@ interface Props {
   setOpen: (open: boolean) => void;
 }
 
-const SUBTOOLS: { key: AnnotationTool; icon: string; label: string }[] = [
+/** The Draw sub-tools, in strip order. Exported for the command registry, so
+ * the palette lists the same tools, names and icons as the strip. */
+export const SUBTOOLS: { key: AnnotationTool; icon: string; label: string }[] = [
   { key: "highlight", icon: "highlighter", label: "Highlight" },
   { key: "pen", icon: "draw_tool", label: "Pen" },
   { key: "rect", icon: "rectangle", label: "Rectangle" },
