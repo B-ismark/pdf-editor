@@ -770,9 +770,11 @@ test.describe("Export split button", () => {
  */
 test.describe("command registry", () => {
   /** Every row of an open menu — any menuitem, whatever its class, so a
-   * hand-made row can't hide from this — as [id, label, icon, mark, checked, group]. */
+   * hand-made row can't hide from this — as [id, label, icon, mark, checked, group].
+   * Switched-off rows are left out: the palette lists only what can run now
+   * (Split, say, with a one-page document in front). */
   const rowsOf = (page: Page, menu: string) =>
-    page.locator(`${menu} [role^="menuitem"]`).evaluateAll((els) =>
+    page.locator(`${menu} [role^="menuitem"]:not(:disabled)`).evaluateAll((els) =>
       els.map((el) => [
         el.getAttribute("data-cmd") ?? "",
         el.querySelector(".menu__itemlabel")?.textContent?.trim() ?? "",
