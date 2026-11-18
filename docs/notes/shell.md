@@ -232,3 +232,16 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   viewer (a container query), not the window: beside the zoom pill when the
   page area is wide enough, below it when not, centred on phones where the
   pill steps aside.
+
+- **One owner for the app's history entries (`useModal`).** Dialogs push an
+  entry so Back closes them, and the editor's phone layer (Back puts the
+  selection / sheet / edit away) pushes one too — both through `pushHistory`
+  / `unwindHistory` / `onStrayBack`, never `history.*` directly. One
+  `popstate` listener: our own removals are *counted* (two closing in one
+  render are two pops); a push made while a removal is in flight waits for it
+  (Chrome lands a queued `back()` *after* a following `pushState`, dropping
+  the new entry — the dialog that opened then steps out of the app when it
+  closes); a real Back goes to the top dialog, and only with none open to the
+  editor's layer. Before, the editor's own listener took a dialog's removal
+  for Back, and a deselect in the same render as a dialog opening closed the
+  dialog at once. `protect.spec` guards both.

@@ -272,11 +272,14 @@ A pragmatic, client-side editor — worth knowing where the seams are:
   good, not perfect: check anything you intend to redact.
 - **Page numbers / watermark / organize** rebuild the document, so they bake in
   (and reset) the current text edits — do them as a finishing step.
-- **Password-protected PDFs open, but download without a password.** The file
-  is unlocked once, in your browser, when you type its password (an owner-only
-  lock opens without asking); the copy you edit and download is unlocked, and
-  the app says so. A document opened with a password is never stored in the
-  session copy. Adding a password on export isn't supported yet, and
+- **Password-protected PDFs open, and download without a password unless you
+  ask for one.** The file is unlocked once, in your browser, when you type its
+  password (an owner-only lock opens without asking); a plain download is
+  unlocked, and the app says so. **Export → Download with password** makes an
+  AES-256 copy that asks for the password you type (twice — it isn't kept, so a
+  lost password means a lost copy). It sets no "no printing / no copying"
+  flags: those are honour-system and any reader can ignore them. A document
+  opened with a password is never stored in the session copy, and
   Organise's "Add PDF" can't take a password-protected file — open it in its
   own tab first, then add it from there.
 

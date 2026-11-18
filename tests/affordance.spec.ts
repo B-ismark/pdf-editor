@@ -41,7 +41,7 @@ test("the ⋯ menu, the Export menu and the palette mark the same actions", asyn
   await page.click('[aria-label="Export options"]');
   const exporting = await page.locator('[role="menu"][aria-label="Export"] .menu__item').evaluateAll(marked);
   await page.keyboard.press("Escape");
-  expect(exporting).toEqual(["Compress PDF", "Sign with certificate"]);
+  expect(exporting).toEqual(["Compress PDF", "Download with password", "Sign with certificate"]);
 
   // The palette holds every command, not just these, and only renders the rows
   // matching the query — so it is searched one label at a time rather than
