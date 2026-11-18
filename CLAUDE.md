@@ -54,7 +54,7 @@ invariant it protects (and why it exists) is in
 [`docs/notes/testing.md`](docs/notes/testing.md#which-spec-guards-what). Read it
 when a spec fails or before you add one. Specs: `app`, `privacy`, `rendering`,
 `export`, `ocr`, `font`, `baseline`, `colors`, `find`, `phone`, `shell`,
-`icons`, `marks`, `affordance`, `shape`, `fragment`, `chrome`, `tabs`,
+`icons`, `marks`, `affordance`, `shape`, `fragment`, `line`, `ligature`, `chrome`, `tabs`,
 `overlays`, `placement`, `edge`, `keyboard`, `saved`, `password`, `sign`, `pages`, `sidebar`, `update`. If you add a feature that touches privacy, the export bytes, or
 per-page rendering, add a spec for it.
 

@@ -1,4 +1,5 @@
-import { LineCapStyle, PDFCheckBox, PDFDocument, PDFPage, PDFRef, PDFString, PDFTextField, StandardFonts, degrees, rgb, type PDFFont } from "@cantoo/pdf-lib";
+import { LineCapStyle, PDFCheckBox, PDFDocument, PDFPage, PDFRef, PDFString, PDFTextField, StandardFonts, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb, type PDFFont } from "@cantoo/pdf-lib";
+import { fitScale, roomAfter } from "./lineFit";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
 import {
@@ -604,7 +605,9 @@ export async function exportPdf(
       if (!font) font = await getFont(standardFontKey(style.font, style.bold, style.italic));
 
       const text = sanitize(edit!.text, font);
-      const textWidth = font.widthOfTextAtSize(text, style.size);
+      // Kept to the room before the next run on its line — see lineFit.ts.
+      const k = fitScale(font.widthOfTextAtSize(text, style.size), fragment.width, roomAfter(fragment, pageData.fragments, edits));
+      const textWidth = font.widthOfTextAtSize(text, style.size) * k;
       // Cover the original glyphs (and the new text if it's longer), then redraw.
       page.drawRectangle({
         x: x - style.size * 0.05,
@@ -614,7 +617,10 @@ export async function exportPdf(
         color: coverColor(pageColors, fragment.itemIndex),
       });
       const c = hexToRgb(style.color);
+      // Condensed about the run's own start, so x stays where it was.
+      if (k < 1) page.pushOperators(pushGraphicsState(), concatTransformationMatrix(k, 0, 0, 1, x * (1 - k), 0));
       page.drawText(text, { x, y, size: style.size, font, color: rgb(c.r, c.g, c.b) });
+      if (k < 1) page.pushOperators(popGraphicsState());
     }
 
     for (const box of pageBoxes) {
@@ -756,6 +762,8 @@ async function rasterisePage(
     style: TextStyle,
     face?: FragmentFont | null,
     rotation = 0,
+    /** Horizontal condensing, about the text's start — see lineFit.ts. */
+    scaleX = 1,
   ) => {
     if (!text) return;
     ctx.font = cssFont(style, style.size * S, face);
@@ -769,6 +777,7 @@ async function rasterisePage(
     ctx.save();
     ctx.translate(x * S, (H - yBaseline) * S);
     if (rotation) ctx.rotate((rotation * Math.PI) / 180);
+    if (scaleX !== 1) ctx.scale(scaleX, 1);
     text.split("\n").forEach((line, i) => {
       ctx.fillText(line, 0, i * lineStep * S);
     });
@@ -796,7 +805,14 @@ async function rasterisePage(
     // permanent and whatever the user thought they had overwritten is not.
     ctx.font = cssFont(style, style.size * S, face);
     const lines = edit!.text.split("\n");
-    const widest = Math.max(...lines.map((line) => ctx.measureText(line).width / S));
+    // Kept to the room before the next run on its line, as on screen and on the
+    // vector path — see lineFit.ts.
+    const k = fitScale(
+      Math.max(...lines.map((line) => ctx.measureText(line).width / S)),
+      fragment.width,
+      roomAfter(fragment, pageData.fragments, edits),
+    );
+    const widest = Math.max(...lines.map((line) => ctx.measureText(line).width / S)) * k;
     // Extra lines step downward from the baseline, so the cover has to grow with
     // them or the replacement text lands on top of un-covered original glyphs.
     const coverHeight = style.size * 1.2 + (lines.length - 1) * style.size * TEXTBOX_LINE_HEIGHT;
@@ -807,7 +823,7 @@ async function rasterisePage(
       (Math.max(fragment.width, widest) + style.size * 0.1) * S,
       coverHeight * S,
     );
-    drawText(edit!.text, x, y, style, face);
+    drawText(edit!.text, x, y, style, face, 0, k);
   }
 
   // New text boxes.

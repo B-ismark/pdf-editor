@@ -92,6 +92,17 @@ type-checking can't see, and each exists because it broke once:
   exactly the x the exporter draws it at, with no horizontal padding anywhere in
   the chain, and a selected fragment is marked by rules above and below rather
   than a ring whose vertical edge reads as a letter;
+- `ligature.spec.ts` — in a document's own TrueType face, every letter draws
+  as itself (pdf.js had filed the "fi" ligature under "f": "from" read
+  "firom"), and an edit kept in that face exports at all, with real glyphs and
+  real spaces (no .notdef boxes); skipped where DejaVu isn't installed;
+- `line.spec.ts` — on a line written as several runs (as Word writes one), an
+  edited run keeps to the room before the next run, less the word space, and is
+  condensed when it needs more — on screen and in both export paths (vector,
+  and raster under a redaction) — so it never covers the next word; a run with
+  a tab-stop gap or nothing after it still grows freely; on a turned page the
+  preview condenses as the file does; a very long edit stops at the 0.7 floor;
+  an emptied neighbour frees its room; a raised footnote marker still bounds it;
 - `chrome.spec.ts` — the draw sub-toolbar opens with its tool, folds away when a
   sub-tool is picked and comes back from its handle; the colour popover stays on
   screen and covers neither the toolbar it lives in nor the tool dock, at three

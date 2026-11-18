@@ -130,3 +130,36 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     properties panel, and both export paths cannot disagree about what colour the
     text is. A memo that reads it needs it as a dependency (`activeStyle` in
     `DocumentEditor.tsx`) — it arrives after the page is sampled.
+  - **An edit keeps to its line** (`lineFit.ts`). A line is usually several
+    runs, each at its own x; an edit that grew in place covered the next run
+    (the opaque cover too), on screen and in the file. `roomAfter` gives the room
+    up to the next run on the same baseline, less up to a word space (pdf.js
+    drops the space item, so the next x is its first glyph); `fitScale` condenses
+    past it. The overlay (`scaleX`), the vector path (`cm`) and the raster path
+    (`ctx.scale`) all use it. Reflow was rejected: it redraws untouched text and
+    would slide words out from under a measured search-redaction box.
+    Its edges, each from a review: "the same line" is the glyph *band*, not the
+    baseline, so a raised footnote marker still bounds the edit; a neighbour the
+    user emptied stops counting (pass `edits`); condensing stops at `MIN_FIT`
+    (0.7) — past it the edit runs on, readable, rather than shrinking to a
+    smear; and the overlay measures its width against `offsetWidth`, because
+    on a turned page the bounding rect is the rotated box.
+  - **The document's face is patched at build time** (`pdfWorkerPlugin` in
+    `vite.config.ts`). pdf.js's rebuilt face is used by Unicode three ways — the
+    selected overlay, the raster export's `ctx.font`, and the vector export,
+    which embeds those bytes (`fontEmbed.ts`) — and its Unicode cmap had two
+    gaps: a ligature was filed under its first letter ("f" drew "fi"), and an
+    outline-less glyph (the space) was left out (the export drew .notdef boxes).
+    The patch fails the build if a pdf.js upgrade moves the code; re-derive it
+    from `adjustMapping` rather than deleting it. Known edge: a letter a subset
+    only ever used inside a ligature ("f" only in "fi") now has no glyph of its
+    own, so an edit using it leaves the document's face — the export draws the
+    run in a standard font, the preview only that letter (the same as any
+    letter the subset lacks; before, it drew the ligature for it).
+  - **`fontEmbed.ts` registers `@pdf-lib/fontkit` through `streamingSubsets`.**
+    `@cantoo/pdf-lib` prefers a subset's `encode()`, which in this fontkit is an
+    internal `encode(stream)`; called bare it threw at save, and every export
+    with an edit kept in the source face failed. Don't register fontkit directly.
+    It fixes TrueType faces only: a CFF or Type1 face (most LaTeX output) still
+    fails to subset ("Not a CFF Font"), `get()` catches it and the edit exports
+    in a standard font while the preview shows the document's face.
