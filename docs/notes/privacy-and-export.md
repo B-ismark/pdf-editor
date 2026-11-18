@@ -200,7 +200,20 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   are honour-system, and a known owner password would only be a second key to
   the same lock. The password is held in a ref across the whiteout warning and
   cleared the moment the export reads it — never in state, storage or a
-  session copy.
+  session copy; the dialog is no `<form>` and its fields are
+  `autocomplete="off"`, so no browser offers to save it.
+  **`@cantoo/pdf-lib` encrypts streams only.** Objects packed into object
+  streams are covered by the stream's encryption, but the writer keeps the
+  catalog, page tree, pages, `/Type /Sig` dicts, non-zero generations and
+  every stream's dictionary out of them — and their strings (`/Lang`, page
+  label prefixes, `/AcroForm /DA`, named destinations) went out in the clear
+  and came back scrambled for the person with the password.
+  `encryptLooseStrings` encrypts exactly those, mirroring `PDFStreamWriter`'s
+  predicate (a signature's `/Contents` stays clear, per the standard). If the
+  library's predicate changes, `protect.spec`'s dictionary test catches it.
+  **Passwords are prepared** (`password.ts`: non-ASCII spaces → space,
+  invisible joiners dropped, NFKC) before hashing, as R6 wants and Acrobat
+  does; opening tries the password as typed, then prepared.
 - **Download via `src/download.ts`.** It attaches the anchor before clicking and
   defers `revokeObjectURL`; revoking synchronously races the browser's fetch of
   the blob and cancels downloads on Firefox/Safari.
