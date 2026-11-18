@@ -790,9 +790,10 @@ function wrapLine(ctx: CanvasRenderingContext2D, text: string, room: number, max
       if (fits(rest.slice(0, mid).trimEnd())) lo = mid;
       else hi = mid - 1;
     }
-    // Back to the last space in it, when there is one.
+    // Back to the last space in it, when there is one — even an indent at the
+    // very start, which then stands as a line of its own, as the preview has it.
     const space = rest.slice(0, lo + 1).search(/\s\S*$/);
-    const cut = space > 0 ? space + 1 : lo;
+    const cut = space >= 0 ? space + 1 : lo;
     out.push(rest.slice(0, cut).trimEnd());
     rest = rest.slice(cut).replace(/^\s+/, "");
   }
@@ -857,10 +858,11 @@ function drawRasterForm(
         const options = f.options ?? [];
         const extra = chosen.filter((c) => !options.some((o) => o.value === c)).map((c) => ({ value: c, label: c }));
         const all = [...options, ...extra];
-        // Scrolled, as the preview's list is, so the first chosen option shows.
+        // Scrolled as the preview's list is: just far enough that the first
+        // chosen option shows, at the bottom, never past the last option.
         const rows = Math.max(1, Math.floor((height - 2) / lineH));
         const first = all.findIndex((o) => chosen.includes(o.value));
-        const start = first >= rows ? first : 0;
+        const start = first >= rows ? Math.max(0, Math.min(first - rows + 1, all.length - rows)) : 0;
         all.slice(start, start + rows + 1).forEach((o, i) => {
           const rowTop = top + (2 + lineH * i) * S;
           if (chosen.includes(o.value)) {

@@ -305,15 +305,19 @@ test.describe("what the file keeps", () => {
     expect(await dark(second(E.essay.rect)), "a long answer wraps").toBeGreaterThan(0);
     await expect(page.locator(".snackbar__msg").filter({ hasText: "fillable" })).toHaveCount(0);
     const [lx, ly, lw, lh] = E.level.rect;
-    const marked = await page.locator(".page canvas").first().evaluate((c: HTMLCanvasElement, r: number[]) => {
-      const s = c.width / 500;
-      const [x, y, w, h] = r;
-      const data = c.getContext("2d")!.getImageData(x * s, (560 - y - h) * s, w * s, h * s).data;
-      let n = 0;
-      for (let i = 0; i < data.length; i += 4) if (data[i + 2] > 180 && data[i] < 180 && data[i + 1] > 160) n++;
-      return n;
-    }, [lx, ly + lh / 2, lw, lh / 2]);
-    expect(marked, "the chosen option is shown, marked, in the list's top rows").toBeGreaterThan(0);
+    const marked = (fromTop: number, to: number) =>
+      page.locator(".page canvas").first().evaluate((c: HTMLCanvasElement, r: number[]) => {
+        const s = c.width / 500;
+        const [x, y, w, h] = r;
+        const data = c.getContext("2d")!.getImageData(x * s, (560 - y - h) * s, w * s, h * s).data;
+        let n = 0;
+        for (let i = 0; i < data.length; i += 4) if (data[i + 2] > 180 && data[i] < 180 && data[i + 1] > 160) n++;
+        return n;
+      }, [lx, ly + lh - to, lw, to - fromTop]);
+    // Two rows show, scrolled just enough — "Intermediate", then "Expert"
+    // marked — as the preview's list shows it: the mark is the second row.
+    expect(await marked(23, 36), "the chosen option is shown, marked, in the second row").toBeGreaterThan(0);
+    expect(await marked(4, 18), "not scrolled to the top of the box").toBe(0);
   });
 
   test("a dropdown shows its own unlisted value and stays untypeable; a locked field can't be changed", async ({ page }) => {

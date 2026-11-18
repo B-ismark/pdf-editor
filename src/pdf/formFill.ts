@@ -172,10 +172,13 @@ function setValue(field: PDFField, v: FormValue): void {
     else if (field instanceof PDFDropdown) {
       // A value no option holds (the preview shows it as it is) is drawn as
       // it is too. pdf-lib's `select` takes it by making the dropdown
-      // editable; it isn't, so that's put back.
+      // editable, and several values by making it multi-select; whichever it
+      // wasn't is put back.
       const editable = field.isEditable();
+      const multi = field.isMultiselect();
       field.select(chosen.length === 1 ? chosen[0] : chosen);
       if (!editable) field.disableEditing();
+      if (!multi) field.disableMultiselect();
     } else field.select(chosen.length === 1 ? chosen[0] : chosen);
   }
 }
