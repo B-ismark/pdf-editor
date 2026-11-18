@@ -301,21 +301,16 @@ test.describe("what the file keeps", () => {
     await expect(page.locator(".snackbar__msg").filter({ hasText: "fillable" })).toHaveCount(0);
   });
 
-  test("a dropdown's own value is drawn as itself; a locked field can't be changed", async ({ page }) => {
+  test("a dropdown shows its own unlisted value and stays untypeable; a locked field can't be changed", async ({ page }) => {
     await open(page, (await fixtures()).formEdge);
     await expect(field(page, E.locked.name)).toHaveAttribute("readonly", "");
     const legacy = field(page, E.legacy.name);
+    // (Flattened untouched, it's printed: the flatten test reads it back.)
     await expect(legacy).toHaveValue(E.legacy.value);
     await legacy.selectOption(E.legacy.options[1]);
-    await legacy.selectOption(E.legacy.value);
-    const doc = await PDFDocument.load(await download(page));
-    const dd = doc.getForm().getDropdown(E.legacy.name);
+    const dd = (await PDFDocument.load(await download(page))).getForm().getDropdown(E.legacy.name);
+    expect(dd.getSelected()).toEqual([E.legacy.options[1]]);
     expect(dd.isEditable(), "still takes no typing").toBe(false);
-    const ap = dd.acroField.getWidgets()[0].dict.lookup(PDFName.of("AP"), PDFDict);
-    const look = ap.lookup(PDFName.of("N"), PDFRawStream);
-    const ops = Buffer.from(decodePDFRawStream(look).decode()).toString("latin1");
-    const hex = Buffer.from(E.legacy.value, "latin1").toString("hex").toUpperCase();
-    expect(ops.toUpperCase(), "its look shows the value the file holds").toContain(hex);
   });
 
   test("a radio button named in UTF-8 bytes is still the one saved", async ({ page }) => {
