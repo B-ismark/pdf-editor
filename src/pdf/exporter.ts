@@ -1,3 +1,4 @@
+import { HF_MARGIN, labelsFor } from "./headerFooter";
 import { LineCapStyle, PDFArray, PDFCatalog,  PDFDict, PDFDocument, PDFHexString, PDFInvalidObject, PDFName, PDFPage, PDFPageLeaf, PDFPageTree, PDFRef, PDFStream, PDFString,  StandardFonts, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb, type PDFFont } from "@cantoo/pdf-lib";
 import { fitScale, roomAfter } from "./lineFit";
 import { renderPageToCanvas } from "./loader";
@@ -126,20 +127,33 @@ export interface ExportInput {
  * the view itself, at 0,0. */
 interface ViewFrame { x: number; y: number; width: number; height: number }
 
-/** Draw a page number onto a finished page (vector or rasterised alike). */
-function drawPageNumber(page: PDFPage, font: PDFFont, label: string, opts: PageNumberOptions, frame: ViewFrame): void {
+/** Draw the header & footer onto a finished page (vector or rasterised
+ * alike): each place's text, filled in for the page at `pos` of `total`. */
+function drawHeaderFooter(
+  page: PDFPage,
+  font: PDFFont,
+  opts: PageNumberOptions,
+  pos: number,
+  total: number,
+  frame: ViewFrame,
+  dropped: Set<string>,
+): void {
   const c = hexToRgb(opts.color);
-  const margin = 28;
+  const margin = HF_MARGIN;
   const { width, height } = frame;
-  const tw = font.widthOfTextAtSize(label, opts.size);
-  const top = opts.position.startsWith("top");
-  const y = top ? height - margin - opts.size : margin;
-  const x = opts.position.endsWith("left")
-    ? margin
-    : opts.position.endsWith("right")
-      ? width - margin - tw
-      : width / 2 - tw / 2;
-  page.drawText(label, { x: frame.x + x, y: frame.y + y, size: opts.size, font, color: rgb(c.r, c.g, c.b) });
+  for (const { position, text: raw } of labelsFor(opts, pos, total)) {
+    const label = sanitize(raw, font, dropped);
+    if (!label.trim()) continue;
+    const tw = font.widthOfTextAtSize(label, opts.size);
+    const top = position.startsWith("top");
+    const y = top ? height - margin - opts.size : margin;
+    const x = position.endsWith("left")
+      ? margin
+      : position.endsWith("right")
+        ? width - margin - tw
+        : width / 2 - tw / 2;
+    page.drawText(label, { x: frame.x + x, y: frame.y + y, size: opts.size, font, color: rgb(c.r, c.g, c.b) });
+  }
 }
 
 /** Stamp a diagonal text watermark centred on a finished page. */
@@ -583,7 +597,7 @@ export async function exportPdf(
     // page number and watermark; links are drawn in whole-view space, so they
     // move by the view's own corner only — never by the crop's.
     const applyPageLayers = (page: PDFPage, frame: ViewFrame, origin: { x: number; y: number }) => {
-      if (pageNumbers) drawPageNumber(page, helv, String(pageNumbers.start + slot.pos), pageNumbers, frame);
+      if (pageNumbers) drawHeaderFooter(page, helv, pageNumbers, slot.pos, plan.length, frame, dropped);
       if (watermark && wmFont) drawWatermark(page, wmFont, watermark, frame, dropped);
       addLinkAnnots(out, page, pageLinks, origin, (source) =>
         planned.has(source) ? finished[source]?.ref : undefined,

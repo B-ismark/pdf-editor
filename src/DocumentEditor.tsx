@@ -1037,7 +1037,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       setFinishTab(null);
       doc.set((d) => ({ ...d, pageNumbers: opts }));
       setStatus("ready");
-      setMessage("Page numbers added.");
+      setMessage("Header & footer added.");
     },
     [doc],
   );
@@ -1046,7 +1046,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     setFinishTab(null);
     doc.set((d) => ({ ...d, pageNumbers: null }));
     setStatus("ready");
-    setMessage("Page numbers removed.");
+    setMessage("Header & footer removed.");
   }, [doc]);
 
   const applyWatermark = useCallback(
@@ -2712,7 +2712,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     { id: "redact-patterns", group: "text", label: "Redact patterns", icon: "redact_patterns", keywords: "find search email phone card iban ssn date regex personal information pii privacy", opens: "dialog", run: openPatterns },
     { id: "hidden-info", group: "text", label: "Hidden information", icon: "hidden_info", keywords: "metadata author properties privacy scrub remove clean attachments scripts javascript", opens: "dialog", run: () => { setSelection(null); setHiddenOpen(true); } },
     { id: "copytext", group: "text", label: "Copy all text", icon: "content_copy", keywords: "clipboard", run: () => void copyAllText() },
-    { id: "numbers", group: "finish", label: "Page numbers", icon: "page_numbers", keywords: "pagination folio", opens: "dialog", run: () => { setSelection(null); setFinishTab("numbers"); } },
+    { id: "numbers", group: "finish", label: "Header & footer", icon: "page_numbers", keywords: "page numbers pagination folio bates date file name header footer", opens: "dialog", run: () => { setSelection(null); setFinishTab("numbers"); } },
     { id: "watermark", group: "finish", label: "Watermark", icon: "watermark", keywords: "draft stamp", opens: "dialog", run: () => { setSelection(null); setFinishTab("watermark"); } },
 
     // Making a file can't start while one is being made.
@@ -3156,6 +3156,7 @@ export const DocumentEditor = memo(function DocumentEditor({
                 formValues={formValues}
                 pageNumbers={pageNumbers}
                 watermark={watermark}
+                pageTotal={shown.length}
                 multiIds={multiByPage.get(page.pageIndex) ?? NO_IDS}
                 placing={pendingStamp}
                 findMatches={matchesByPage.get(page.pageIndex)}
@@ -3496,6 +3497,8 @@ export const DocumentEditor = memo(function DocumentEditor({
             onClearNumbers={clearNumbers}
             onClearWatermark={clearWatermark}
             onClose={() => setFinishTab(null)}
+            fileName={fileName}
+            pageTotal={shown.length}
           />
         </Suspense>
       )}

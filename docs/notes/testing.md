@@ -304,6 +304,16 @@ type-checking can't see, and each exists because it broke once:
   tab stop that arrows move, without also nudging the selected link, and End
   on a deleted page's link leaves it flagged; closing a section keeps focus in
   the tree;
+- `headerfooter.spec.ts` — Package 8f. The resolver (a setting from before
+  reads as its page number; tokens fill per page, case-insensitively; `{pages}`
+  counts from the start; a brace that isn't a token stays; Bates pads, keeps
+  counting past its digits, and survives nonsense) and, in the app: a new
+  setting starts as a bottom-centre page number; clearing every place disables
+  Apply; a chip goes in at the caret of the place last focused; the Bates block
+  and its range appear once it's used; the page previews exactly what the file
+  gets, a cleared place leaves no number behind, right-aligned text ends on the
+  same margin; `{date}` and `{file}` are the applied ones, not today's or the
+  tab's; a page-number setting from before opens as its one place;
 - `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
   never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
   character WinAnsi can't encode instead of throwing, so `sanitize`

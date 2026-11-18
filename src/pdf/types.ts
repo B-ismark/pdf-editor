@@ -302,12 +302,30 @@ export type NumberPosition =
   | "top-left" | "top-center" | "top-right"
   | "bottom-left" | "bottom-center" | "bottom-right";
 
-/** Page-numbering options, applied to every page at export time. */
+/** Header & footer (it began as page numbers alone), drawn on every page at
+ * export time. Read through `headerFooter.ts`, never field by field. */
 export interface PageNumberOptions {
+  /** Where "{page}" goes when there are no `slots` (sessions from before
+   * header & footer). */
   position: NumberPosition;
+  /** The number of the first page, for {page} and {pages}. */
   start: number;
   size: number;
   color: string;
+  /** Text by place, with tokens: {page} {pages} {date} {file} {bates}. */
+  slots?: Partial<Record<NumberPosition, string>>;
+  bates?: BatesOptions;
+  /** What {date} and {file} say. Fixed when applied, so the page and the file
+   * agree and every export of it says the same. */
+  date?: string;
+  file?: string;
+}
+
+/** Bates numbering: a prefix and a running number, zero-padded. */
+export interface BatesOptions {
+  prefix: string;
+  start: number;
+  digits: number;
 }
 
 /** Diagonal text watermark options, applied to every page at export time. */

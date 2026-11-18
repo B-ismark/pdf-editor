@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
 import { useModal } from "../hooks/useModal";
-import type { NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/types";
+import { DEFAULT_BATES, MAX_BATES_DIGITS, POSITIONS, TOKENS, batesNumber, labelsFor, slotsOf } from "../pdf/headerFooter";
+import type { BatesOptions, NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/types";
 
 interface Props {
   initialTab?: "numbers" | "watermark";
@@ -14,12 +15,28 @@ interface Props {
   onClearNumbers: () => void;
   onClearWatermark: () => void;
   onClose: () => void;
+  /** The document's name and page count as shown, for `{file}` and `{pages}`
+   * (and the Bates range) — fixed into the setting when it's applied. */
+  fileName: string;
+  pageTotal: number;
 }
 
-const POSITIONS: NumberPosition[] = [
-  "top-left", "top-center", "top-right",
-  "bottom-left", "bottom-center", "bottom-right",
-];
+type Slots = Partial<Record<NumberPosition, string>>;
+
+const PLACE: Record<NumberPosition, string> = {
+  "top-left": "Header, left",
+  "top-center": "Header, centre",
+  "top-right": "Header, right",
+  "bottom-left": "Footer, left",
+  "bottom-center": "Footer, centre",
+  "bottom-right": "Footer, right",
+};
+
+/** Today, as a reader would write it: fixed into the setting at Apply, so the
+ * preview, every page and every later export agree. */
+function today(): string {
+  return new Date().toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+}
 
 export function FinishDialog({
   initialTab = "numbers",
@@ -30,10 +47,17 @@ export function FinishDialog({
   onClearNumbers,
   onClearWatermark,
   onClose,
+  fileName,
+  pageTotal,
 }: Props) {
   const [tab, setTab] = useState(initialTab);
-  const [position, setPosition] = useState<NumberPosition>(currentNumbers?.position ?? "bottom-center");
+  // A setting from before header & footer (no `slots`) opens as its one
+  // "{page}" place; a new one starts as a page number, bottom centre.
+  const [slots, setSlots] = useState<Slots>(() =>
+    Object.fromEntries(currentNumbers ? slotsOf(currentNumbers) : [["bottom-center", "{page}"]]),
+  );
   const [start, setStart] = useState(currentNumbers?.start ?? 1);
+  const [bates, setBates] = useState<BatesOptions>(currentNumbers?.bates ?? DEFAULT_BATES);
   const [numColor, setNumColor] = useState(currentNumbers?.color ?? "#444444");
   const [text, setText] = useState(currentWatermark?.text ?? "DRAFT");
   const [wmColor, setWmColor] = useState(currentWatermark?.color ?? "#888888");
@@ -41,6 +65,40 @@ export function FinishDialog({
   const [angle, setAngle] = useState(currentWatermark?.angle ?? 45);
   const [wmSize, setWmSize] = useState(currentWatermark?.size ?? 60);
   const modalRef = useModal<HTMLDivElement>(onClose);
+
+  // The place a token chip types into: the last one focused.
+  const inputs = useRef<Partial<Record<NumberPosition, HTMLInputElement | null>>>({});
+  const lastPlace = useRef<NumberPosition>("bottom-center");
+  const insert = (token: string) => {
+    const at = lastPlace.current;
+    const el = inputs.current[at];
+    const value = slots[at] ?? "";
+    const from = el?.selectionStart ?? value.length;
+    const to = el?.selectionEnd ?? value.length;
+    setSlots((s) => ({ ...s, [at]: value.slice(0, from) + token + value.slice(to) }));
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(from + token.length, from + token.length);
+    });
+  };
+
+  // What Apply stores, and so what the preview line, the page and the file read.
+  const draft = useMemo<PageNumberOptions>(() => {
+    const filled = slotsOf({ position: "bottom-center", start, size: 11, color: numColor, slots });
+    return {
+      position: filled[0]?.[0] ?? "bottom-center",
+      start,
+      size: 11,
+      color: numColor,
+      slots: Object.fromEntries(filled),
+      bates,
+      date: today(),
+      file: fileName,
+    };
+  }, [slots, start, numColor, bates, fileName]);
+  const empty = slotsOf(draft).length === 0;
+  const usesBates = slotsOf(draft).some(([, t]) => /\{bates\}/i.test(t));
+  const firstPage = labelsFor(draft, 0, Math.max(1, pageTotal));
 
   return (
     <div className="dialog-scrim" onPointerDown={onClose}>
@@ -62,7 +120,7 @@ export function FinishDialog({
 
         <div className="segmented dialog__tabs">
           <button className={`segmented__btn${tab === "numbers" ? " segmented__btn--on" : ""}`} onClick={() => setTab("numbers")}>
-            Page numbers
+            Header &amp; footer
           </button>
           <button className={`segmented__btn${tab === "watermark" ? " segmented__btn--on" : ""}`} onClick={() => setTab("watermark")}>
             Watermark
@@ -72,24 +130,79 @@ export function FinishDialog({
         <div className="dialog__body dialog__body--form">
           {tab === "numbers" ? (
             <div className="props__section">
+              {(["Header", "Footer"] as const).map((band) => (
+                <div className="field" key={band}>
+                  <span className="field__label label-medium">{band}</span>
+                  <div className="hf__band">
+                    {POSITIONS.filter((p) => p.startsWith(band === "Header" ? "top" : "bottom")).map((p) => (
+                      <input
+                        key={p}
+                        ref={(el) => {
+                          inputs.current[p] = el;
+                        }}
+                        className="hf__slot"
+                        aria-label={PLACE[p]}
+                        placeholder={p.endsWith("left") ? "Left" : p.endsWith("right") ? "Right" : "Centre"}
+                        value={slots[p] ?? ""}
+                        onFocus={() => {
+                          lastPlace.current = p;
+                        }}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          setSlots((s) => ({ ...s, [p]: v }));
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              ))}
               <div className="field">
-                <span className="field__label label-medium">Position</span>
-                <div className="posgrid">
-                  {POSITIONS.map((p) => (
+                <span className="field__label label-medium">Insert</span>
+                <div className="chip-row hf__tokens">
+                  {TOKENS.map((t) => (
                     <button
-                      key={p}
-                      className={`posgrid__cell${position === p ? " posgrid__cell--on" : ""}`}
-                      onClick={() => setPosition(p)}
-                      aria-label={p}
-                      aria-pressed={position === p}
-                    />
+                      key={t.token}
+                      type="button"
+                      className="chip hf__token"
+                      // Keep the caret where it is: the chip types into the
+                      // place last focused, at its cursor.
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => insert(t.token)}
+                    >
+                      {t.label}
+                    </button>
                   ))}
                 </div>
               </div>
+              <p className="hf__preview body-medium" aria-live="polite">
+                {empty
+                  ? "Nothing to add yet — type in a place above."
+                  : <>Page 1 reads: {firstPage.map((l, i) => <span key={l.position}>{i > 0 && " · "}<b>{l.text}</b></span>)}</>}
+              </p>
               <div className="field field--row">
-                <span className="field__label label-medium">Start at</span>
-                <input className="numinput" type="number" min={0} value={start} onChange={(e) => setStart(Number(e.target.value) || 0)} />
+                <span className="field__label label-medium">Number pages from</span>
+                <input className="numinput" type="number" min={0} aria-label="Number pages from" value={start} onChange={(e) => setStart(Math.max(0, Math.round(Number(e.target.value)) || 0))} />
               </div>
+              {usesBates && (
+                <fieldset className="hf__bates">
+                  <legend className="field__label label-medium">Bates number</legend>
+                  <div className="field field--row">
+                    <span className="field__label label-medium">Prefix</span>
+                    <input className="numinput hf__prefix" aria-label="Bates prefix" value={bates.prefix} onChange={(e) => setBates((b) => ({ ...b, prefix: e.target.value }))} />
+                  </div>
+                  <div className="field field--row">
+                    <span className="field__label label-medium">Start at</span>
+                    <input className="numinput" type="number" min={0} aria-label="Bates start" value={bates.start} onChange={(e) => setBates((b) => ({ ...b, start: Math.max(0, Math.round(Number(e.target.value)) || 0) }))} />
+                  </div>
+                  <div className="field field--row">
+                    <span className="field__label label-medium">Digits</span>
+                    <input className="numinput" type="number" min={1} max={MAX_BATES_DIGITS} aria-label="Bates digits" value={bates.digits} onChange={(e) => setBates((b) => ({ ...b, digits: Math.max(1, Math.min(MAX_BATES_DIGITS, Math.round(Number(e.target.value)) || 1)) }))} />
+                  </div>
+                  <p className="hf__range body-medium">
+                    {batesNumber(bates, 0)} – {batesNumber(bates, Math.max(1, pageTotal) - 1)}
+                  </p>
+                </fieldset>
+              )}
               <div className="field field--row">
                 <span className="field__label label-medium">Colour</span>
                 <ColorField value={numColor} onChange={setNumColor} />
@@ -128,7 +241,7 @@ export function FinishDialog({
               {currentNumbers && (
                 <button className="btn" onClick={onClearNumbers}>Remove</button>
               )}
-              <button className="btn btn--filled" onClick={() => onApplyNumbers({ position, start, size: 11, color: numColor })}>
+              <button className="btn btn--filled" disabled={empty} onClick={() => onApplyNumbers({ ...draft, bates: usesBates ? bates : undefined })}>
                 {currentNumbers ? "Update" : "Apply"}
               </button>
             </>
