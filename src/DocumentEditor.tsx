@@ -117,12 +117,21 @@ type NavKey = Tool | "sign";
 const NO_LINKS: LinkAnnot[] = [];
 const NO_FORM_VALUES: Record<string, FormValue> = {};
 
-/** What to say when fields chosen to be flattened stayed a form: their text
- * has characters the export's built-in font can't draw. */
+/** What to say when fields chosen to be flattened stayed a form: their look
+ * couldn't be drawn (text the built-in font lacks, a layout it can't do).
+ * Named, so the user knows which to check — up to three, then a count. */
 function keptFillableNote(names: string[]): string {
   if (names.length === 0) return "";
-  const which = names.length === 1 ? `“${names[0]}” stays` : `${plural(names.length, "field")} stay`;
-  return ` ${which} fillable — ${names.length === 1 ? "its" : "their"} text can't be drawn into the page.`;
+  const shown = names.slice(0, 3).map((n) => `“${n}”`);
+  const rest = names.length - shown.length;
+  const list =
+    rest > 0
+      ? `${shown.join(", ")} and ${plural(rest, "other")}`
+      : shown.length > 1
+        ? `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}`
+        : shown[0];
+  const one = names.length === 1;
+  return ` ${list} ${one ? "stays" : "stay"} fillable — ${one ? "it" : "they"} couldn't be drawn into the page.`;
 }
 
 /** What a page with nothing of a kind on it gets: one shared identity each, so
@@ -592,6 +601,21 @@ export const DocumentEditor = memo(function DocumentEditor({
 
   const vp = useViewport(fitRef.current);
   const { fitWidth, pageWidthPts } = vp.fit;
+  // A form box or radio keeps focus after a click, and keys go to it (Space
+  // ticks, arrows move the choice). Selecting something else on the page
+  // mostly prevents the pointer's default, which would have moved focus — so
+  // hand focus back here, or Delete and arrow-nudge would still go to the box.
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el?.closest(".formlayer")) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;
+      el.blur();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, []);
+
   useEffect(() => {
     if (fitWidth > 0 && pageWidthPts > 0) fitRef.current = { fitWidth, pageWidthPts };
   }, [fitRef, fitWidth, pageWidthPts]);

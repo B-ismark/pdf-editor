@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
-import { PDFBool, PDFDict, PDFDocument, PDFName, PDFRawStream, decodePDFRawStream } from "pdf-lib";
+import { PDFArray, PDFBool, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFTextField, decodePDFRawStream } from "pdf-lib";
 import { fixtures, FORM, FORM_EDGE } from "./fixtures";
 import { dragOnPage, expectClean, open, openOrganise, pageTexts, pickTool, watch } from "./helpers";
 import { writeFileSync } from "node:fs";
@@ -242,12 +242,15 @@ test.describe("what the file keeps", () => {
     await field(page, E.script.name).selectOption({ label: "English" });
     await formPanel(page).getByRole("radio", { name: "Flatten into the page" }).check();
     const out = await download(page);
-    await expect(page.locator(".snackbar__msg").filter({ hasText: `“${E.script.name}” stays fillable` }).first()).toBeVisible();
+    await expect(page.locator(".snackbar__msg").filter({ hasText: `“${E.script.name}”` }).first()).toBeVisible();
+    // Not only text the font can't draw: any field whose look can't be drawn
+    // (a comb field holding more than its boxes) stays, and is named.
+    await expect(page.locator(".snackbar__msg").filter({ hasText: `“${E.comb.name}”` }).first()).toBeVisible();
     await expect(page.locator(".snackbar__msg").filter({ hasText: E.signature.name })).toHaveCount(0);
 
     const doc = await PDFDocument.load(out);
     const form = doc.getForm();
-    expect(form.getFields().map((f) => f.getName()).sort()).toEqual([E.script.name, E.signature.name]);
+    expect(form.getFields().map((f) => f.getName()).sort()).toEqual([E.comb.name, E.script.name, E.signature.name]);
     expect(form.getOptionList(E.script.name).getSelected()).toEqual(["English"]);
     const [text] = await pageTexts(out, [1]);
     expect(text).toContain(E.city.value);
@@ -256,8 +259,11 @@ test.describe("what the file keeps", () => {
     expectClean(w);
   });
 
-  test("a redacted page doesn't carry the form's old answers in its picture", async ({ page }, info) => {
+  test("a redacted page shows the answers as they are now, not as the file came", async ({ page }, info) => {
     await open(page, (await fixtures()).formEdge);
+    // The file says "Tamale"; cleared here. No answer was given; the third chosen.
+    await page.getByRole("combobox", { name: E.city.tip }).selectOption("");
+    await page.getByRole("radio", { name: `${E.answer.name}: option 3 of 3`, exact: true }).click();
     const box = (await page.locator(".page").first().boundingBox())!;
     // Over the heading only, nowhere near the fields.
     await pickTool(page, "Redact");
@@ -270,15 +276,83 @@ test.describe("what the file keeps", () => {
 
     await open(page, file);
     await expect(page.locator(".formlayer [data-field]")).toHaveCount(0);
-    const dark = await page.locator(".page canvas").first().evaluate((c: HTMLCanvasElement, r: number[]) => {
-      const s = c.width / 500;
-      const [x, y, w, h] = r;
-      const data = c.getContext("2d")!.getImageData(x * s, (560 - y - h) * s, w * s, h * s).data;
-      let n = 0;
-      for (let i = 0; i < data.length; i += 4) if (data[i] < 110 && data[i + 1] < 110 && data[i + 2] < 110) n++;
-      return n;
-    }, E.city.rect);
-    expect(dark, `no "${E.city.value}" baked into the page`).toBe(0);
+    const dark = (r: number[]) =>
+      page.locator(".page canvas").first().evaluate((c: HTMLCanvasElement, r: number[]) => {
+        const s = c.width / 500;
+        const [x, y, w, h] = r;
+        const data = c.getContext("2d")!.getImageData(x * s, (560 - y - h) * s, w * s, h * s).data;
+        let n = 0;
+        for (let i = 0; i < data.length; i += 4) if (data[i] < 110 && data[i + 1] < 110 && data[i + 2] < 110) n++;
+        return n;
+      }, r);
+    expect(await dark(E.city.rect), `no "${E.city.value}": the answer was cleared`).toBe(0);
+    expect(await dark([160, E.answer.y, 16, 16]), "the button chosen is drawn chosen").toBeGreaterThan(0);
+    expect(await dark([40, E.answer.y, 16, 16]), "and the others not").toBe(0);
+  });
+
+  test("a radio button named in UTF-8 bytes is still the one saved", async ({ page }) => {
+    await open(page, (await fixtures()).formEdge);
+    await field(page, E.cyrillic.name).nth(1).click();
+    const doc = await PDFDocument.load(await download(page));
+    const f = doc.getForm().getRadioGroup(E.cyrillic.name).acroField;
+    const as = f.getWidgets().map((w) => String(w.dict.get(PDFName.of("AS"))));
+    expect(as[0]).toBe("/Off");
+    expect(as[1]).not.toBe("/Off");
+    expect(String(f.dict.get(PDFName.of("V")))).toBe(as[1]);
+  });
+
+  test("a field in a /Parent loop, or under an untitled parent, still gets its value", async ({ page }) => {
+    await open(page, (await fixtures()).formEdge);
+    await field(page, E.loop.name).fill("Looped");
+    await field(page, E.leaf.name).fill("Leafy");
+    await field(page, E.level.name).selectOption({ label: E.level.options[1] });
+    const doc = await PDFDocument.load(await download(page));
+    const form = doc.getForm();
+    const text = (suffix: string) => form.getFields().find((f) => f.getName().endsWith(suffix));
+    expect((text("top") as PDFTextField).getText()).toBe("Looped");
+    expect((text(E.leaf.name) as PDFTextField).getText()).toBe("Leafy");
+    expect(form.getOptionList(E.level.name).getSelected(), "and the rest of the form too").toEqual([E.level.options[1]]);
+  });
+
+  test("a clicked form box gives the keyboard back when a box on the page is selected", async ({ page }) => {
+    await open(page, (await fixtures()).form);
+    const box = (await page.locator(".page").first().boundingBox())!;
+    await pickTool(page, "Redact");
+    await dragOnPage(page, { x: box.width * 0.6, y: box.height * 0.03 }, { x: box.width * 0.9, y: box.height * 0.09 });
+    await pickTool(page, "Select");
+    await page.getByRole("checkbox", { name: FORM.checkbox.name }).click();
+    await page.locator(".redaction").click();
+    await expect(page.locator(".redaction--selected")).toHaveCount(1);
+    await page.keyboard.press("Delete");
+    await expect(page.locator(".redaction")).toHaveCount(0);
+    await expect(page.getByRole("checkbox", { name: FORM.checkbox.name }), "still ticked").toHaveAttribute("aria-checked", "true");
+  });
+
+  test("Organise merging two forms keeps each one's defaults", async ({ page }) => {
+    const f = await fixtures();
+    await open(page, f.form);
+    await openOrganise(page);
+    const org = page.locator(".organize");
+    await expect(org.locator(".pcard").first()).toBeVisible();
+    await org.locator("input[type=file]").setInputFiles(f.formEdge);
+    await expect.poll(() => org.locator(".pcard").count(), { timeout: 30_000 }).toBeGreaterThan(1);
+    // Nothing edited yet, so there's nothing to confirm losing.
+    await org.locator(".btn--filled").click();
+    await expect(org).toHaveCount(0);
+    await expect.poll(() => page.locator(".page").count(), { timeout: 30_000 }).toBe(2);
+
+    // Read by hand: the second file's own `/Parent` loop is still there, and
+    // pdf-lib's getForm() would walk it forever.
+    const doc = await PDFDocument.load(await download(page));
+    const acro = doc.catalog.lookup(PDFName.of("AcroForm"), PDFDict);
+    expect(acro.get(PDFName.of("NeedAppearances")), "the second file asked viewers to draw").toBe(PDFBool.True);
+    const fonts = acro.lookup(PDFName.of("DR"), PDFDict).lookup(PDFName.of("Font"), PDFDict);
+    expect(fonts.has(PDFName.of("TiRo")), "the second file's font is in the merged resources").toBe(true);
+    // A field of the second file that relied on its form's default keeps it.
+    expect(String(acro.lookup(PDFName.of("DA"))), "the first file's default is the form's").not.toContain("TiRo");
+    const roots = acro.lookup(PDFName.of("Fields"), PDFArray).asArray().map((r) => doc.context.lookup(r, PDFDict));
+    const radio = roots.find((d) => d.lookup(PDFName.of("T"))?.toString() === `(${E.cyrillic.name})`)!;
+    expect(radio.lookup(PDFName.of("DA"))?.toString()).toContain("TiRo");
   });
 
   test("Organise keeps the form: a value typed before it still reaches the file", async ({ page }) => {

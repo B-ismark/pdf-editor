@@ -199,8 +199,13 @@ type-checking can't see, and each exists because it broke once:
   editable dropdown shows its own value and is named by its `/TU`, a single
   list starts empty, of two buttons with one export value the clicked one is
   chosen, flattening skips a hidden field and a signature and keeps a list
-  with Greek options fillable, a redacted page's picture has no field answers
-  in it, and Organise keeps the form.
+  with Greek options and a comb field it can't lay out fillable (both named),
+  a redacted page's picture shows the answers as they are now (a cleared field
+  blank, the newly chosen radio dotted, the old one not), a UTF-8-named radio
+  is saved as the button clicked, a field in a `/Parent` loop or under an
+  untitled parent gets its value, a clicked field gives the keyboard back to
+  a selected box, Organise keeps the form, and merging two forms keeps the
+  second's `/NeedAppearances`, `/DR` font and `/DA`.
 - `crop.spec.ts` — Package 8b. A page whose CropBox starts at 100,200: the
   heading's overlay sits on its glyphs (not off the page), an edit is redrawn
   at the run's own user-space position, and a link drawn 20 points in from

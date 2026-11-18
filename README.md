@@ -312,8 +312,9 @@ A pragmatic, client-side editor — worth knowing where the seams are:
   the standard font, whatever the form used. An answer it can't draw (Greek,
   Cyrillic, Chinese…) is still saved, and the file asks the reader to draw it;
   such a field can't be flattened, so it stays fillable and the app says so.
-  Form fields on a page you redact are removed, answers and all: redact after
-  you've downloaded the filled form (flattened) and opened it again.
+  On a page you redact, the form becomes part of the picture: your current
+  answers are printed into it (in a plain style, not the form's own) and the
+  fields stop being fillable.
 - **Printing is at 150 dpi.** The pages are drawn as pictures for the print
   dialog, as browsers' own PDF viewers do — sharp on paper, but text in a
   "Save as PDF" from the print dialog isn't selectable. Download for that.

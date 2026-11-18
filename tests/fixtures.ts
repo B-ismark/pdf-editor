@@ -1,4 +1,4 @@
-import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFString, StandardFonts, degrees, rgb } from "pdf-lib";
+import { PDFBool, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFString, StandardFonts, degrees, rgb } from "pdf-lib";
 import { chromium } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import fontkit from "@pdf-lib/fontkit";
@@ -1270,6 +1270,18 @@ export const FORM_EDGE = {
   script: { name: "script", rect: [40, 250, 140, 50], options: ["English", "Ελληνικά"] },
   level: { name: "level", rect: [240, 250, 140, 50], options: ["Beginner", "Intermediate", "Expert"] },
   signature: { name: "signature", rect: [300, 40, 160, 40] },
+  /** Radio buttons whose on-states are Cyrillic names, UTF-8 in the file
+   * ("Да", "Нет"): pdf.js reads their bytes as PDFDocEncoding. */
+  cyrillic: { name: "da", states: ["\u00D0\u0094\u00D0\u00B0", "\u00D0\u009D\u00D0\u00B5\u00D1\u0082"], y: 190 },
+  /** A text field in a `/Parent` loop with its parent (pdf.js reads it fine). */
+  loop: { name: "mid.top", rect: [240, 180, 140, 22] },
+  /** A text field under a parent with no `/T`: pdf.js names it "leaf". */
+  leaf: { name: "leaf", rect: [240, 140, 140, 22] },
+  /** A comb text field holding more than its boxes (`/MaxLen` 2, value
+   * "ABCDE"): pdf-lib can't lay it out, so it can't be flattened. */
+  comb: { name: "comb", rect: [40, 140, 140, 22], value: "ABCDE", maxLength: 2 },
+  /** The form's own defaults, unlike pdf-lib's: Times, and asks viewers to draw. */
+  da: "/TiRo 0 Tf 0 g",
 };
 
 async function formEdgePdf(): Promise<Uint8Array> {
@@ -1323,5 +1335,59 @@ async function formEdgePdf(): Promise<Uint8Array> {
   page.node.addAnnot(sig);
   form.acroForm.addField(sig);
 
-  return doc.save();
+  // Every look drawn now: pdf-lib's own redraw at save would walk the loop below.
+  form.updateFieldAppearances();
+
+  const ctx = doc.context;
+  const box = (r: number[]) => [r[0], r[1], r[0] + r[2], r[1] + r[3]];
+  const look = (ops: string) => ctx.register(ctx.stream(ops, { Type: "XObject", Subtype: "Form", BBox: [0, 0, 16, 16] }));
+  const widget = (extra: Record<string, unknown>) => {
+    const ref = ctx.register(ctx.obj({ Type: "Annot", Subtype: "Widget", F: 4, P: page.ref, ...extra }));
+    page.node.addAnnot(ref);
+    return ref;
+  };
+
+  // Radio buttons named in UTF-8 bytes.
+  const daRef = ctx.nextRef();
+  const daKids = E.cyrillic.states.map((state, i) =>
+    widget({
+      Parent: daRef,
+      Rect: box([40 + i * 60, E.cyrillic.y, 16, 16]),
+      AS: PDFName.of("Off"),
+      AP: { N: { [state]: look("0 g 4 4 8 8 re f"), Off: look("") } },
+    }),
+  );
+  ctx.assign(daRef, ctx.obj({ FT: "Btn", Ff: (1 << 15) | (1 << 14), T: PDFString.of(E.cyrillic.name), Kids: daKids, V: PDFName.of("Off") }));
+  form.acroForm.addField(daRef);
+
+  // A field and its parent, each the other's parent.
+  const midRef = ctx.nextRef();
+  const topRef = widget({ FT: "Tx", T: PDFString.of("top"), Parent: midRef, Rect: box(E.loop.rect), DA: PDFString.of("0 g /Helv 10 Tf") });
+  ctx.assign(midRef, ctx.obj({ T: PDFString.of("mid"), Kids: [topRef], Parent: topRef }));
+  form.acroForm.addField(midRef);
+
+  // A field under an untitled parent.
+  const anonRef = ctx.nextRef();
+  const leafRef = widget({ T: PDFString.of(E.leaf.name), Parent: anonRef, Rect: box(E.leaf.rect) });
+  ctx.assign(anonRef, ctx.obj({ FT: "Tx", Kids: [leafRef], DA: PDFString.of("0 g /Helv 10 Tf") }));
+  form.acroForm.addField(anonRef);
+
+  // A comb field holding more than it has boxes for.
+  const comb = form.createTextField(E.comb.name);
+  comb.addToPage(page, at(E.comb.rect));
+  comb.acroField.setFlagTo(1 << 24, true);
+  comb.acroField.setMaxLength(E.comb.maxLength);
+  comb.acroField.dict.set(PDFName.of("V"), PDFString.of(E.comb.value));
+  // No look of its own, so flattening has to draw one — and can't.
+  for (const w of comb.acroField.getWidgets()) w.dict.delete(PDFName.of("AP"));
+  form.markFieldAsClean(comb.ref);
+
+  // The form's defaults: Times, in its resources, and drawn by the viewer.
+  const times = doc.context.register(doc.context.obj({ Type: "Font", Subtype: "Type1", BaseFont: "Times-Roman" }));
+  const acro = form.acroForm.dict;
+  acro.set(PDFName.of("DR"), ctx.obj({ Font: { TiRo: times } }));
+  acro.set(PDFName.of("DA"), PDFString.of(E.da));
+  acro.set(PDFName.of("NeedAppearances"), PDFBool.True);
+
+  return doc.save({ updateFieldAppearances: false });
 }

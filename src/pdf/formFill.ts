@@ -8,6 +8,9 @@ import {
   PDFBool,
   PDFHexString,
   PDFNumber,
+  PDFDict,
+  PDFRef,
+  PDFString,
   type PDFDocument,
   type PDFField,
   type PDFFont,
@@ -45,6 +48,10 @@ export function applyForm(
   const names = Object.keys(values);
   if (names.length === 0 && !flatten) return result;
   if (!doc.catalog.has(PDFName.of("AcroForm"))) return result;
+  // pdf-lib walks `/Parent` with no guard: one loop in the form overflows the
+  // stack and every value in the document would be lost. pdf.js reads such a
+  // form fine, so the preview filled it; cut the loop.
+  breakParentCycles(doc);
   let form: PDFForm;
   let fields: PDFField[];
   try {
@@ -56,10 +63,8 @@ export function applyForm(
   }
   if (fields.length === 0) return result;
 
-  // Fields whose look couldn't be drawn: the viewer has to. `unreadable` are
-  // the ones that couldn't because of their text — the user is told.
+  // Fields whose look couldn't be drawn: the viewer has to.
   const undrawn = new Set<PDFField>();
-  const unreadable = new Set<PDFField>();
   // Only the kinds the editor fills. A signature or push button is left as it
   // came, flattening or not: it has no value to draw.
   const fillable = fields.filter(
@@ -71,12 +76,9 @@ export function applyForm(
       f instanceof PDFOptionList,
   );
   for (const field of fillable) {
-    let name: string;
-    try {
-      name = field.getName();
-    } catch {
-      continue;
-    }
+    // The name as pdf.js gives it (and so the preview keys values by): an
+    // ancestor without a `/T` is skipped, where pdf-lib writes "undefined.".
+    const name = fieldKey(field.acroField.dict);
     const touched = name in values;
     // An untouched dropdown or list still holds what the file stored; drawn
     // again, it should show its options' text, not their stored values.
@@ -107,10 +109,7 @@ export function applyForm(
       }
       const looks = keepLooks(field);
       try {
-        if (!drawable(shownText(field), font)) {
-          unreadable.add(field);
-          throw new Error("no glyphs");
-        }
+        if (!drawable(shownText(field), font)) throw new Error("no glyphs");
         field.defaultUpdateAppearances(font);
       } catch {
         undrawn.add(field);
@@ -133,14 +132,10 @@ export function applyForm(
 
   if (flatten) {
     for (const field of fillable) {
+      // Kept fillable, whatever stopped its look being drawn (text the font
+      // can't draw, a layout pdf-lib can't do): the user is told either way.
       if (undrawn.has(field)) {
-        if (unreadable.has(field)) {
-          try {
-            result.keptFillable.push(field.getName());
-          } catch {
-            /* unnamed */
-          }
-        }
+        result.keptFillable.push(fieldKey(field.acroField.dict));
         continue;
       }
       flattenField(form, field);
@@ -166,15 +161,25 @@ function setValue(field: PDFField, v: FormValue): void {
       // By the button's own on-state, not pdf-lib's `select`, which goes by
       // export value — and when two buttons share one (`/Opt [(Yes) (Yes)
       // (No)]`), picks the last.
-      const on = field.acroField.getOnValues().find((n) => n.decodeText() === v);
+      const on = field.acroField.getOnValues().find((n) => n.decodeText() === v || pdfDocText(n.decodeText()) === v);
       if (!on) throw new Error(`No button "${v}"`);
       field.acroField.setValue(on);
     }
   } else if (field instanceof PDFDropdown || field instanceof PDFOptionList) {
-    const chosen = (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : []).map((x) => optionText(field, x));
+    // A value that isn't one of the options (left from an older version of
+    // the file) is dropped, unless the dropdown takes typed values: pdf-lib
+    // would throw and lose the whole choice.
+    const typed = field instanceof PDFDropdown && field.isEditable();
+    const chosen = (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : [])
+      .filter((x) => typed || hasOption(field, x))
+      .map((x) => optionText(field, x));
     if (chosen.length === 0) field.clear();
     else field.select(chosen.length === 1 ? chosen[0] : chosen);
   }
+}
+
+function hasOption(field: PDFDropdown | PDFOptionList, value: string): boolean {
+  return field.acroField.getOptions().some(({ value: v }) => v.decodeText() === value);
 }
 
 /** The text pdf-lib selects an option by, for the value the file stores. */
@@ -265,7 +270,7 @@ function flattenField(form: PDFForm, field: PDFField): void {
   for (const widget of field.acroField.getWidgets()) {
     // A widget the file hides (Hidden, NoView) never shows, so it isn't
     // printed into the page either — its field still goes.
-    const flags = widget.dict.get(PDFName.of("F"));
+    const flags = widget.dict.lookup(PDFName.of("F"));
     if (flags instanceof PDFNumber && (flags.asNumber() & (2 | 32)) !== 0) continue;
     try {
       const page = f.findWidgetPage(widget);
@@ -279,4 +284,70 @@ function flattenField(form: PDFForm, field: PDFField): void {
   } catch {
     /* already gone */
   }
+}
+
+/** A field's full name as pdf.js builds it: each ancestor's `/T`, skipping any
+ * without one, joined with ".". */
+function fieldKey(dict: PDFDict): string {
+  const parts: string[] = [];
+  const seen = new Set<PDFDict>();
+  let cur: PDFDict | undefined = dict;
+  while (cur && !seen.has(cur) && seen.size < 64) {
+    seen.add(cur);
+    const t = cur.lookup(PDFName.of("T"));
+    if (t instanceof PDFString || t instanceof PDFHexString) parts.unshift(t.decodeText());
+    const up: unknown = cur.lookup(PDFName.of("Parent"));
+    cur = up instanceof PDFDict ? up : undefined;
+  }
+  return parts.join(".");
+}
+
+/** Cut every `/Parent` loop among the form's fields and widgets. */
+function breakParentCycles(doc: PDFDocument): void {
+  const PARENT = PDFName.of("Parent");
+  const isField = (d: PDFDict) =>
+    d.has(PDFName.of("T")) || d.has(PDFName.of("FT")) || d.get(PDFName.of("Subtype")) === PDFName.of("Widget");
+  // Widgets first: walking up from each, the link cut is the one pdf.js stops
+  // at, so the name left matches the one the preview keyed the value by.
+  const dicts = doc.context
+    .enumerateIndirectObjects()
+    .map(([, o]) => o)
+    .filter((o): o is PDFDict => o instanceof PDFDict && isField(o));
+  const widget = (d: PDFDict) => d.get(PDFName.of("Subtype")) === PDFName.of("Widget");
+  for (const obj of [...dicts.filter(widget), ...dicts.filter((d) => !widget(d))]) {
+    const seen = new Set<PDFDict>([obj]);
+    let cur = obj;
+    for (let depth = 0; ; depth++) {
+      const ref = cur.get(PARENT);
+      const up = ref instanceof PDFRef ? doc.context.lookup(ref) : ref;
+      if (!(up instanceof PDFDict)) break;
+      if (seen.has(up) || depth > 64) {
+        cur.delete(PARENT);
+        break;
+      }
+      seen.add(up);
+      cur = up;
+    }
+  }
+}
+
+/** PDFDocEncoding's characters for the bytes where it differs from Latin-1. */
+const PDF_DOC: Record<number, number> = {
+  0x18: 0x02d8, 0x19: 0x02c7, 0x1a: 0x02c6, 0x1b: 0x02d9, 0x1c: 0x02dd, 0x1d: 0x02db, 0x1e: 0x02da, 0x1f: 0x02dc,
+  0x80: 0x2022, 0x81: 0x2020, 0x82: 0x2021, 0x83: 0x2026, 0x84: 0x2014, 0x85: 0x2013, 0x86: 0x0192, 0x87: 0x2044,
+  0x88: 0x2039, 0x89: 0x203a, 0x8a: 0x2212, 0x8b: 0x2030, 0x8c: 0x201e, 0x8d: 0x201c, 0x8e: 0x201d, 0x8f: 0x2018,
+  0x90: 0x2019, 0x91: 0x201a, 0x92: 0x2122, 0x93: 0xfb01, 0x94: 0xfb02, 0x95: 0x0141, 0x96: 0x0152, 0x97: 0x0160,
+  0x98: 0x0178, 0x99: 0x017d, 0x9a: 0x0131, 0x9b: 0x0142, 0x9c: 0x0153, 0x9d: 0x0161, 0x9e: 0x017e, 0xa0: 0x20ac,
+};
+
+/** A name's bytes (as pdf-lib decodes them, one character each) read as
+ * PDFDocEncoding — which is how pdf.js reports a radio button's on-state, so
+ * a Cyrillic or CJK name (UTF-8 bytes 0x80–0x9F) still matches. */
+function pdfDocText(latin1: string): string {
+  let out = "";
+  for (const ch of latin1) {
+    const c = ch.charCodeAt(0);
+    out += String.fromCharCode(PDF_DOC[c] ?? c);
+  }
+  return out;
 }

@@ -1,5 +1,8 @@
 import { Icon } from "./Icon";
 import type { FormField, FormValue } from "../pdf/types";
+import { fieldValue } from "../pdf/formValue";
+
+export { fieldValue, hasValue, sameValue } from "../pdf/formValue";
 
 interface Props {
   fields: FormField[];
@@ -11,26 +14,6 @@ interface Props {
   active: boolean;
   /** `typing`: a keystroke in a text field, which joins the field's undo step. */
   onChange: (name: string, value: FormValue, typing?: boolean) => void;
-}
-
-/** A field's value now: what was typed, else what the file came with. */
-export function fieldValue(f: FormField, values: Record<string, FormValue>): FormValue {
-  return f.name in values ? values[f.name] : f.defaultValue;
-}
-
-/** Whether a value fills its field: text typed, a box ticked, an option chosen. */
-export function hasValue(v: FormValue): boolean {
-  return Array.isArray(v) ? v.length > 0 : v === true || (typeof v === "string" && v !== "" && v !== "Off");
-}
-
-/** Whether two values fill a field alike. */
-export function sameValue(a: FormValue | undefined, b: FormValue | undefined): boolean {
-  if (Array.isArray(a) || Array.isArray(b)) {
-    const x = Array.isArray(a) ? a : a ? [String(a)] : [];
-    const y = Array.isArray(b) ? b : b ? [String(b)] : [];
-    return x.length === y.length && [...x].sort().every((v, i) => v === [...y].sort()[i]);
-  }
-  return a === b;
 }
 
 /**

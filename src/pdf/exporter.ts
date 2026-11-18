@@ -41,10 +41,12 @@ import {
   resolveFragmentStyle,
   standardFontKey,
 } from "./style";
+import { fieldValue, shownLines } from "./formValue";
 import { annotationPaintOrder, isBoxAnnotation } from "./types";
 import type {
   Annotation,
   Edits,
+  FormField,
   FormValue,
   FragmentFont,
   LinkAnnot,
@@ -579,7 +581,7 @@ export async function exportPdf(
 
     if (needsRaster) {
       const oldRef = finished[i].ref;
-      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, pageEdited, await getJpegEncoder());
+      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, pageEdited, await getJpegEncoder(), formValues);
       finished[i] = rasterPage;
       replaced.set(oldRef, rasterPage.ref);
       applyPageLayers(rasterPage, seen, { x: 0, y: 0 });
@@ -762,6 +764,64 @@ export async function exportPdf(
 
 /** Render a page to an image with edits, text boxes, and redactions baked in,
  * then add it to the output document as a full-page image. */
+/**
+ * A redacted page becomes a picture and loses its fields; their answers are
+ * drawn into it as the preview shows them, in the preview's Helvetica-like
+ * face, so the page still says what the form said. Redaction covers are
+ * painted after, over whatever they cover. A read-only text field isn't drawn:
+ * pdf.js paints those onto the canvas itself even without forms.
+ */
+function drawRasterForm(
+  ctx: CanvasRenderingContext2D,
+  fields: FormField[],
+  values: Record<string, FormValue>,
+  H: number,
+  S: number,
+): void {
+  for (const f of fields) {
+    const v = fieldValue(f, values);
+    const { x, y, width, height } = f.rect;
+    const top = (H - (y + height)) * S;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x * S, top, width * S, height * S);
+    ctx.clip();
+    ctx.fillStyle = "#000000";
+    ctx.strokeStyle = "#000000";
+    if (f.type === "checkbox" || f.type === "radio") {
+      const on = f.type === "checkbox" ? v === true : typeof v === "string" && v !== "" && v === f.onValue;
+      if (on) {
+        const side = Math.min(width, height) * S;
+        const cx = (x + width / 2) * S;
+        const cy = top + (height * S) / 2;
+        if (f.type === "radio") {
+          ctx.beginPath();
+          ctx.arc(cx, cy, side * 0.25, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.lineWidth = Math.max(1, side * 0.12);
+          ctx.beginPath();
+          ctx.moveTo(cx - side * 0.3, cy);
+          ctx.lineTo(cx - side * 0.08, cy + side * 0.25);
+          ctx.lineTo(cx + side * 0.32, cy - side * 0.28);
+          ctx.stroke();
+        }
+      }
+    } else if (!(f.type === "text" && f.readOnly)) {
+      const lines = shownLines(f, v);
+      const size = f.multiline || (f.type === "choice" && !f.combo) ? Math.min(12, height * 0.6) : Math.max(6, Math.min(14, height * 0.6));
+      ctx.font = `${size * S}px Helvetica, Arial, sans-serif`;
+      ctx.textBaseline = "alphabetic";
+      const stacked = lines.length > 1 || f.multiline || (f.type === "choice" && !f.combo);
+      lines.forEach((line, i) => {
+        const base = stacked ? top + (2 + size * (i + 1) * 1.15) * S : top + ((height + size * 0.7) / 2) * S;
+        ctx.fillText(line, (x + 2) * S, base);
+      });
+    }
+    ctx.restore();
+  }
+}
+
 async function rasterisePage(
   out: PDFDocument,
   loaded: LoadedPdf,
@@ -777,6 +837,9 @@ async function rasterisePage(
    * copies of the same predicate is how one of them ends up out of date. */
   pageEdited: boolean,
   encodeJpeg: JpegEncoder | null,
+  /** The form's answers: the page is drawn without its fields, and they go
+   * back on as the preview shows them — under the redactions. */
+  formValues: Record<string, FormValue> = {},
 ): Promise<PDFPage> {
   const pageData = loaded.pages[pageIndex];
   const H = pageData.viewBox.height;
@@ -872,6 +935,9 @@ async function rasterisePage(
 
   // New text boxes.
   for (const box of boxes) drawText(box.text, box.x, box.y, box.style, null, box.rotation ?? 0);
+
+  // The form's answers, as they are now (the raster was drawn without them).
+  drawRasterForm(ctx, pageData.fields, formValues, H, S);
 
   // Annotations sit above content but below redactions.
   drawRasterAnnots(ctx, annots, H, S);

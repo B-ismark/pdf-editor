@@ -237,8 +237,10 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   - **The standard font doesn't throw on a missing glyph** — the fork draws
     "?" instead. `drawable` checks each character first; a field it can't draw
     keeps its value, gets `/NeedAppearances`, and when flattening is *kept
-    fillable* and reported (`onFormKept` → "“name” stays fillable"), never
-    flattened as "?????". A list's look draws *every* option, so all of them
+    fillable* and reported (`onFormKept` → "“name” stays fillable", up to
+    three named), never flattened as "?????". Any other failure to draw a
+    look (a comb field holding more than its boxes) is kept and reported the
+    same way: whatever wasn't drawn is never flattened. A list's look draws *every* option, so all of them
     are checked, not just the chosen one. Signatures and push buttons are
     never touched, reported or flattened. (The exporter's own `sanitize` relies on the same
     throw, so it writes "?" where it means to drop a character.)
@@ -250,10 +252,22 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     a normal appearance is drawn before flattening, or it would flatten to
     nothing (a choice from its stored values, so it shows option text). A
     hidden widget (`/F` Hidden or NoView) is not painted; its field still goes.
+  - **Names are pdf.js's.** The preview keys values by pdf.js's field name,
+    which skips an ancestor with no `/T`; pdf-lib's `getName` writes
+    "undefined." there, so `applyForm` builds names itself (`fieldKey`). A
+    radio's on-state is matched as pdf-lib decodes it *or* as PDFDocEncoding
+    (`pdfDocText`) — pdf.js's reading, so a UTF-8 Cyrillic name still matches.
+  - **`/Parent` loops hang pdf-lib.** Its `getFields` / `getName` recurse up
+    `/Parent` with no guard. `breakParentCycles` cuts each loop before
+    `getForm`, walking from widgets first so the link cut is the one pdf.js
+    stops at and the name stays the preview's.
   - **Organise drops the form.** `copyPages` copies the widgets and fields but
     not `/AcroForm`; `pageOps.rebuildForm` gives the rebuilt file one from the
-    kept pages' widgets (with the first source's `/DA`, `/DR`), dropping
-    widgets on pages left out. Two merged files with same-named fields stay
+    kept pages' widgets, dropping widgets on pages left out. `/DA` and `/Q`
+    come from the first source; `/DR` merges every source's by category (first
+    name wins); `/NeedAppearances` is set if any source had it; and a later
+    source's root field that leaned on its own form's different `/DA` or `/Q`
+    gets it written onto itself. Two merged files with same-named fields stay
     two fields of one name.
   - **Known limits, not handled:** a checkbox with several on-states (only
     "on" or "off" is offered); a widget whose appearance `/BBox` isn't at the
@@ -262,7 +276,11 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   The preview controls are opaque: the canvas beneath shows the field as the
   file came, and a changed value mustn't sit over the old one. They take the
   pointer only themselves (the layer doesn't), so text and boxes around them
-  stay reachable. Fields on a redacted (rasterised) page are removed with the
-  page's content, answers and all — and the raster is drawn *without* the
-  form (`renderPageToCanvas(…, withoutForms)`), so the file's original
-  answers aren't baked into the picture either.
+  stay reachable. Fields on a redacted (rasterised) page stop being fields:
+  the raster is drawn *without* the form (`renderPageToCanvas(…,
+  withoutForms)`), so the file's original answers aren't baked in, and then
+  `drawRasterForm` paints the answers *as they are now* — a tick, a dot, the
+  text — before the redaction boxes go on, so a box over a field still
+  covers it. A read-only text field is left as the canvas drew it (pdf.js
+  paints those even in forms mode). Clicking out of a field onto the page
+  blurs it, so Delete reaches the selected box rather than the field.
