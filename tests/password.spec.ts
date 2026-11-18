@@ -158,7 +158,7 @@ test.describe("password-protected PDFs", () => {
     // pages, so it has to be just as unstored — or merging is a way round it.
     const f = await fixtures();
     await open(page, f.sample);
-    await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', f.locked);
+    await page.setInputFiles('input[data-open-input]', f.locked);
     await dialog(page).getByLabel("Password").fill(LOCKED_PASSWORD);
     await dialog(page).getByLabel("Password").press("Enter");
     await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });

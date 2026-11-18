@@ -304,7 +304,7 @@ test.describe("inspector", () => {
       for (const sz of sizes) d.addPage(sz);
       const path = join(dir, `near-${sizes.map((x) => x.join("x")).join("-")}.pdf`);
       writeFileSync(path, await d.save());
-      await page.setInputFiles('input[accept="application/pdf,.pdf"]', path);
+      await page.setInputFiles('input[data-open-input]', path);
       await expect(fact("Pages")).toHaveText(String(sizes.length));
     };
     await near([[595, 842], [597.6, 842]]);
@@ -312,7 +312,7 @@ test.describe("inspector", () => {
     await near([[568.06, 800], [568.63, 800], [569, 801]]);
     await expect(fact("Page size")).toHaveText("200 × 282 mm");
 
-    await page.setInputFiles('input[accept="application/pdf,.pdf"]', (await fixtures()).typeset);
+    await page.setInputFiles('input[data-open-input]', (await fixtures()).typeset);
     await expect(fact("Pages")).toHaveText("1");
     await expect(fact("Text")).toHaveText("Searchable");
   });
@@ -432,7 +432,7 @@ test.describe("inspector", () => {
     blank.addPage([595.28, 841.89]);
     const path = join(mkdtempSync(join(tmpdir(), "inspector-")), "blank.pdf");
     writeFileSync(path, await blank.save());
-    await page.setInputFiles('input[accept="application/pdf,.pdf"]', path);
+    await page.setInputFiles('input[data-open-input]', path);
     await expect(fact).toContainText("No text layer");
     await panel.getByRole("button", { name: "Recognise text (OCR)" }).click();
     await expect(page.locator(".snackbar__msg")).toContainText("No recognisable text found", { timeout: 180_000 });
@@ -495,7 +495,7 @@ test.describe("inspector", () => {
     await open(page, f.sample);
     await page.locator(".fragment").first().click();
     await expect(page.locator(".props__title")).toHaveText("Text");
-    await page.setInputFiles('input[accept="application/pdf,.pdf"]', f.typeset);
+    await page.setInputFiles('input[data-open-input]', f.typeset);
     await expect(page.locator(".snackbar__msg")).toContainText("1 page ·");
     await expect(page.locator(".props__title")).toHaveText("Document");
     await expect(page.locator(".docpanel__fact", { hasText: "Pages" }).locator("dd")).toHaveText("1");
@@ -586,7 +586,7 @@ test("user-facing counts are written as English", async ({ page }) => {
  * document, so "make me a file" had no one place to look.
  */
 test.describe("Export split button", () => {
-  const OUTPUTS = ["Download with password", "Compress PDF", "Sign with certificate", "Export as images", "Export text (.txt)"];
+  const OUTPUTS = ["Download with password", "Split into files", "Compress PDF", "Sign with certificate", "Export as images", "Export text (.txt)"];
 
   test("the caret opens Export, which holds every way to make a file", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
@@ -632,7 +632,7 @@ test.describe("Export split button", () => {
     await page.setViewportSize({ width: 1280, height: 860 });
     const f = await fixtures();
     await open(page, f.sample);
-    await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', f.typeset);
+    await page.setInputFiles('input[data-open-input]', f.typeset);
     await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
     await page.getByRole("button", { name: "More actions" }).click();
     await expect(page.locator(".menu__item", { hasText: "Download all" })).toHaveCount(0);
@@ -658,7 +658,7 @@ test.describe("Export split button", () => {
     const page = await ctx.newPage();
     const f = await fixtures();
     await open(page, f.sample);
-    await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', f.typeset);
+    await page.setInputFiles('input[data-open-input]', f.typeset);
     await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
     await page.getByRole("button", { name: "More actions" }).click();
     await expect(page.getByRole("group", { name: "Export" }).getByRole("menuitem").last()).toHaveText("Download all (2) as ZIP");
@@ -770,9 +770,11 @@ test.describe("Export split button", () => {
  */
 test.describe("command registry", () => {
   /** Every row of an open menu — any menuitem, whatever its class, so a
-   * hand-made row can't hide from this — as [id, label, icon, mark, checked, group]. */
+   * hand-made row can't hide from this — as [id, label, icon, mark, checked, group].
+   * Switched-off rows are left out: the palette lists only what can run now
+   * (Split, say, with a one-page document in front). */
   const rowsOf = (page: Page, menu: string) =>
-    page.locator(`${menu} [role^="menuitem"]`).evaluateAll((els) =>
+    page.locator(`${menu} [role^="menuitem"]:not(:disabled)`).evaluateAll((els) =>
       els.map((el) => [
         el.getAttribute("data-cmd") ?? "",
         el.querySelector(".menu__itemlabel")?.textContent?.trim() ?? "",
@@ -814,7 +816,7 @@ test.describe("command registry", () => {
     const w = watch(page);
     const f = await fixtures();
     await open(page, f.sample);
-    await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', f.typeset);
+    await page.setInputFiles('input[data-open-input]', f.typeset);
     await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
 
     await page.getByRole("button", { name: "More actions" }).click();

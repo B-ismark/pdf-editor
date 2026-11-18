@@ -1,4 +1,5 @@
 import {
+  Scissors,
   FileArchive,
   AlignHorizontalDistributeCenter,
   AlignHorizontalJustifyCenter,
@@ -31,6 +32,7 @@ import {
   EyeOff,
   FileScan,
   FileDown,
+  File as FileBlank,
   FilePlus,
   FileText,
   Highlighter,
@@ -170,6 +172,10 @@ const MAP: Record<string, LucideIcon> = {
   download_all: FileArchive,
   picture_as_pdf: FileText,
   note_add: FilePlus,
+  /** An empty page put into the document. */
+  blank_page: FileBlank,
+  /** Cut one document into several files. */
+  split_pdf: Scissors,
   /** Bring one image in. */
   image: ImageIcon,
   /** Send every page out as an image. */

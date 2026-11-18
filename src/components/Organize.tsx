@@ -1,12 +1,16 @@
-import { useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { staleBuildMessage } from "../staleBuild";
 import { Icon } from "./Icon";
 import { plural } from "../plural";
 import { Thumbnail } from "./Thumbnail";
 import { ConfirmDialog } from "./ConfirmDialog";
 import { useModal } from "../hooks/useModal";
-import { buildFromPlan, pageCount, type PlanEntry } from "../pdf/pageOps";
+import { buildFromPlan, pageCount, shownPageSize, type PlanEntry } from "../pdf/pageOps";
 import { looksLikePdf } from "../pdf/loader";
+import { IMAGE_ACCEPT, sniffImage } from "../pdf/images";
+import { blankPage, imagesToPdf } from "../pdf/imagesToPdf";
+import { makeZip } from "../pdf/zip";
+import { SplitDialog, rangeLabel } from "./SplitDialog";
 import type { PageRef } from "../pdf/types";
 
 interface Props {
@@ -28,6 +32,10 @@ interface Props {
   onApply: (bytes: ArrayBuffer, note: string) => void;
   /** Download the given bytes without changing the working document. */
   onExtract: (bytes: Uint8Array) => void;
+  /** Download the split files, zipped, without changing the working document. */
+  onSplit: (zip: Uint8Array) => void;
+  /** Open straight into Split (from the Export menu); closing it closes this. */
+  startWithSplit?: boolean;
   onClose: () => void;
   /** The other documents open in tabs. Their pages can be merged in without
    * going back to the file system — with their edits baked in, since what you
@@ -35,7 +43,14 @@ interface Props {
   otherDocs?: { id: string; name: string; bake: () => Promise<ArrayBuffer> }[];
 }
 
-/** Full-screen page organizer: reorder, rotate, delete, merge, extract. */
+/** Full-screen page organizer: reorder, rotate, delete, insert, merge,
+ * extract, split. */
+function toAB(bytes: Uint8Array): ArrayBuffer {
+  const ab = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(ab).set(bytes);
+  return ab;
+}
+
 export function Organize({
   mainBytes,
   fileName,
@@ -45,6 +60,8 @@ export function Organize({
   bakeMain,
   onApply,
   onExtract,
+  onSplit,
+  startWithSplit = false,
   onClose,
   otherDocs = [],
 }: Props) {
@@ -55,7 +72,24 @@ export function Organize({
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [confirmApply, setConfirmApply] = useState(false);
+  // Opened after Organise has mounted, never in the same commit: the dialog's
+  // focus trap has to stack *above* Organise's, and child effects run first.
+  const [splitOpen, setSplitOpen] = useState(false);
+  useEffect(() => {
+    if (startWithSplit) setSplitOpen(true);
+  }, []);
+  const [splitErr, setSplitErr] = useState<string | null>(null);
+  // Opened for Split alone: leaving Split leaves Organise too, back to where
+  // it was asked for.
+  const splitOnly = useRef(startWithSplit);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Locked while pages are being added or split: the insert point was worked
+  // out from this plan, and must still mean the same place. Set by hand —
+  // React 18 doesn't know `inert` — and in the same commit as the busy label.
+  const gridRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    gridRef.current?.toggleAttribute("inert", !!busy);
+  }, [busy]);
   const addCounter = useRef(0);
   const modalRef = useModal<HTMLDivElement>(onClose);
 
@@ -65,9 +99,15 @@ export function Organize({
     pages.map((p) => ({ sourceKey: "main", index: p.index, rotation: p.rotate })),
   );
 
+  // Where the last pages added went: the next ones follow them, until a page
+  // is picked or the plan changes. Kept apart from the picked pages so adding
+  // never picks anything — that would change what Extract and Split do.
+  const [after, setAfter] = useState<number | null>(null);
+
   const update = (next: PlanEntry[]) => {
     setPlan(next);
     setSelected(new Set());
+    setAfter(null);
   };
 
   const move = (i: number, dir: -1 | 1) => {
@@ -83,6 +123,7 @@ export function Organize({
     const next = plan.slice();
     next[i] = { ...next[i], rotation: (next[i].rotation + 90) % 360 };
     setPlan(next);
+    setAfter(null);
   };
   const del = (i: number) => {
     if (!plan) return;
@@ -92,24 +133,47 @@ export function Organize({
     const s = new Set(selected);
     s.has(i) ? s.delete(i) : s.add(i);
     setSelected(s);
+    setAfter(null);
   };
 
-  /** Append every page of `bytes` to the plan. */
-  const addBytes = async (bytes: ArrayBuffer) => {
-    const key = `add-${addCounter.current++}`;
-    const n = await pageCount(bytes);
-    setSources((prev) => new Map(prev).set(key, bytes));
-    setPlan((prev) => [
-      ...(prev ?? []),
-      ...Array.from({ length: n }, (_, i) => ({ sourceKey: key, index: i, rotation: 0 })),
-    ]);
+  /** Where new pages go: after the last picked page, else after the pages
+   * added last, else at the end. */
+  const insertAt = plan
+    ? selected.size > 0
+      ? Math.max(...selected) + 1
+      : after != null
+        ? Math.min(after, plan.length)
+        : plan.length
+    : 0;
+
+  /** A document's bytes, checked and counted, ready to go into the plan. */
+  const prepare = async (bytes: ArrayBuffer | Uint8Array) => {
+    const ab = bytes instanceof Uint8Array ? toAB(bytes) : bytes;
+    return { key: `add-${addCounter.current++}`, ab, n: await pageCount(ab) };
+  };
+
+  /** Put every page of the prepared documents into the plan at `at`, in
+   * order, in one step. The grid is locked while anything is being added, so
+   * the plan `at` was worked out from is the plan this changes. */
+  const insert = (docs: { key: string; ab: ArrayBuffer; n: number }[], at: number) => {
+    if (!plan) return;
+    const pos = Math.max(0, Math.min(at, plan.length));
+    const added = docs.flatMap((d) => Array.from({ length: d.n }, (_, i) => ({ sourceKey: d.key, index: i, rotation: 0 })));
+    setSources((prev) => {
+      const next = new Map(prev);
+      for (const d of docs) next.set(d.key, d.ab);
+      return next;
+    });
+    setPlan([...plan.slice(0, pos), ...added, ...plan.slice(pos)]);
+    setSelected(new Set());
+    setAfter(pos + added.length);
   };
 
   const addOpenDoc = async (d: { name: string; bake: () => Promise<ArrayBuffer> }) => {
     setErr(null);
     setBusy("Adding pages…");
     try {
-      await addBytes(await d.bake());
+      insert([await prepare(await d.bake())], insertAt);
     } catch (e) {
       setErr(staleBuildMessage(e) ?? ((e as { userFacing?: boolean })?.userFacing ? (e as Error).message : `Couldn't add the pages of "${d.name}".`));
     } finally {
@@ -117,20 +181,70 @@ export function Organize({
     }
   };
 
-  const addFile = async (file: File) => {
+  /**
+   * Add the files picked, in order, at the insert point: each PDF's pages, and
+   * each run of pictures as pages of their own (metadata taken out, as when a
+   * picture is opened). All or nothing: every file is read and checked first,
+   * so one that can't be added leaves the plan as it was, and says which.
+   */
+  const addFiles = async (files: File[]) => {
     setErr(null);
     setBusy("Adding pages…");
+    let current = "";
     try {
-      const bytes = await file.arrayBuffer();
-      // Sniff the content — reject an image/HTML/renamed file before pdf-lib
-      // chokes on it deep in the merge.
-      if (!looksLikePdf(bytes)) {
-        setErr(`"${file.name}" isn't a PDF file.`);
+      const read = await Promise.all(files.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })));
+      const notOurs = read.filter((f) => !sniffImage(f.bytes.slice(0, 8)) && !looksLikePdf(f.bytes));
+      if (notOurs.length > 0) {
+        // Sniffed by content — HTML or a renamed file is refused here rather
+        // than deep in the merge.
+        const names = notOurs.map((f) => `"${f.name}"`).join(", ");
+        setErr(`${names} ${notOurs.length === 1 ? "isn't a PDF or a picture" : "aren't PDFs or pictures"} (JPEG, PNG). Nothing was added.`);
         return;
       }
-      await addBytes(bytes);
+      const docs = [];
+      let pictures: { name: string; bytes: ArrayBuffer }[] = [];
+      const flush = async () => {
+        if (pictures.length === 0) return;
+        current = pictures[0].name;
+        const batch = pictures;
+        pictures = [];
+        docs.push(await prepare(await imagesToPdf(batch)));
+      };
+      for (const file of read) {
+        if (sniffImage(file.bytes.slice(0, 8))) {
+          pictures.push(file);
+          continue;
+        }
+        await flush();
+        current = file.name;
+        docs.push(await prepare(file.bytes));
+      }
+      await flush();
+      insert(docs, insertAt);
     } catch (e) {
-      setErr(staleBuildMessage(e) ?? `Couldn't add "${file.name}". It may be damaged or password-protected.`);
+      setErr(
+        staleBuildMessage(e) ??
+          ((e as { fileName?: string })?.fileName != null
+            ? `${(e as Error).message} Nothing was added.`
+            : `Couldn't add "${current}". It may be damaged or password-protected. Nothing was added.`),
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** An empty page at the insert point, the size of the page before it as
+   * shown (or the first page's, at the very start). */
+  const addBlank = async () => {
+    if (!plan || plan.length === 0) return;
+    setErr(null);
+    setBusy("Adding a page…");
+    try {
+      const like = plan[insertAt - 1] ?? plan[0];
+      const size = await shownPageSize(sources.get(like.sourceKey)!, like.index, like.rotation);
+      insert([await prepare(await blankPage(size.width, size.height))], insertAt);
+    } catch (e) {
+      setErr(staleBuildMessage(e) ?? "Couldn't add a blank page. Please try again.");
     } finally {
       setBusy(null);
     }
@@ -203,9 +317,40 @@ export function Organize({
       // The pages as you see them: an extract of the original bytes would hand
       // back text you redacted.
       const main = await mainAsShown(subset, true);
-      onExtract(await buildFromPlan(main.entries, new Map(sources).set("main", main.bytes)));
+      onExtract(await buildFromPlan(main.entries, new Map(sources).set("main", main.bytes), { forDownload: true }));
     } catch (e) {
       setErr(staleBuildMessage(e) ?? failure(e, "Couldn't extract those pages. Please try again."));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const closeSplit = () => {
+    setSplitOpen(false);
+    setSplitErr(null);
+    if (splitOnly.current) onClose();
+  };
+
+  /** One file per part, from this document as shown — never the original
+   * bytes, which would hand back what was redacted. */
+  const split = async (parts: number[][]) => {
+    if (!plan) return;
+    setSplitErr(null);
+    setBusy("Splitting…");
+    try {
+      const main = await mainAsShown(plan, true);
+      const all = new Map(sources).set("main", main.bytes);
+      const base = fileName.replace(/\.pdf$/i, "");
+      const files = [];
+      for (const part of parts) {
+        const data = await buildFromPlan(part.map((pos) => main.entries[pos]), all, { forDownload: true });
+        files.push({ name: `${base}-pages-${rangeLabel(part).replace("–", "-")}.pdf`, data });
+      }
+      onSplit(makeZip(files));
+      setBusy(null);
+      closeSplit();
+    } catch (e) {
+      setSplitErr(staleBuildMessage(e) ?? failure(e, "Couldn't split the document. Please try again."));
     } finally {
       setBusy(null);
     }
@@ -226,12 +371,40 @@ export function Organize({
         </button>
         <span className="title-large">Organise pages</span>
         <div className="appbar__spacer" />
-        <button className="btn" onClick={() => fileRef.current?.click()}>
-          <Icon name="note_add" size={16} /> <span className="organize__btnlabel">Add PDF</span>
+        <button
+          className="btn"
+          onClick={() => fileRef.current?.click()}
+          disabled={!!busy}
+          aria-label="Add file: a PDF or pictures"
+          data-tip="Add a PDF's pages, or pictures as pages"
+        >
+          <Icon name="note_add" size={16} /> <span className="organize__btnlabel" aria-hidden="true">Add file</span>
+        </button>
+        <button
+          className="btn"
+          onClick={() => void addBlank()}
+          disabled={!!busy || !plan || plan.length === 0}
+          aria-label="Add blank page"
+          data-tip="Add a blank page"
+        >
+          <Icon name="blank_page" size={16} /> <span className="organize__btnlabel" aria-hidden="true">Blank page</span>
+        </button>
+        <button
+          className="btn"
+          onClick={() => {
+            splitOnly.current = false;
+            setSplitErr(null);
+            setSplitOpen(true);
+          }}
+          disabled={!!busy || !plan || plan.length < 2}
+          aria-label="Split into files"
+          data-tip="Split into files"
+        >
+          <Icon name="split_pdf" size={16} /> <span className="organize__btnlabel" aria-hidden="true">Split</span>
         </button>
         {selected.size > 0 && (
-          <button className="btn" onClick={extract}>
-            <Icon name="download" size={16} /> <span className="organize__btnlabel">Extract {selected.size}</span>
+          <button className="btn" onClick={extract} disabled={!!busy} aria-label={`Extract ${plural(selected.size, "page")}`}>
+            <Icon name="download" size={16} /> <span className="organize__btnlabel" aria-hidden="true">Extract {selected.size}</span>
           </button>
         )}
         <button className="btn btn--filled" onClick={apply} disabled={!plan || plan.length === 0 || !!busy}>
@@ -241,19 +414,25 @@ export function Organize({
         <input
           ref={fileRef}
           type="file"
-          accept="application/pdf,.pdf"
+          accept={`application/pdf,.pdf,${IMAGE_ACCEPT}`}
+          multiple
           hidden
           onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void addFile(f);
+            const files = [...(e.target.files ?? [])];
             e.target.value = "";
+            if (files.length > 0) void addFiles(files);
           }}
         />
       </header>
 
       <p className="organize__hint body-small">
-        Reorder, rotate, or delete pages · tap a page to select it for extract ·
-        add another PDF to merge. {fileName}
+        Reorder, rotate, or delete pages · tap a page to pick it ·{" "}
+        <span className="organize__at">
+          {plan && insertAt < plan.length
+            ? `new pages go after page ${insertAt}`
+            : "new pages go at the end"}
+        </span>
+        . {fileName}
       </p>
 
       {otherDocs.length > 0 && (
@@ -284,7 +463,7 @@ export function Organize({
           <span className="spinner spinner--sm" aria-hidden="true" /> Loading pages…
         </div>
       ) : (
-        <div className="organize__grid">
+        <div className="organize__grid" ref={gridRef} aria-busy={busy ? true : undefined}>
           {plan.map((entry, i) => (
             <div
               key={`${entry.sourceKey}-${entry.index}-${i}`}
@@ -316,10 +495,21 @@ export function Organize({
         </div>
       )}
 
+      {splitOpen && plan && (
+        <SplitDialog
+          count={plan.length}
+          picked={[...selected]}
+          busy={busy}
+          error={splitErr}
+          onSplit={(parts) => void split(parts)}
+          onClose={closeSplit}
+        />
+      )}
+
       {confirmApply && (
         <ConfirmDialog
           title="Apply page changes?"
-          message="Adding pages from another document rebuilds this one: your text edits, annotations and redactions are drawn into the pages and can no longer be changed, and undo starts over."
+          message="Adding pages rebuilds this document: your text edits, annotations and redactions are drawn into the pages and can no longer be changed, and undo starts over."
           confirmLabel="Apply"
           danger
           onConfirm={doApply}

@@ -1,4 +1,5 @@
 import { PDFDict, PDFDocument, PDFName, PDFRef, degrees, type PDFPage } from "@cantoo/pdf-lib";
+import { sanitizeDocument } from "./sanitize";
 import { collectGarbage, cutDeletedPages } from "./structure";
 
 /** One page slot in an organize plan: which source document, which page in it,
@@ -40,8 +41,15 @@ function loadSource(bytes: ArrayBuffer): Promise<PDFDocument> {
 export async function buildFromPlan(
   plan: PlanEntry[],
   sources: Map<string, ArrayBuffer>,
+  opts: {
+    /** The result goes straight to a download (Extract, Split) rather than
+     * back into the editor: it gets the exporter's scrub — scripts, launch
+     * actions, attachments, page XMP — since nothing else will scrub it. */
+    forDownload?: boolean;
+  } = {},
 ): Promise<Uint8Array> {
-  const out = await PDFDocument.create();
+  // No pdf-lib Producer / Creator / dates: the file says nothing of the tool.
+  const out = await PDFDocument.create({ updateMetadata: false });
 
   // Load each distinct source once.
   const docs = new Map<string, PDFDocument>();
@@ -81,10 +89,11 @@ export async function buildFromPlan(
   for (const [ref, obj] of out.context.enumerateIndirectObjects()) {
     if (obj instanceof PDFDict && obj.get(PDFName.of("Type")) === PDFName.of("Page") && !inTree.has(ref)) stray.add(ref);
   }
-  if (stray.size > 0) {
-    cutDeletedPages(out, stray);
-    collectGarbage(out);
-  }
+  if (stray.size > 0) cutDeletedPages(out, stray);
+  if (opts.forDownload) sanitizeDocument(out);
+  // What was cut or scrubbed is unreachable now; the copier had already
+  // copied it (an attachment's bytes, a stray page), so drop it from the file.
+  if (stray.size > 0 || opts.forDownload) collectGarbage(out);
 
   return out.save();
 }
@@ -93,4 +102,18 @@ export async function buildFromPlan(
 export async function pageCount(bytes: ArrayBuffer): Promise<number> {
   const doc = await loadSource(bytes);
   return doc.getPageCount();
+}
+
+/** A page's size as it shows — its crop box, turned by its own `/Rotate` plus
+ * `extra` — for a blank page inserted beside it to match. */
+export async function shownPageSize(
+  bytes: ArrayBuffer,
+  index: number,
+  extra: number,
+): Promise<{ width: number; height: number }> {
+  const doc = await loadSource(bytes);
+  const page = doc.getPage(Math.min(index, doc.getPageCount() - 1));
+  const { width, height } = page.getCropBox();
+  const turn = (((page.getRotation().angle + extra) % 360) + 360) % 360;
+  return turn % 180 === 0 ? { width, height } : { width: height, height: width };
 }

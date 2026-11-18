@@ -67,12 +67,14 @@ Read only the section a package points at, not the whole folder.
   - [x] Download becomes an Export split button that holds every "produce a file" action. Guarded by `shell.spec` ("Export split button"); notes in `docs/notes/shell.md`.
   - [x] The Inspector becomes properties only, showing document settings when nothing is selected. Guarded by `shell.spec` ("inspector"); notes in `docs/notes/shell.md`.
   - [x] The command palette is generated from one command registry, which the ⋯ and Export menus render from too. Guarded by `shell.spec` ("command registry"); notes in `docs/notes/shell.md`.
-- [ ] **7. Privacy features** (M). (PRODUCT §2.1)
+- [x] **7. Privacy features** (M). (PRODUCT §2.1)
   - [x] Pattern redaction with a review list. Guarded by the `patterns` spec; notes in `docs/notes/privacy-and-export.md`.
   - [x] A "Remove hidden information" report. Guarded by the `hidden` spec; notes in `docs/notes/privacy-and-export.md`.
   - [x] Encrypt and decrypt on export (`@cantoo/pdf-lib` or qpdf-wasm, lazy-loaded and self-hosted). — Export → Download with password (AES-256 via `@cantoo/pdf-lib`); decrypt was already the password prompt on open.
 - [ ] **8. Page tools** (M ×2). (PRODUCT §2.1)
-  - Split, Images → PDF, Crop, insert a page at a position.
+  - [ ] Split, Images → PDF, Crop, insert a page at a position.
+    - [x] Split, Images → PDF, insert at a position (8a). Guarded by the `pagetools` spec; notes in `docs/notes/pages.md`.
+    - [ ] Crop (8b).
   - Print, Share, Save in place.
   - Complete forms, with a keep-fillable/flatten choice.
   - Outline sidebar; links to a page.
