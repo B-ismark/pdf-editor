@@ -179,7 +179,10 @@ type-checking can't see, and each exists because it broke once:
   alone; with two tabs each saves to its own file; a failed write stays
   unsaved. Second review: Save as onto a file another tab has open is
   refused; one unreadable file among several opens the rest and is named;
-  sharing through "Ready to share" isn't a save either.
+  sharing through "Ready to share" isn't a save either. Third: Save as onto its
+  own password-opened file warns as Ctrl+S does; a file named "-edited" is
+  offered "… copy", never its own name; an already-open file picked with
+  another is said to be open.
 - `crop.spec.ts` — Package 8b. A page whose CropBox starts at 100,200: the
   heading's overlay sits on its glyphs (not off the page), an edit is redrawn
   at the run's own user-space position, and a link drawn 20 points in from

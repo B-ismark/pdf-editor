@@ -256,7 +256,8 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     the tab (Organise) keeps it. Picking a file that's already open
     (`isSameEntry`) goes to its tab: two tabs on one file save over each other.
     For the same reason Save as refuses a file another tab has open
-    (`openElsewhere`). Files are read with `allSettled`: one that's gone
+    (`openElsewhere`); onto its *own* file it is Save, and a password-opened
+    file gets the same warning. Files are read with `allSettled`: one that's gone
     doesn't cost the rest, and is named *after* they open (or the load
     message talks over it).
   - `handleLocked`, not `locked`, decides the "Save without its password?"
