@@ -403,7 +403,7 @@ export function App() {
       // rejected here rather than failing deep inside pdf.js.
       if (!looksLikePdf(bytes)) {
         setStatus("error");
-        setMessage(`"${file.name}" isn't a PDF file. Please choose a .pdf document.`);
+        setMessage(`"${file.name}" isn't a PDF or a picture (JPEG, PNG). Please choose one of those.`);
         return false;
       }
       let locked = false;
@@ -434,7 +434,7 @@ export function App() {
    * asks first, and autosave keeps it.
    */
   const openImages = useCallback(
-    async (files: File[]): Promise<boolean> => {
+    async (files: File[]): Promise<{ ok: boolean; reason?: string }> => {
       setStatus("loading");
       setMessage(files.length === 1 ? `Making a PDF of ${files[0].name}…` : `Making a PDF of ${plural(files.length, "picture")}…`);
       try {
@@ -443,14 +443,16 @@ export function App() {
         const out = await imagesToPdf(inputs);
         const ab = new ArrayBuffer(out.byteLength);
         new Uint8Array(ab).set(out);
-        const name = files[0].name.replace(/\.[^./\\]+$/, "") + ".pdf";
+        // ".jpg" alone has no name to keep: it would make ".pdf", a hidden file.
+        const name = (files[0].name.replace(/\.[^./\\]+$/, "").trim() || "Pictures") + ".pdf";
         const note = `Made a PDF of ${plural(files.length, "picture")} · not saved yet`;
-        return (await openBytes(ab, name, note, undefined, { baked: 1 })) != null;
+        return { ok: (await openBytes(ab, name, note, undefined, { baked: 1 })) != null };
       } catch (e) {
         setStatus("error");
         const unreadable = (e as { fileName?: string })?.fileName != null;
-        setMessage(staleBuildMessage(e) ?? (unreadable ? (e as Error).message : "Couldn't make a PDF of those pictures."));
-        return false;
+        const reason = staleBuildMessage(e) ?? (unreadable ? (e as Error).message : "Couldn't make a PDF of those pictures.");
+        setMessage(reason);
+        return { ok: false, reason: unreadable ? reason : undefined };
       }
     },
     [openBytes],
@@ -491,8 +493,13 @@ export function App() {
       const list = picked.filter((_, i) => !kinds[i]);
       const failed: string[] = [];
       let opened = 0;
+      // Why the pictures didn't become a PDF, when one of them is to blame —
+      // otherwise the batch message lists every picture and names none.
+      let pictureReason: string | undefined;
       if (images.length > 0) {
-        if (await openImages(images)) opened++;
+        const r = await openImages(images);
+        if (r.ok) opened++;
+        else if (r.reason) pictureReason = r.reason;
         else failed.push(...images.map((f) => f.name));
       }
       for (const f of list) {
@@ -503,20 +510,22 @@ export function App() {
         // Each open writes its own status over the last, so a failure early in
         // the list was being covered by the next file's success — "Opened 2
         // documents" with one tab on screen. Report the whole batch instead.
-        const fromPictures = images.length > 0 && !failed.includes(images[0].name)
-          ? `, one made from ${plural(images.length, "picture")}`
-          : "";
-        if (failed.length === 0) {
+        const picturesOk = images.length > 0 && !pictureReason && !failed.includes(images[0].name);
+        const fromPictures = picturesOk ? `, one made from ${plural(images.length, "picture")}` : "";
+        const why = pictureReason ? ` No PDF was made of the pictures: ${pictureReason}` : "";
+        if (failed.length === 0 && !pictureReason) {
           setStatus("ready");
           setMessage(`Opened ${plural(opened, "document")} in tabs${fromPictures}.`);
         } else {
           setStatus("error");
           const names = failed.map((n) => `"${n}"`).join(", ");
-          setMessage(
-            opened > 0
-              ? `Opened ${plural(opened, "document")}${fromPictures}; couldn't open ${names}.`
-              : `Couldn't open ${names}.`,
-          );
+          const head =
+            failed.length === 0
+              ? `Opened ${plural(opened, "document")}${fromPictures}.`
+              : opened > 0
+                ? `Opened ${plural(opened, "document")}${fromPictures}; couldn't open ${names}.`
+                : `Couldn't open ${names}.`;
+          setMessage(head + why);
         }
       }
     },
@@ -840,6 +849,7 @@ export function App() {
       ref={openInputRef}
       type="file"
       accept={`application/pdf,.pdf,${IMAGE_ACCEPT}`}
+      data-open-input
       multiple
       hidden
       onChange={(e) => {

@@ -45,7 +45,7 @@ async function download(page: Page) {
 
 async function openMore(page: Page, file: string) {
   const before = await tabs(page).count();
-  await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', file);
+  await page.setInputFiles('input[data-open-input]', file);
   await expect(tabs(page)).toHaveCount(before + 1, { timeout: 30_000 });
   await page.waitForSelector(".page canvas");
 }

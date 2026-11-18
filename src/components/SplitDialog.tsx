@@ -45,19 +45,24 @@ export function rangeLabel(part: number[]): string {
  * one .zip — a browser lets a page start one download, not twenty.
  */
 export function SplitDialog({ count, picked, busy, error, onSplit, onClose }: Props) {
-  const ref = useModal<HTMLDivElement>(onClose);
+  // Not while it's splitting: closing then would hide the work without
+  // stopping it — the files would still download, from a dialog that's gone.
+  const close = () => {
+    if (!busy) onClose();
+  };
+  const ref = useModal<HTMLDivElement>(close);
   const id = useId();
   const canPick = picked.some((p) => p > 0);
   const [mode, setMode] = useState<"every" | "picked">(canPick ? "picked" : "every");
   const [size, setSize] = useState(String(Math.max(1, Math.ceil(count / 2))));
-  const n = Math.floor(Number(size));
-  const sizeOk = Number.isFinite(n) && n >= 1;
+  const n = Number(size);
+  const sizeOk = size.trim() !== "" && Number.isInteger(n) && n >= 1;
   const parts = mode === "picked" ? atPicked(count, picked) : sizeOk ? everyN(count, n) : [];
   const shown = parts.slice(0, 6).map(rangeLabel).join(", ") + (parts.length > 6 ? ", …" : "");
   const ready = parts.length >= 2 && !busy;
 
   return (
-    <div className="dialog-scrim" onPointerDown={onClose}>
+    <div className="dialog-scrim" onPointerDown={close}>
       <div
         ref={ref}
         tabIndex={-1}
@@ -97,21 +102,25 @@ export function SplitDialog({ count, picked, busy, error, onSplit, onClose }: Pr
             <span className="body-medium">Before each picked page</span>
           </label>
           {!canPick && (
-            <p className="body-small split__hint">To split at pages of your choosing, pick them in the grid first.</p>
+            <p className="body-small split__hint">
+              {picked.length > 0
+                ? "Each picked page starts a new file, and page 1 already does — pick a later page."
+                : "To split at pages of your choosing, pick them in the grid first."}
+            </p>
           )}
         </div>
         <p className="body-small split__summary" aria-live="polite">
           {parts.length >= 2
             ? `${plural(parts.length, "file")}: pages ${shown}.`
             : mode === "every" && !sizeOk
-              ? "Type how many pages go in each file."
+              ? "Type a whole number of pages for each file."
               : "That makes one file — nothing to split."}
         </p>
         {error && (
           <p className="pwform__error body-small" role="alert">{error}</p>
         )}
         <div className="dialog__actions">
-          <button type="button" className="btn" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn" onClick={close} disabled={!!busy}>Cancel</button>
           <button type="button" className="btn btn--filled" disabled={!ready} onClick={() => onSplit(parts)}>
             {busy ? <span className="spinner spinner--sm spinner--on-primary" aria-hidden="true" /> : <Icon name="split_pdf" size={16} />}
             {busy ?? (parts.length >= 2 ? `Download ${plural(parts.length, "file")}` : "Download")}

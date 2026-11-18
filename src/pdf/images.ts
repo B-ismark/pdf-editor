@@ -34,10 +34,14 @@ export interface CleanJpeg {
  * Photoshop (APP13), maker notes and comments. pdf-lib embeds a JPEG's bytes
  * as they are, so all of that would ride along inside the PDF.
  *
- * Kept: APP0 (JFIF: pixel density, no personal data) and APP14 (Adobe: says
- * how to read the colour channels — without it a CMYK scan comes out
- * inverted). Everything else before the image data goes; the scan data after
- * SOS is copied byte for byte, so nothing is re-encoded.
+ * Kept: APP0 when it's JFIF (pixel density, no personal data), rewritten
+ * without the thumbnail JFIF may carry, and APP14 (Adobe: says how to read the
+ * colour channels — without it a CMYK scan comes out inverted). Every other
+ * APPn and comment goes, before the picture and between the scans of a
+ * progressive one. The picture stops at its end marker: phones append more
+ * after it — a second picture with EXIF of its own (MPF, Ultra HDR gain maps),
+ * the video of a motion photo — and none of that is the picture. Scan data is
+ * copied byte for byte, so nothing is re-encoded.
  *
  * The EXIF orientation is read on the way through, since stripping it is
  * what makes the picture lie on its side: the page draws it upright instead.
@@ -47,38 +51,73 @@ export function cleanJpeg(input: Uint8Array): CleanJpeg {
   if (b[0] !== 0xff || b[1] !== 0xd8) throw new Error("Not a JPEG");
   const keep: Uint8Array[] = [b.subarray(0, 2)];
   let orientation = 1;
+  let scanned = false;
   let i = 2;
-  while (i + 4 <= b.length) {
-    if (b[i] !== 0xff) throw new Error("Damaged JPEG");
+  while (i + 2 <= b.length) {
+    if (b[i] !== 0xff || (scanned && b[i + 1] === 0x00)) {
+      if (!scanned) throw new Error("Damaged JPEG");
+      // Entropy-coded data after a scan header: copy up to the next marker.
+      // 0xFF00 is a stuffed data byte and RST0–7 sit inside the data.
+      let j = i;
+      while (j + 1 < b.length && !(b[j] === 0xff && b[j + 1] !== 0x00 && !(b[j + 1] >= 0xd0 && b[j + 1] <= 0xd7))) j++;
+      if (j + 1 >= b.length) throw new Error("Damaged JPEG");
+      keep.push(b.subarray(i, j));
+      i = j;
+      continue;
+    }
     const marker = b[i + 1];
     // Fill bytes between segments.
     if (marker === 0xff) {
       i++;
       continue;
     }
-    // Markers without a length (TEM, RSTn) don't belong here, but cost nothing.
+    // Markers without a length (TEM, RSTn).
     if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) {
       keep.push(b.subarray(i, i + 2));
       i += 2;
       continue;
     }
-    if (marker === 0xd9) break; // EOI before any image data
+    if (marker === 0xd9) {
+      // End of the picture. Whatever follows is not part of it.
+      if (!scanned) throw new Error("Damaged JPEG");
+      keep.push(b.subarray(i, i + 2));
+      return { bytes: concat(keep), orientation };
+    }
+    if (i + 4 > b.length) throw new Error("Damaged JPEG");
     const len = (b[i + 2] << 8) | b[i + 3];
     if (len < 2 || i + 2 + len > b.length) throw new Error("Damaged JPEG");
     const end = i + 2 + len;
-    if (marker === 0xda) {
-      // Start of scan: from here on it's the picture (and any later scans and
-      // markers inside it), copied as is.
-      keep.push(b.subarray(i));
-      return { bytes: concat(keep), orientation };
-    }
-    const isApp = marker >= 0xe0 && marker <= 0xef;
+    if (marker === 0xda) scanned = true;
     if (marker === 0xe1 && orientation === 1) orientation = exifOrientation(b.subarray(i + 4, end));
-    const drop = (isApp && marker !== 0xe0 && marker !== 0xee) || marker === 0xfe;
-    if (!drop) keep.push(b.subarray(i, end));
+    if (marker === 0xe0) {
+      const jfif = bareJfif(b.subarray(i + 4, end));
+      if (jfif) keep.push(jfif);
+    } else {
+      const isApp = marker >= 0xe0 && marker <= 0xef;
+      const drop = (isApp && marker !== 0xee) || marker === 0xfe;
+      if (!drop) keep.push(b.subarray(i, end));
+    }
     i = end;
   }
-  throw new Error("Damaged JPEG");
+  // No end marker: a truncated file. Keep what there is only if it reached
+  // the picture — decoders show truncated JPEGs — and close it properly.
+  if (!scanned) throw new Error("Damaged JPEG");
+  keep.push(new Uint8Array([0xff, 0xd9]));
+  return { bytes: concat(keep), orientation };
+}
+
+/** A JFIF APP0 segment with its thumbnail dropped, or null for anything else
+ * in APP0 (JFXX extension segments are nothing but a thumbnail). */
+function bareJfif(payload: Uint8Array): Uint8Array | null {
+  if (payload.length < 14) return null;
+  if (String.fromCharCode(...payload.subarray(0, 5)) !== "JFIF\0") return null;
+  const seg = new Uint8Array(18);
+  seg.set([0xff, 0xe0, 0x00, 0x10]);
+  seg.set(payload.subarray(0, 12), 4); // id, version, units, densities
+  // Thumbnail width and height: none.
+  seg[16] = 0;
+  seg[17] = 0;
+  return seg;
 }
 
 function concat(parts: Uint8Array[]): Uint8Array {

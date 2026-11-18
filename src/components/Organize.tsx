@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { staleBuildMessage } from "../staleBuild";
 import { Icon } from "./Icon";
 import { plural } from "../plural";
@@ -72,12 +72,24 @@ export function Organize({
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [confirmApply, setConfirmApply] = useState(false);
-  const [splitOpen, setSplitOpen] = useState(startWithSplit);
+  // Opened after Organise has mounted, never in the same commit: the dialog's
+  // focus trap has to stack *above* Organise's, and child effects run first.
+  const [splitOpen, setSplitOpen] = useState(false);
+  useEffect(() => {
+    if (startWithSplit) setSplitOpen(true);
+  }, []);
   const [splitErr, setSplitErr] = useState<string | null>(null);
   // Opened for Split alone: leaving Split leaves Organise too, back to where
   // it was asked for.
   const splitOnly = useRef(startWithSplit);
   const fileRef = useRef<HTMLInputElement>(null);
+  // Locked while pages are being added or split: the insert point was worked
+  // out from this plan, and must still mean the same place. Set by hand —
+  // React 18 doesn't know `inert` — and in the same commit as the busy label.
+  const gridRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    gridRef.current?.toggleAttribute("inert", !!busy);
+  }, [busy]);
   const addCounter = useRef(0);
   const modalRef = useModal<HTMLDivElement>(onClose);
 
@@ -87,9 +99,15 @@ export function Organize({
     pages.map((p) => ({ sourceKey: "main", index: p.index, rotation: p.rotate })),
   );
 
+  // Where the last pages added went: the next ones follow them, until a page
+  // is picked or the plan changes. Kept apart from the picked pages so adding
+  // never picks anything — that would change what Extract and Split do.
+  const [after, setAfter] = useState<number | null>(null);
+
   const update = (next: PlanEntry[]) => {
     setPlan(next);
     setSelected(new Set());
+    setAfter(null);
   };
 
   const move = (i: number, dir: -1 | 1) => {
@@ -105,6 +123,7 @@ export function Organize({
     const next = plan.slice();
     next[i] = { ...next[i], rotation: (next[i].rotation + 90) % 360 };
     setPlan(next);
+    setAfter(null);
   };
   const del = (i: number) => {
     if (!plan) return;
@@ -114,34 +133,47 @@ export function Organize({
     const s = new Set(selected);
     s.has(i) ? s.delete(i) : s.add(i);
     setSelected(s);
+    setAfter(null);
   };
 
-  /** Where new pages go: after the last picked page, or at the end. */
-  const insertAt = plan ? (selected.size > 0 ? Math.max(...selected) + 1 : plan.length) : 0;
+  /** Where new pages go: after the last picked page, else after the pages
+   * added last, else at the end. */
+  const insertAt = plan
+    ? selected.size > 0
+      ? Math.max(...selected) + 1
+      : after != null
+        ? Math.min(after, plan.length)
+        : plan.length
+    : 0;
 
-  /** Put every page of `bytes` into the plan at position `at`, and pick them,
-   * so they show where they landed and the next insert follows them. Returns
-   * the position after them. */
-  const addBytes = async (bytes: ArrayBuffer | Uint8Array, at: number) => {
+  /** A document's bytes, checked and counted, ready to go into the plan. */
+  const prepare = async (bytes: ArrayBuffer | Uint8Array) => {
     const ab = bytes instanceof Uint8Array ? toAB(bytes) : bytes;
-    const key = `add-${addCounter.current++}`;
-    const n = await pageCount(ab);
-    setSources((prev) => new Map(prev).set(key, ab));
-    setPlan((prev) => {
-      const list = prev ?? [];
-      const pos = Math.max(0, Math.min(at, list.length));
-      const added = Array.from({ length: n }, (_, i) => ({ sourceKey: key, index: i, rotation: 0 }));
-      return [...list.slice(0, pos), ...added, ...list.slice(pos)];
+    return { key: `add-${addCounter.current++}`, ab, n: await pageCount(ab) };
+  };
+
+  /** Put every page of the prepared documents into the plan at `at`, in
+   * order, in one step. The grid is locked while anything is being added, so
+   * the plan `at` was worked out from is the plan this changes. */
+  const insert = (docs: { key: string; ab: ArrayBuffer; n: number }[], at: number) => {
+    if (!plan) return;
+    const pos = Math.max(0, Math.min(at, plan.length));
+    const added = docs.flatMap((d) => Array.from({ length: d.n }, (_, i) => ({ sourceKey: d.key, index: i, rotation: 0 })));
+    setSources((prev) => {
+      const next = new Map(prev);
+      for (const d of docs) next.set(d.key, d.ab);
+      return next;
     });
-    setSelected(new Set(Array.from({ length: n }, (_, i) => at + i)));
-    return at + n;
+    setPlan([...plan.slice(0, pos), ...added, ...plan.slice(pos)]);
+    setSelected(new Set());
+    setAfter(pos + added.length);
   };
 
   const addOpenDoc = async (d: { name: string; bake: () => Promise<ArrayBuffer> }) => {
     setErr(null);
     setBusy("Adding pages…");
     try {
-      await addBytes(await d.bake(), insertAt);
+      insert([await prepare(await d.bake())], insertAt);
     } catch (e) {
       setErr(staleBuildMessage(e) ?? ((e as { userFacing?: boolean })?.userFacing ? (e as Error).message : `Couldn't add the pages of "${d.name}".`));
     } finally {
@@ -152,46 +184,49 @@ export function Organize({
   /**
    * Add the files picked, in order, at the insert point: each PDF's pages, and
    * each run of pictures as pages of their own (metadata taken out, as when a
-   * picture is opened).
+   * picture is opened). All or nothing: every file is read and checked first,
+   * so one that can't be added leaves the plan as it was, and says which.
    */
   const addFiles = async (files: File[]) => {
     setErr(null);
     setBusy("Adding pages…");
-    let at = insertAt;
     let current = "";
     try {
+      const read = await Promise.all(files.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })));
+      const notOurs = read.filter((f) => !sniffImage(f.bytes.slice(0, 8)) && !looksLikePdf(f.bytes));
+      if (notOurs.length > 0) {
+        // Sniffed by content — HTML or a renamed file is refused here rather
+        // than deep in the merge.
+        const names = notOurs.map((f) => `"${f.name}"`).join(", ");
+        setErr(`${names} ${notOurs.length === 1 ? "isn't a PDF or a picture" : "aren't PDFs or pictures"} (JPEG, PNG). Nothing was added.`);
+        return;
+      }
+      const docs = [];
       let pictures: { name: string; bytes: ArrayBuffer }[] = [];
       const flush = async () => {
         if (pictures.length === 0) return;
         current = pictures[0].name;
         const batch = pictures;
         pictures = [];
-        at = await addBytes(await imagesToPdf(batch), at);
+        docs.push(await prepare(await imagesToPdf(batch)));
       };
-      for (const file of files) {
-        current = file.name;
-        const bytes = await file.arrayBuffer();
-        if (sniffImage(bytes.slice(0, 8))) {
-          pictures.push({ name: file.name, bytes });
+      for (const file of read) {
+        if (sniffImage(file.bytes.slice(0, 8))) {
+          pictures.push(file);
           continue;
         }
         await flush();
         current = file.name;
-        // Sniff the content — reject HTML or a renamed file before pdf-lib
-        // chokes on it deep in the merge.
-        if (!looksLikePdf(bytes)) {
-          setErr(`"${file.name}" isn't a PDF or a picture (JPEG, PNG).`);
-          return;
-        }
-        at = await addBytes(bytes, at);
+        docs.push(await prepare(file.bytes));
       }
       await flush();
+      insert(docs, insertAt);
     } catch (e) {
       setErr(
         staleBuildMessage(e) ??
           ((e as { fileName?: string })?.fileName != null
-            ? (e as Error).message
-            : `Couldn't add "${current}". It may be damaged or password-protected.`),
+            ? `${(e as Error).message} Nothing was added.`
+            : `Couldn't add "${current}". It may be damaged or password-protected. Nothing was added.`),
       );
     } finally {
       setBusy(null);
@@ -207,7 +242,7 @@ export function Organize({
     try {
       const like = plan[insertAt - 1] ?? plan[0];
       const size = await shownPageSize(sources.get(like.sourceKey)!, like.index, like.rotation);
-      await addBytes(await blankPage(size.width, size.height), insertAt);
+      insert([await prepare(await blankPage(size.width, size.height))], insertAt);
     } catch (e) {
       setErr(staleBuildMessage(e) ?? "Couldn't add a blank page. Please try again.");
     } finally {
@@ -282,7 +317,7 @@ export function Organize({
       // The pages as you see them: an extract of the original bytes would hand
       // back text you redacted.
       const main = await mainAsShown(subset, true);
-      onExtract(await buildFromPlan(main.entries, new Map(sources).set("main", main.bytes)));
+      onExtract(await buildFromPlan(main.entries, new Map(sources).set("main", main.bytes), { forDownload: true }));
     } catch (e) {
       setErr(staleBuildMessage(e) ?? failure(e, "Couldn't extract those pages. Please try again."));
     } finally {
@@ -308,7 +343,7 @@ export function Organize({
       const base = fileName.replace(/\.pdf$/i, "");
       const files = [];
       for (const part of parts) {
-        const data = await buildFromPlan(part.map((pos) => main.entries[pos]), all);
+        const data = await buildFromPlan(part.map((pos) => main.entries[pos]), all, { forDownload: true });
         files.push({ name: `${base}-pages-${rangeLabel(part).replace("–", "-")}.pdf`, data });
       }
       onSplit(makeZip(files));
@@ -340,7 +375,7 @@ export function Organize({
           className="btn"
           onClick={() => fileRef.current?.click()}
           disabled={!!busy}
-          aria-label="Add PDF or pictures"
+          aria-label="Add file: a PDF or pictures"
           data-tip="Add a PDF's pages, or pictures as pages"
         >
           <Icon name="note_add" size={16} /> <span className="organize__btnlabel" aria-hidden="true">Add file</span>
@@ -358,6 +393,7 @@ export function Organize({
           className="btn"
           onClick={() => {
             splitOnly.current = false;
+            setSplitErr(null);
             setSplitOpen(true);
           }}
           disabled={!!busy || !plan || plan.length < 2}
@@ -392,7 +428,7 @@ export function Organize({
       <p className="organize__hint body-small">
         Reorder, rotate, or delete pages · tap a page to pick it ·{" "}
         <span className="organize__at">
-          {plan && selected.size > 0 && insertAt < plan.length
+          {plan && insertAt < plan.length
             ? `new pages go after page ${insertAt}`
             : "new pages go at the end"}
         </span>
@@ -427,7 +463,7 @@ export function Organize({
           <span className="spinner spinner--sm" aria-hidden="true" /> Loading pages…
         </div>
       ) : (
-        <div className="organize__grid">
+        <div className="organize__grid" ref={gridRef} aria-busy={busy ? true : undefined}>
           {plan.map((entry, i) => (
             <div
               key={`${entry.sourceKey}-${entry.index}-${i}`}

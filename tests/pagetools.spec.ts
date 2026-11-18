@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PDFDocument } from "pdf-lib";
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFRef, PDFString } from "pdf-lib";
 import { fixtures } from "./fixtures";
 import { expectClean, open, openOrganise, pageTexts, pickTool, watch } from "./helpers";
 
@@ -106,8 +106,8 @@ async function download(page: Page, click: () => Promise<void>): Promise<{ name:
 }
 
 /** The entries of a stored (uncompressed) zip, as the app writes them. */
-function unzip(zip: Buffer): { name: string; data: Buffer }[] {
-  const out: { name: string; data: Buffer }[] = [];
+function unzip(zip: Buffer): { name: string; data: Buffer; flags: number }[] {
+  const out: { name: string; data: Buffer; flags: number }[] = [];
   let at = 0;
   while (zip.readUInt32LE(at) === 0x04034b50) {
     expect(zip.readUInt16LE(at + 8), "stored, not deflated").toBe(0);
@@ -116,7 +116,7 @@ function unzip(zip: Buffer): { name: string; data: Buffer }[] {
     const extra = zip.readUInt16LE(at + 28);
     const name = zip.subarray(at + 30, at + 30 + nameLen).toString("utf8");
     const start = at + 30 + nameLen + extra;
-    out.push({ name, data: zip.subarray(start, start + size) });
+    out.push({ name, data: zip.subarray(start, start + size), flags: zip.readUInt16LE(at + 6) });
     at = start + size;
   }
   return out;
@@ -213,12 +213,15 @@ test.describe("Organise inserts where you point", () => {
     await expect(org).toContainText("new pages go after page 3");
     await org.getByRole("button", { name: "Add blank page" }).click();
     await expect(org.locator(".pcard")).toHaveCount(13);
-    // The blank page is picked, so the next insert follows it.
-    await expect(org.locator(".pcard").nth(3)).toHaveClass(/pcard--sel/);
+    // Adding picks nothing — that would change what Extract and Split do —
+    // but the next insert still follows the page just added.
+    await expect(org.locator(".pcard--sel")).toHaveCount(0);
+    await expect(org.getByRole("button", { name: /^Extract/ })).toHaveCount(0);
     await expect(org).toContainText("new pages go after page 4");
     await org.locator("input[type=file]").setInputFiles(pic);
     await expect(org.locator(".pcard")).toHaveCount(14, { timeout: 30_000 });
-    await expect(org.locator(".pcard").nth(4)).toHaveClass(/pcard--sel/);
+    await expect(org.locator(".pcard--sel")).toHaveCount(0);
+    await expect(org).toContainText("new pages go after page 5");
 
     await org.getByRole("button", { name: "Apply" }).click();
     await expect(org).toBeHidden();
@@ -325,5 +328,241 @@ test.describe("Split into files", () => {
     const firstPart = await pageTexts(files[0].data, [1, 2, 3]);
     expect(firstPart.map((t) => /Page (\d+)/.exec(t)?.[1])).toEqual(["1", "3", "2"]);
     expect((await pageTexts(files[1].data, [1]))[0]).toContain("Page 4");
+  });
+});
+
+/** Redact page 1's heading, so exporting it has real work to do. */
+async function redactHeading(page: Page): Promise<void> {
+  await pickTool(page, "Redact");
+  const box = (await page.locator(".page").first().boundingBox())!;
+  await page.mouse.move(box.x + box.width * 0.05, box.y + box.height * (52 / 842));
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.95, box.y + box.height * (97 / 842), { steps: 10 });
+  await page.mouse.up();
+  await page.keyboard.press("Escape");
+}
+
+/** Every indirect object of a PDF, written out as text, and the raw bytes:
+ * what a reader could find in it. */
+function everything(bytes: Buffer, doc: PDFDocument): string {
+  const objs = doc.context.enumerateIndirectObjects().map(([, o]) => o.toString());
+  return bytes.toString("latin1") + "\n" + objs.join("\n");
+}
+
+test.describe("what Split, Extract and pictures leave out", () => {
+  test("Split and Extract of an unedited document scrub it like Download does, and name files in UTF-8", async ({ page }) => {
+    // A two-page file whose first page carries everything Download takes
+    // out: a script that runs when the page opens, a link that launches a
+    // program, an attached file, the page's own XMP and private data.
+    const d = await PDFDocument.create();
+    const p1 = d.addPage([300, 300]);
+    d.addPage([300, 300]);
+    const ctx = d.context;
+    p1.node.set(PDFName.of("AA"), ctx.obj({ O: { S: "JavaScript", JS: PDFString.of('app.alert("PAGE-JS-SECRET")') } }));
+    const attached = ctx.register(ctx.stream("ATTACHED-FILE-SECRET-BYTES", { Type: "EmbeddedFile" }));
+    const launch = ctx.register(ctx.obj({ Type: "Annot", Subtype: "Link", Rect: [0, 0, 50, 50], A: { S: "Launch", F: PDFString.of("evil-LAUNCH.exe") } }));
+    const fileAnnot = ctx.register(
+      ctx.obj({ Type: "Annot", Subtype: "FileAttachment", Rect: [60, 0, 80, 20], FS: { Type: "Filespec", F: PDFString.of("a.txt"), EF: { F: attached } } }),
+    );
+    p1.node.set(PDFName.of("Annots"), ctx.obj([launch, fileAnnot]));
+    p1.node.set(PDFName.of("Metadata"), ctx.register(ctx.stream("<x:xmpmeta>PAGE-XMP-SECRET</x:xmpmeta>", { Type: "Metadata", Subtype: "XML" })));
+    p1.node.set(PDFName.of("PieceInfo"), ctx.obj({ App: { Private: PDFString.of("PIECE-SECRET") } }));
+    const pdf = Buffer.from(await d.save({ useObjectStreams: false }));
+    const SCRUBBED = ["PAGE-JS-SECRET", "JavaScript", "Launch", "evil-LAUNCH", "ATTACHED-FILE-SECRET-BYTES", "EmbeddedFile", "PAGE-XMP-SECRET", "PIECE-SECRET", "pdf-lib"];
+    const check = async (bytes: Buffer, what: string) => {
+      const doc = await PDFDocument.load(bytes, { updateMetadata: false });
+      const all = everything(bytes, doc);
+      for (const s of SCRUBBED) expect(all, `${what}: "${s}" reached the file`).not.toContain(s);
+      expect(doc.getProducer(), `${what}: a producer`).toBeUndefined();
+      expect(doc.getCreationDate(), `${what}: a creation date`).toBeUndefined();
+    };
+
+    // Handed over as bytes: Playwright can't pick a file whose path has an accent.
+    await page.goto("/");
+    await page.setInputFiles("input[data-open-input]", { name: "Résumé.pdf", mimeType: "application/pdf", buffer: pdf });
+    await expect(page.locator(".page")).toHaveCount(2, { timeout: 30_000 });
+    await page.click('[aria-label="Export options"]');
+    await page.getByRole("menuitem", { name: /Split into files/ }).click();
+    const dlg = page.getByRole("dialog", { name: "Split into files" });
+    await dlg.getByLabel("Pages per file").fill("1");
+    const zip = await download(page, () => dlg.getByRole("button", { name: "Download 2 files" }).click());
+    // (The zip's own name isn't checked: headless Chromium saves a download
+    // with an accented name as "download".)
+    const parts = unzip(zip.bytes);
+    expect(parts.map((f) => f.name)).toEqual(["Résumé-pages-1.pdf", "Résumé-pages-2.pdf"]);
+    // Bit 11: the names are UTF-8. Without it, Windows reads them as CP437.
+    for (const f of parts) expect(f.flags & 0x0800, `${f.name} flagged UTF-8`).toBe(0x0800);
+    await check(parts[0].data, "split");
+
+    await openOrganise(page);
+    const org = page.locator(".organize");
+    await org.locator(".pcard__thumb").first().click();
+    const ex = await download(page, () => org.getByRole("button", { name: "Extract 1 page" }).click());
+    await check(ex.bytes, "extract");
+  });
+
+  test("a photo brings only its picture: no second picture, video, thumbnail or late comment after it", async ({ page }) => {
+    await page.goto("/");
+    const jpeg = await drawPicture(page, "image/jpeg", 200, 100);
+    const small = await drawPicture(page, "image/jpeg", 20, 10);
+    // A JFIF header carrying a thumbnail (6 × 1 RGB pixels of text), and a
+    // JFXX extension segment — another thumbnail.
+    const thumbText = Buffer.from("JFIF-THUMB-SECRET!", "latin1");
+    const jfif = Buffer.concat([Buffer.from("JFIF\0", "latin1"), Buffer.from([1, 2, 0, 0, 1, 0, 1, 6, 1]), thumbText]);
+    const jfxx = Buffer.concat([Buffer.from("JFXX\0", "latin1"), Buffer.from([0x10]), Buffer.from("JFXX-THUMB-SECRET", "latin1")]);
+    // After the picture ends: a second picture with EXIF of its own (as MPF
+    // and Ultra HDR append), then a motion photo's video.
+    const second = Buffer.concat([
+      small.subarray(0, 2),
+      segment(0xe1, Buffer.concat([Buffer.from("Exif\0\0", "latin1"), Buffer.from("SECOND-IMAGE-GPS-SECRET", "latin1")])),
+      small.subarray(2),
+    ]);
+    const body = jpeg.subarray(2, jpeg.length - 2); // without SOI and EOI
+    const photo = Buffer.concat([
+      jpeg.subarray(0, 2),
+      segment(0xe0, jfif),
+      segment(0xe0, jfxx),
+      body,
+      // A comment between the scan and the end marker.
+      segment(0xfe, Buffer.from("LATE-COMMENT-SECRET", "latin1")),
+      Buffer.from([0xff, 0xd9]),
+      second,
+      Buffer.from("\0\0\0\x18ftypmp42MOTION-VIDEO-SECRET", "latin1"),
+    ]);
+    const file = join(dir, "motion.jpg");
+    writeFileSync(file, photo);
+    await page.setInputFiles("input[type=file]", file);
+    await page.waitForFunction(() => [...document.querySelectorAll(".page canvas")].some((c) => (c as HTMLCanvasElement).width > 1), null, { timeout: 30_000 });
+    // Still the picture: red top-left, blue elsewhere.
+    await expect.poll(() => colourAt(page, 0.25, 0.25), { timeout: 15_000 }).toBe("red");
+    expect(await colourAt(page, 0.75, 0.75)).toBe("blue");
+    const { bytes } = await download(page, () => page.click(".appbar__download"));
+    const raw = bytes.toString("latin1");
+    for (const s of ["JFIF-THUMB-SECRET", "JFXX", "LATE-COMMENT-SECRET", "SECOND-IMAGE-GPS-SECRET", "Exif", "ftypmp42", "MOTION-VIDEO-SECRET"]) {
+      expect(raw, `"${s}" reached the file`).not.toContain(s);
+    }
+    // The picture's stream is one JPEG: one start, one end.
+    const doc = await PDFDocument.load(bytes);
+    const img = doc.context.enumerateIndirectObjects().map(([, o]) => o).find((o): o is PDFRawStream => o instanceof PDFRawStream && o.dict.get(PDFName.of("Subtype")) === PDFName.of("Image"))!;
+    const c = Buffer.from(img.contents);
+    expect(c.subarray(-2)).toEqual(Buffer.from([0xff, 0xd9]));
+    expect(c.indexOf(Buffer.from([0xff, 0xd8]), 2)).toBe(-1);
+  });
+});
+
+test.describe("Split and Organise behave while they work", () => {
+  test("Split from the Export menu holds focus, and can't be dismissed halfway through", async ({ page }) => {
+    await open(page, (await fixtures()).sample);
+    // An edit, so the split has to draw the document first — it takes a while.
+    await redactHeading(page);
+    await page.click('[aria-label="Export options"]');
+    await page.getByRole("menuitem", { name: /Split into files/ }).click();
+    const d = page.getByRole("dialog", { name: "Split into files" });
+    await expect(d).toBeVisible();
+    // Focus is in the dialog, not on Organise behind it, and Tab keeps it there.
+    await expect.poll(() => d.evaluate((el) => el.contains(document.activeElement))).toBe(true);
+    for (let i = 0; i < 8; i++) {
+      await page.keyboard.press("Tab");
+      expect(await d.evaluate((el) => el.contains(document.activeElement)), `Tab ${i + 1} left the dialog`).toBe(true);
+    }
+    await d.getByLabel("Pages per file").fill("6");
+    // Start the split, then — while it works — press Escape, Cancel and the
+    // scrim. None may close it: the files would download from nowhere.
+    const [dl, during] = await Promise.all([
+      page.waitForEvent("download", { timeout: 120_000 }),
+      page.evaluate(async () => {
+        const dialog = () => [...document.querySelectorAll<HTMLElement>("[role=dialog]")].find((e) => e.textContent?.includes("Split into files") && !e.classList.contains("organize"));
+        const btn = (t: string) => [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.includes(t))!;
+        btn("Download 2 files").click();
+        await new Promise((r) => setTimeout(r, 0));
+        const cancelOff = btn("Cancel").disabled;
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+        btn("Cancel").click();
+        document.querySelector(".dialog-scrim")!.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
+        await new Promise((r) => setTimeout(r, 50));
+        return { cancelOff, open: !!dialog() };
+      }),
+    ]);
+    expect(during.cancelOff, "Cancel while splitting").toBe(true);
+    expect(during.open, "the dialog closed while splitting").toBe(true);
+    expect(dl.suggestedFilename()).toBe("sample-split.zip");
+    await expect(d).toBeHidden();
+    await expect(page.locator(".organize")).toBeHidden();
+  });
+
+  test("pages are locked while pages are added, and added pages aren't picked", async ({ page }) => {
+    await open(page, (await fixtures()).sample);
+    await openOrganise(page);
+    const org = page.locator(".organize");
+    await expect(org.locator(".pcard")).toHaveCount(12);
+    // The visible label is the start of the accessible name (WCAG 2.5.3).
+    expect(await org.locator("button", { hasText: "Add file" }).getAttribute("aria-label")).toMatch(/^Add file/);
+    // Watch the grid's records: adding a page must lock it (inert) and then
+    // unlock it. The add can be over before an observer looks at the page, so
+    // it's the records that are read, not the page.
+    await page.evaluate(() => {
+      const w = window as unknown as { inert?: (string | null)[] };
+      w.inert = [];
+      const grid = document.querySelector(".organize__grid")!;
+      new MutationObserver((records) => {
+        for (const r of records) if (r.attributeName === "inert") w.inert!.push(r.oldValue);
+      }).observe(grid, { attributes: true, attributeOldValue: true });
+    });
+    await org.getByRole("button", { name: "Add blank page" }).click();
+    await expect(org.locator(".pcard")).toHaveCount(13);
+    // null → "" (locked), then "" → removed (unlocked).
+    expect(await page.evaluate(() => (window as unknown as { inert: (string | null)[] }).inert), "the grid was locked while adding").toEqual([null, ""]);
+    expect(await org.locator(".organize__grid").getAttribute("inert")).toBeNull();
+    // Nothing picked, so Split still offers "every N" by default.
+    await expect(org.locator(".pcard--sel")).toHaveCount(0);
+    await org.getByRole("button", { name: "Split into files" }).click();
+    const d = page.getByRole("dialog", { name: "Split into files" });
+    await expect(d.getByRole("radio", { name: /^Every/ })).toBeChecked();
+    await d.getByRole("button", { name: "Cancel" }).click();
+    // Pick only page 1: the hint says why that doesn't split.
+    await org.locator(".pcard__thumb").first().click();
+    await org.getByRole("button", { name: "Split into files" }).click();
+    await expect(d).toContainText("page 1 already does");
+    await d.getByLabel("Pages per file").fill("2.5");
+    await expect(d).toContainText("Type a whole number of pages");
+    await expect(d.getByRole("button", { name: /Download/ })).toBeDisabled();
+  });
+
+  test("adding several files in Organise is all or nothing, and says which file is to blame", async ({ page }) => {
+    await open(page, (await fixtures()).sample);
+    const pic = join(dir, "ok.png");
+    writeFileSync(pic, await drawPicture(page, "image/png", 100, 100));
+    const notes = join(dir, "notes.txt");
+    writeFileSync(notes, "just some notes");
+    await openOrganise(page);
+    const org = page.locator(".organize");
+    await org.locator("input[type=file]").setInputFiles([pic, notes, (await fixtures()).typeset]);
+    await expect(org.getByRole("alert")).toContainText('"notes.txt" isn\'t a PDF or a picture');
+    await expect(org.getByRole("alert")).toContainText("Nothing was added");
+    await expect(org.locator(".pcard")).toHaveCount(12);
+  });
+});
+
+test.describe("opening pictures: names and reasons", () => {
+  test("a batch names the picture to blame; a nameless picture gets a name; other files hear what's accepted", async ({ page }) => {
+    await page.goto("/");
+    const good = join(dir, "good.png");
+    writeFileSync(good, await drawPicture(page, "image/png", 100, 100));
+    const broken = join(dir, "broken.jpg");
+    writeFileSync(broken, Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]), Buffer.from("not really")]));
+    await page.setInputFiles("input[data-open-input]", [good, broken, (await fixtures()).sample]);
+    const status = page.getByRole("alert").filter({ hasText: "Opened 1 document" });
+    await expect(status).toContainText(`"broken.jpg" isn't a JPEG or PNG picture this can read`, { timeout: 30_000 });
+    await expect(status).not.toContainText('"good.png"');
+
+    const nameless = join(mkdtempSync(join(tmpdir(), "dot-")), ".png");
+    writeFileSync(nameless, await drawPicture(page, "image/png", 100, 100));
+    await page.setInputFiles("input[data-open-input]", nameless);
+    await expect(page.locator(".doctab__btn", { hasText: "Pictures.pdf" })).toBeVisible({ timeout: 30_000 });
+
+    const txt = join(dir, "readme.txt");
+    writeFileSync(txt, "hello");
+    await page.setInputFiles("input[data-open-input]", txt);
+    await expect(page.getByRole("alert").filter({ hasText: `"readme.txt" isn't a PDF or a picture (JPEG, PNG)` })).toHaveCount(1);
   });
 });

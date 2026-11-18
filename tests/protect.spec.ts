@@ -289,7 +289,7 @@ test("a password typed with full-width letters or a no-break space opens the cop
   // And typed as it was into this app's own prompt, it still opens.
   const file = join(mkdtempSync(join(tmpdir(), "protect-")), "fullwidth.pdf");
   writeFileSync(file, bytes);
-  await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', file);
+  await page.setInputFiles('input[data-open-input]', file);
   const prompt = page.getByRole("dialog", { name: /password/i }).last();
   await prompt.getByLabel(/password/i).first().fill(typed);
   await prompt.getByRole("button", { name: /Open|Unlock/ }).click();

@@ -171,12 +171,28 @@ type-checking can't see, and each exists because it broke once:
   producer; it opens as unsaved work (closing asks). Pictures picked with a PDF
   make one document in pick order beside the PDF's own tab; a file that only
   starts like a JPEG is refused by name. Organise: a blank page and a picture
-  go after the picked page (the inserted page is then picked, so the next one
+  go after the picked page (nothing is then picked, but the next one still
   follows it), the blank sized like the page before it — turned with it when
   that page is turned. Split: from the Export menu it opens straight into the
   dialog and Cancel lands back on the page; every 5 pages of 12 makes three
   files named by range, the redacted page has no text in its part; in
-  Organise, picks start parts in the order Organise shows.
+  Organise, picks start parts in the order Organise shows. Review fixes:
+  Split and Extract of an *unedited* file carrying a page script, a launch
+  link, an attachment, page XMP and PieceInfo leave all of it out, with no
+  producer, and the zip flags its names UTF-8 (the file goes in as a buffer —
+  Playwright can't pick a path with an accent); a photo with a JFIF
+  thumbnail, a JFXX segment, a comment after the scan and a second picture
+  plus video after its end marker brings only the picture; Split from the
+  menu keeps focus and Tab inside its dialog, and Escape / Cancel / scrim
+  during the split don't close it; the grid goes `inert` while a page is
+  added (read from mutation records — the add can finish before an observer
+  looks), added pages aren't picked so Split defaults to "every N", picking
+  only page 1 explains itself, "2.5" pages is refused, "Add file" starts its
+  own accessible name; adding several files with one non-PDF adds nothing
+  and names it; a mixed batch names the picture to blame, a picture called
+  ".png" opens as "Pictures.pdf", and a .txt hears that pictures are
+  accepted too. Other specs pick the open input by `input[data-open-input]`,
+  not by its accept list, which changes as file types are added.
 - `patterns.spec.ts` — Redact patterns: every preset is found in the
   `personal` fixture, a phone number split across two runs too, and the
   decoys (a Luhn-failing "card", a bad-checksum IBAN, a span of years, a short

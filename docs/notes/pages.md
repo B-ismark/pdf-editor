@@ -118,10 +118,20 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
 
 ## Inserting and splitting (Organise)
 
-- **New pages go after the last picked page, or at the end** (`insertAt` in
-  `Organize.tsx`). What was inserted is then picked, so a second insert
-  follows the first and the user sees where things landed. The hint line says
-  where the next insert goes.
+- **New pages go after the last picked page, else after the pages added
+  last, else at the end** (`insertAt` in `Organize.tsx`). Inserting picks
+  **nothing**: a pick changes what Extract does and Split's default mode, so
+  the "follow the last insert" point is its own state (`after`), dropped as
+  soon as a page is picked, moved, turned or deleted. The hint line says where
+  the next insert goes.
+- **The grid is `inert` while anything is being added or split** (set by
+  hand in a layout effect — React 18 doesn't know the attribute — so it lands
+  in the same commit as the busy label). The insert point was worked out from
+  the plan before the await; a delete or move during it would make it point
+  somewhere else.
+- **Adding several files is all or nothing**: every file is read, sniffed and
+  counted first (`prepare`), then all go in in one `insert`. A file that
+  can't be added is named, and nothing is added.
 - **Everything inserted is a source of its own**: another PDF, a run of
   pictures (one `imagesToPdf` document per run of consecutive pictures in the
   pick), or a blank page (`blankPage`, sized by `shownPageSize` like the page
@@ -135,8 +145,19 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
   at each picked page. It bakes this document once (`mainAsShown(plan, true)`,
   page numbers and watermark drawn in) and builds each part from the baked
   entries — never from the original bytes, which would hand back redacted
-  text. The parts go out as one stored ZIP, named `<file>-pages-<a>-<b>.pdf`.
-- **Split from the Export menu** opens Organise with `startWithSplit`; leaving
+  text. The parts go out as one stored ZIP, named `<file>-pages-<a>-<b>.pdf`
+  (names flagged UTF-8, general-purpose bit 11).
+- **Extract and Split are downloads, so they get the exporter's scrub**:
+  `buildFromPlan(…, { forDownload: true })` runs `sanitizeDocument` and
+  collects garbage. Without edits, `mainAsShown` hands back the *original*
+  bytes, so page `/AA` scripts, launch links, attachments and page XMP would
+  otherwise ride along. `buildFromPlan` never stamps a pdf-lib producer.
+- **The Split dialog can't be dismissed while it splits** (Escape, scrim and
+  Cancel are off): closing it would hide the work without stopping it.
+- **Split from the Export menu** opens Organise with `startWithSplit`, and
+  opens the dialog one commit *after* Organise mounts: mounted together, the
+  child's `useModal` would register first and Organise's focus trap would sit
+  on top of it. Leaving
   the dialog (Cancel or after the download) closes Organise too, back to the
   page. Opened from inside Organise, it returns to the grid.
 
@@ -146,9 +167,12 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
   picked together become **one** PDF in pick order (`openImages`), PDFs open
   in tabs of their own. The new document opens with `baked: 1` — it exists
   nowhere else, so it is unsaved work (dot, close asks, autosave keeps it).
-- `cleanJpeg` drops every APPn segment but APP0 (JFIF) and APP14 (Adobe — a
-  CMYK JPEG reads inverted without it), plus comments, and copies the scan
-  data untouched: no re-encode, no loss. It reads the EXIF orientation on the
+- `cleanJpeg` drops every APPn segment but APP0 and APP14 (Adobe — a CMYK
+  JPEG reads inverted without it), plus comments — before the picture and
+  between progressive scans. APP0 is kept only when it's JFIF, rewritten with
+  no thumbnail; JFXX goes. It **stops at the end marker**: phones append a
+  second picture with its own EXIF (MPF, Ultra HDR gain maps) or a motion
+  photo's video after it. Scan data is copied untouched: no re-encode, no loss. It reads the EXIF orientation on the
   way through; the page then draws the picture upright with `orientMatrix`
   (all eight orientations, mirrors included), and swaps the page's sides for
   5–8. Stripping the tag is also what keeps a viewer that honours EXIF from

@@ -20,7 +20,7 @@ const activeTab = (page: Page) => page.locator(".doctab--active");
 /** Open another file through the always-mounted picker (it accepts several). */
 async function openMore(page: Page, ...files: string[]) {
   const before = await tabs(page).count();
-  await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', files);
+  await page.setInputFiles('input[data-open-input]', files);
   await expect(tabs(page)).toHaveCount(before + files.length, { timeout: 30_000 });
   await page.waitForSelector(".page canvas");
 }
@@ -289,7 +289,7 @@ test.describe("document tabs", () => {
   test("a batch with a bad file says so, instead of claiming every file opened", async ({ page }) => {
     const f = await fixtures();
     await open(page, f.sample);
-    await page.locator('input[accept="application/pdf,.pdf"][multiple]').setInputFiles([
+    await page.locator('input[data-open-input]').setInputFiles([
       { name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from("not a pdf") },
       { name: "typeset.pdf", mimeType: "application/pdf", buffer: readFileSync(f.typeset) },
     ]);
@@ -386,7 +386,7 @@ test.describe("document tabs", () => {
     const f = await fixtures();
     await open(page, f.sample);
     await expect(page.locator(".doctabs")).toHaveCount(0);
-    await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', f.typeset);
+    await page.setInputFiles('input[data-open-input]', f.typeset);
     await expect(page.locator(".doctabs")).toBeVisible();
     await expect(tabs(page)).toHaveCount(2);
     // The status toast is fixed to the window, so it has to move down with the

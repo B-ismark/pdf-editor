@@ -259,7 +259,7 @@ test.describe("Picture-only pages", () => {
     await page.locator(".page").first().click({ position: { x: 150, y: 150 } });
     await hint.getByRole("button", { name: "Dismiss" }).click();
 
-    await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', f.sample);
+    await page.setInputFiles('input[data-open-input]', f.sample);
     await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
     await page.locator(".doctab").first().locator(".doctab__btn").click();
     await page.waitForSelector(".page canvas");
