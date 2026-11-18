@@ -452,6 +452,10 @@ test.describe("the kept-fillable note on every export that is a PDF", () => {
     const w = watch(page);
     const f = await fixtures();
     await open(page, f.form);
+    // Three fields kept in the first: the one kept in the second falls past
+    // the three named, and its file still has to be named.
+    await field(page, FORM.multiline.name).fill("Οδός");
+    await field(page, FORM.limited.name).fill("ΑΒΓ");
     await greekFlattened(page);
     // The same form again, in a second tab: two tabs, one file name, and two
     // entries in the ZIP. The first tab is parked, its choice with it.
@@ -464,9 +468,9 @@ test.describe("the kept-fillable note on every export that is a PDF", () => {
       page.waitForEvent("download"),
       page.locator(".menu__item", { hasText: "Download all (2) as ZIP" }).click(),
     ]);
-    await expect(page.locator(".snackbar__msg")).toContainText(
-      `“${FORM.text.name}” in form-edited.pdf and “${FORM.text.name}” in form-edited-2.pdf stay fillable`,
-    );
+    const msg = page.locator(".snackbar__msg");
+    await expect(msg).toContainText(/“\w+”, “\w+” and “\w+” \(in form-edited\.pdf\) and 1 field \(in form-edited-2\.pdf\) stay fillable/);
+    for (const name of [FORM.text.name, FORM.multiline.name, FORM.limited.name]) await expect(msg).toContainText(`“${name}”`);
     expectClean(w);
   });
 
