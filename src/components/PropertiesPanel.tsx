@@ -4,6 +4,8 @@ import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
 import { isRejectedUrl } from "../pdf/url";
 import { segmentKey } from "../segmentKey";
+
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 import type { Annotation, FontKey, Selection, TextStyle } from "../pdf/types";
 
 interface Props {
@@ -424,11 +426,23 @@ function LinkPageField({ pos, count, onChange }: { pos: number | null; count: nu
             onKeyDown={(e) => {
               if (e.key === "Enter") commit(draft);
               else if (e.key === "Escape") setDraft(shown);
-              // Ctrl/⌘+S and +P act on the file with what was typed: taken
-              // now, before they run. Not on Ctrl alone or the field's own
-              // shortcuts (select all, paste…) — "1" on the way to "12"
-              // mustn't move the link, and Escape must still go back.
-              else if ((e.ctrlKey || e.metaKey) && /^[sp]$/i.test(e.key)) flushSync(() => commit(draft));
+              else {
+                const key = e.key.toLowerCase();
+                const mod = e.ctrlKey || e.metaKey;
+                // Ctrl/⌘+S and +P (as the editor reads them) act on the file
+                // with what was typed: taken now, before they run. Not on
+                // Ctrl alone or the field's own shortcuts (select all,
+                // paste…) — "1" on the way to "12" mustn't move the link, and
+                // Escape must still go back.
+                if ((IS_MAC ? e.metaKey && !e.ctrlKey : mod) && (key === "s" || key === "p") && !e.shiftKey && !e.altKey)
+                  flushSync(() => commit(draft));
+                // Undo/redo step through what was taken; what wasn't is
+                // dropped first, so the field going away can't take it after.
+                else if (mod && (key === "z" || key === "y")) {
+                  latest.current = () => {};
+                  setDraft(shown);
+                }
+              }
             }}
             onBlur={() => {
               commit(draft);
