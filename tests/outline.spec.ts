@@ -429,6 +429,20 @@ test.describe("the link panel's controls", () => {
     await expect(page.locator(".linkbox").first()).toHaveAttribute("data-tip", "Page 4");
   });
 
+  test("Ctrl or a field shortcut mid-number takes nothing; Escape still goes back", async ({ page }) => {
+    await open(page, (await fixtures()).outlined);
+    await pickTool(page, "Link");
+    await dragOnPage(page, { x: 80, y: 120 }, { x: 280, y: 165 });
+    await page.getByRole("radio", { name: "Page" }).click();
+    await page.fill("#link-page", "3");
+    await page.locator("#link-page").press("Enter");
+    await page.fill("#link-page", "1");
+    await page.keyboard.press("Control");
+    await page.keyboard.press("ControlOrMeta+a");
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".linkbox")).toHaveAttribute("data-tip", "Page 3");
+  });
+
   test("closing a section by its arrow keeps focus in the tree", async ({ page }) => {
     await open(page, (await fixtures()).outlined);
     await showOutline(page);

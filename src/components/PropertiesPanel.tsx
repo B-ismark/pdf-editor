@@ -424,9 +424,11 @@ function LinkPageField({ pos, count, onChange }: { pos: number | null; count: nu
             onKeyDown={(e) => {
               if (e.key === "Enter") commit(draft);
               else if (e.key === "Escape") setDraft(shown);
-              // Ctrl/⌘+S (or any shortcut) acts on the document with what was
-              // typed in it: taken now, before the shortcut runs.
-              else if (e.ctrlKey || e.metaKey) flushSync(() => commit(draft));
+              // Ctrl/⌘+S and +P act on the file with what was typed: taken
+              // now, before they run. Not on Ctrl alone or the field's own
+              // shortcuts (select all, paste…) — "1" on the way to "12"
+              // mustn't move the link, and Escape must still go back.
+              else if ((e.ctrlKey || e.metaKey) && /^[sp]$/i.test(e.key)) flushSync(() => commit(draft));
             }}
             onBlur={() => {
               commit(draft);
