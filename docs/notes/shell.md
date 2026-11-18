@@ -304,10 +304,13 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   the setting at Apply — the preview, every page and a later export (or a
   restored session, or a renamed file) read the same thing. Update keeps them
   too, unless the person ticks "Use today's date and this file's name" (shown
-  only when that would change a page). The date is written in the reader's
+  only when that would change a page) — but only a value that was *on* the
+  pages is kept: Apply stores a date even for a "{page}" setting, and adding
+  `{date}` months later must not surface that never-shown one. The date is written in the reader's
   language only when Helvetica can draw it (`dateLabel`: "18 novembre 2026"),
   in English otherwise — a Japanese or Russian date would reach the file as
-  fragments while the preview showed it whole. Bates is prefix + a zero-padded count from its own start, one per page
+    fragments while the preview showed it whole. Bates is prefix + a
+  zero-padded count from its own start, one per page
   as arranged, and keeps counting past its digits rather than wrapping. Text
   goes through `sanitize` like a watermark: a character Helvetica can't write
   is dropped and reported, not drawn as "?". Token chips in the dialog take
@@ -320,4 +323,5 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   exporter's footer baseline is on the margin, the header's a text size below
   it. Stored values are read defensively (`slotsOf`, `firstNumber`): restore
   doesn't validate `DocState`, and a non-text slot must not stop the page
-  rendering.
+  rendering, nor a non-numeric size the export. The dialog opens on the same
+  reading (`normalBates`), so Update with nothing touched renumbers nothing.

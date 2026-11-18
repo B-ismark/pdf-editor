@@ -261,13 +261,49 @@ test("a number field can be cleared and retyped", async ({ page }) => {
   await expect(digits).toHaveValue("1");
 });
 
-test("a damaged saved setting still opens the document", async ({ page }) => {
+test("a damaged saved setting still opens, exports, and edits without renumbering", async ({ page }) => {
   const w = watch(page);
   const f = await fixtures();
-  const broken = { position: "nowhere", start: "x", size: 11, color: "#000000", slots: { "top-left": 5, "bottom-center": "{page}" } };
+  const broken = {
+    position: "nowhere", start: "x", size: "big", color: "nope",
+    slots: { "top-left": 5, "bottom-center": "{page}", "bottom-right": "{bates}" },
+    bates: { digits: 3 },
+  };
   await restoreWith(page, f.sample, { pageNumbers: broken as unknown as PageNumberOptions });
-  await expect(page.locator(".page").first().locator(".finishlayer__num")).toHaveText("1");
+  await page.keyboard.press("Escape");
+  const labels = page.locator(".page").first().locator(".finishlayer__num");
+  await expect(labels).toHaveText(["1", "000"]);
+  // The file gets what the page shows.
+  const [text] = await pageTexts(await download(page), [1]);
+  expect(text).toContain("000");
+  // The dialog reads the Bates setting as the page does, so Update with
+  // nothing touched leaves every number where it was.
+  await page.getByRole("button", { name: "Edit header & footer" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("Bates start")).toHaveValue("0");
+  await expect(dialog.getByLabel("Bates digits")).toHaveValue("3");
+  await dialog.getByRole("button", { name: "Update" }).click();
+  await expect(labels).toHaveText(["1", "000"]);
   expectClean(w);
+});
+
+test("a date added later is today's, not one stored but never shown", async ({ page }) => {
+  const f = await fixtures();
+  const pageNumbers: PageNumberOptions = {
+    position: "bottom-center", start: 1, size: 11, color: "#000000",
+    slots: { "bottom-center": "{page}" }, date: "1 January 2020", file: "brief.pdf",
+  };
+  await restoreWith(page, f.sample, { pageNumbers }, "renamed.pdf");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Edit header & footer" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Header, left").fill("{date} {file}");
+  // Nothing on the pages to keep, so nothing to offer keeping.
+  await expect(dialog.getByRole("checkbox")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "Update" }).click();
+  const head = page.locator(".page").first().locator('.finishlayer__num[data-place="top-left"]');
+  await expect(head).not.toContainText("2020");
+  await expect(head).toContainText("renamed.pdf");
 });
 
 test("the preview's text sits on the file's baseline", async ({ page }) => {

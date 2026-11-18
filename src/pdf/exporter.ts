@@ -1,4 +1,4 @@
-import { HF_MARGIN, labelsFor } from "./headerFooter";
+import { HF_MARGIN, labelsFor, textColor, textSize } from "./headerFooter";
 import { LineCapStyle, PDFArray, PDFCatalog,  PDFDict, PDFDocument, PDFHexString, PDFInvalidObject, PDFName, PDFPage, PDFPageLeaf, PDFPageTree, PDFRef, PDFStream, PDFString,  StandardFonts, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb, type PDFFont } from "@cantoo/pdf-lib";
 import { fitScale, roomAfter } from "./lineFit";
 import { renderPageToCanvas } from "./loader";
@@ -138,21 +138,22 @@ function drawHeaderFooter(
   frame: ViewFrame,
   dropped: Set<string>,
 ): void {
-  const c = hexToRgb(opts.color);
+  const c = hexToRgb(textColor(opts));
+  const size = textSize(opts);
   const margin = HF_MARGIN;
   const { width, height } = frame;
   for (const { position, text: raw } of labelsFor(opts, pos, total)) {
     const label = sanitize(raw, font, dropped);
     if (!label.trim()) continue;
-    const tw = font.widthOfTextAtSize(label, opts.size);
+    const tw = font.widthOfTextAtSize(label, size);
     const top = position.startsWith("top");
-    const y = top ? height - margin - opts.size : margin;
+    const y = top ? height - margin - size : margin;
     const x = position.endsWith("left")
       ? margin
       : position.endsWith("right")
         ? width - margin - tw
         : width / 2 - tw / 2;
-    page.drawText(label, { x: frame.x + x, y: frame.y + y, size: opts.size, font, color: rgb(c.r, c.g, c.b) });
+    page.drawText(label, { x: frame.x + x, y: frame.y + y, size, font, color: rgb(c.r, c.g, c.b) });
   }
 }
 

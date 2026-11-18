@@ -48,9 +48,26 @@ export function uses(o: PageNumberOptions, token: string): boolean {
 
 /** The Bates number of the page at `pos` (0-based, as arranged). */
 export function batesNumber(b: BatesOptions, pos: number): string {
-  const digits = Math.max(1, Math.min(MAX_BATES_DIGITS, Math.round(b.digits) || 1));
-  const n = Math.max(0, Math.round(b.start) || 0) + pos;
-  return `${typeof b.prefix === "string" ? b.prefix : ""}${String(n).padStart(digits, "0")}`;
+  const { prefix, start, digits } = normalBates(b);
+  return `${prefix}${String(start + pos).padStart(digits, "0")}`;
+}
+
+/** A stored Bates setting read safely — the one reading the page, the
+ * Inspector and the dialog all use, so none of them disagrees with another. */
+export function normalBates(b: BatesOptions): BatesOptions {
+  return {
+    prefix: typeof b.prefix === "string" ? b.prefix : "",
+    start: Math.max(0, Math.round(b.start) || 0),
+    digits: Math.max(1, Math.min(MAX_BATES_DIGITS, Math.round(b.digits) || 1)),
+  };
+}
+
+/** The text size and colour, read safely from a stored setting. */
+export function textSize(o: PageNumberOptions): number {
+  return Number.isFinite(o.size) && o.size > 0 ? Math.min(o.size, 200) : 11;
+}
+export function textColor(o: PageNumberOptions): string {
+  return typeof o.color === "string" && /^#[0-9a-f]{6}$/i.test(o.color) ? o.color : "#444444";
 }
 
 /** The first page's number, read safely from a stored setting. */

@@ -3,7 +3,7 @@ import { flushSync } from "react-dom";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
 import { useModal } from "../hooks/useModal";
-import { DEFAULT_BATES, MAX_BATES_DIGITS, POSITIONS, TOKENS, batesNumber, dateLabel, firstNumber, labelsFor, slotsOf } from "../pdf/headerFooter";
+import { DEFAULT_BATES, MAX_BATES_DIGITS, POSITIONS, TOKENS, batesNumber, dateLabel, firstNumber, labelsFor, normalBates, slotsOf, textColor, uses } from "../pdf/headerFooter";
 import type { BatesOptions, NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/types";
 
 interface Props {
@@ -77,10 +77,11 @@ export function FinishDialog({
     Object.fromEntries(currentNumbers ? slotsOf(currentNumbers) : [["bottom-center", "{page}"]]),
   );
   const [startText, setStartText] = useState(String(currentNumbers ? firstNumber(currentNumbers) : 1));
-  const storedBates = currentNumbers?.bates ?? DEFAULT_BATES;
-  const [prefix, setPrefix] = useState(typeof storedBates.prefix === "string" ? storedBates.prefix : "");
-  const [batesStartText, setBatesStartText] = useState(String(whole(String(storedBates.start), 0, Number.MAX_SAFE_INTEGER, 1)));
-  const [digitsText, setDigitsText] = useState(String(whole(String(storedBates.digits), 1, MAX_BATES_DIGITS, 6)));
+  // Read as the page reads it, so opening and pressing Update changes nothing.
+  const storedBates = normalBates(currentNumbers?.bates ?? DEFAULT_BATES);
+  const [prefix, setPrefix] = useState(storedBates.prefix);
+  const [batesStartText, setBatesStartText] = useState(String(storedBates.start));
+  const [digitsText, setDigitsText] = useState(String(storedBates.digits));
   const start = whole(startText, 0, Number.MAX_SAFE_INTEGER, 0);
   const bates = useMemo<BatesOptions>(
     () => ({ prefix, start: whole(batesStartText, 0, Number.MAX_SAFE_INTEGER, 0), digits: whole(digitsText, 1, MAX_BATES_DIGITS, 1) }),
@@ -89,10 +90,12 @@ export function FinishDialog({
   // The date and file name were fixed when the setting was applied; Update
   // keeps them unless the person asks for today's and this file's.
   const today = useMemo(() => dateLabel(new Date()), []);
-  const storedDate = typeof currentNumbers?.date === "string" ? currentNumbers.date : null;
-  const storedFile = typeof currentNumbers?.file === "string" ? currentNumbers.file : null;
+  // Only a value that was on the pages is worth keeping: one stored but never
+  // shown (a "{page}" setting applied months ago) gives way to today's.
+  const storedDate = currentNumbers && uses(currentNumbers, "{date}") && typeof currentNumbers.date === "string" ? currentNumbers.date : null;
+  const storedFile = currentNumbers && uses(currentNumbers, "{file}") && typeof currentNumbers.file === "string" ? currentNumbers.file : null;
   const [refresh, setRefresh] = useState(false);
-  const [numColor, setNumColor] = useState(currentNumbers?.color ?? "#444444");
+  const [numColor, setNumColor] = useState(currentNumbers ? textColor(currentNumbers) : "#444444");
   const [text, setText] = useState(currentWatermark?.text ?? "DRAFT");
   const [wmColor, setWmColor] = useState(currentWatermark?.color ?? "#888888");
   const [opacity, setOpacity] = useState(currentWatermark?.opacity ?? 0.2);
