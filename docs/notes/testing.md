@@ -164,6 +164,25 @@ type-checking can't see, and each exists because it broke once:
   still protected and closing the warning stays in the app; on a phone with
   something selected, the dialog opens (the deselect's removal no longer
   closes it) and Back closes it without leaving the app.
+- `saveto.spec.ts` — Package 8c. With stubbed pickers / share sheet / print():
+  a picked file is written back on Ctrl+S with the edit in its bytes, no
+  download, "Saved", and closes without asking; denied permission writes
+  nothing; a password-opened file warns first. With no handle Ctrl+S is Save
+  as (asked once, then the tab is that file); a cancelled picker is silent;
+  without pickers Ctrl+S downloads. Share passes the edited PDF, and a refused
+  first call offers "Ready to share" (and isn't a save). Print lays out 12
+  pages at 595×842 pt, 150 dpi, with the redaction black; under print media
+  only they show. Review fixes: the same file picked again goes to its tab; two
+  Ctrl+S at once write once; a file once saved without its password (in place
+  or via Save as) isn't warned about again; a browser-started print shows the
+  app; a landscape page gets a landscape `@page`; on a Mac Ctrl+S is left
+  alone; with two tabs each saves to its own file; a failed write stays
+  unsaved. Second review: Save as onto a file another tab has open is
+  refused; one unreadable file among several opens the rest and is named;
+  sharing through "Ready to share" isn't a save either. Third: Save as onto its
+  own password-opened file warns as Ctrl+S does; a file named "-edited" is
+  offered "… copy", never its own name; an already-open file picked with
+  another is said to be open — but never over why the other didn't open.
 - `crop.spec.ts` — Package 8b. A page whose CropBox starts at 100,200: the
   heading's overlay sits on its glyphs (not off the page), an edit is redrawn
   at the run's own user-space position, and a link drawn 20 points in from

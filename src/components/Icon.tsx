@@ -60,6 +60,10 @@ import {
   RotateCcw,
   RotateCw,
   Save,
+  HardDrive,
+  FileOutput,
+  Printer,
+  Share2,
   ScanText,
   TextSearch,
   Search,
@@ -195,7 +199,11 @@ const MAP: Record<string, LucideIcon> = {
   /** A cryptographic signature, not a drawn one. */
   certificate: BadgeCheck,
   /** Session kept on this device. */
-  save_local: Save,
+  save_local: HardDrive,
+  save: Save,
+  save_as: FileOutput,
+  print: Printer,
+  share: Share2,
   /** Bring a previous session back. `History` was the obvious pick and the wrong
    * one: it is `RotateCcw` — the `reset` glyph — with a clock hand added, same arc,
    * same arrowhead. A document with a clock says "the file you had, earlier". */

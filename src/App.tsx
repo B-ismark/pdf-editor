@@ -17,6 +17,7 @@ import { findUnsafeCovers } from "./pdf/redactionSafety";
 import type { DocState, LoadedPdf } from "./pdf/types";
 import { lazyPart, staleBuildMessage, useStaleBuild } from "./staleBuild";
 import { UpdateBanner } from "./components/UpdateBanner";
+import { canOpenInPlace, pickFiles, sameFile, type FileHandle } from "./fileAccess";
 import {
   EMPTY_DOC,
   aModalIsOpen,
@@ -266,7 +267,7 @@ export function App() {
       name: string,
       note?: string,
       seedDoc?: DocState,
-      opts: { replace?: boolean; id?: string; quiet?: boolean; baked?: number; locked?: boolean } = {},
+      opts: { replace?: boolean; id?: string; quiet?: boolean; baked?: number; locked?: boolean; handle?: FileHandle } = {},
     ): Promise<OpenDoc | null> => {
       const { tabs, activeId } = liveTabs.current;
       const replacing = opts.replace && activeId != null;
@@ -299,6 +300,9 @@ export function App() {
           unsaved: false,
           // A rebuild of a password-opened document is still that document.
           locked: opts.locked ?? (replacing ? tabs.find((t) => t.id === id)?.locked ?? false : false),
+          // …and still saves back to the same file.
+          handle: opts.handle ?? (replacing ? tabs.find((t) => t.id === id)?.handle : undefined),
+          handleLocked: opts.handle ? !!opts.locked : replacing ? tabs.find((t) => t.id === id)?.handleLocked : undefined,
         };
         if (replacing) {
           const old = tabs.find((t) => t.id === id)?.pdf;
@@ -385,7 +389,7 @@ export function App() {
   );
 
   const openFile = useCallback(
-    async (file: File): Promise<boolean> => {
+    async (file: File, handle?: FileHandle): Promise<boolean> => {
       // Show feedback immediately — reading a large file into memory and
       // sniffing it can take a beat, and a drag-drop gives no other signal.
       setStatus("loading");
@@ -423,7 +427,7 @@ export function App() {
         }
         ({ bytes, locked } = opened);
       }
-      return (await openBytes(bytes, file.name, undefined, undefined, { locked })) != null;
+      return (await openBytes(bytes, file.name, undefined, undefined, { locked, handle })) != null;
     },
     [openBytes, unlock],
   );
@@ -462,11 +466,78 @@ export function App() {
   // another PDF", the tab strip's +, and Ctrl+O. What's picked opens in new
   // tabs, so nothing open is put at risk.
   const openInputRef = useRef<HTMLInputElement>(null);
-  const openAnother = useCallback(() => openInputRef.current?.click(), []);
+  // Where the browser can, files are opened through its own picker, which
+  // hands back the file itself — so Save can write back to it. Elsewhere, the
+  // file input: Save downloads a copy.
+  /** The open tab that is this file on disk, if any. */
+  const tabFor = async (handle: FileHandle): Promise<OpenDoc | undefined> => {
+    for (const t of liveTabs.current.tabs) {
+      if (t.handle && (await sameFile(t.handle, handle))) return t;
+    }
+    return undefined;
+  };
+  const openElsewhere = useStable(async (handle: FileHandle, except: string) => {
+    for (const t of liveTabs.current.tabs) {
+      if (t.id !== except && t.handle && (await sameFile(t.handle, handle))) return t.fileName;
+    }
+    return undefined;
+  });
+  const openAnother = useStable(async () => {
+    if (!canOpenInPlace()) {
+      openInputRef.current?.click();
+      return;
+    }
+    try {
+      const result = await pickFiles();
+      if (!result) return;
+      const { picked, unreadable } = result;
+      // A file that's already open goes to its tab, not a second one: two tabs
+      // writing to one file would each save over the other's work.
+      const fresh: typeof picked = [];
+      let already: OpenDoc | undefined;
+      for (const p of picked) {
+        const open = await tabFor(p.handle);
+        if (open) already = open;
+        else fresh.push(p);
+      }
+      // (Its own failures it reports itself; they aren't the picker's.)
+      const allOpened =
+        fresh.length === 0 ||
+        (await openFiles(fresh.map((p) => p.file), new Map(fresh.map((p) => [p.file, p.handle]))).catch(() => false));
+      if (already) {
+        // Said whenever it's picked, not only alone — dropped without a word it
+        // looks like it failed to open. But never over why another file didn't
+        // open: that message is the one that matters.
+        const blocked = busyRef.current || aModalIsOpen();
+        if (fresh.length === 0 && !blocked) {
+          switchTo(already.id);
+          setMessage(`${already.fileName} is already open.`);
+        } else if (fresh.length === 0) {
+          setMessage("Finish what's open first, then open the file again.");
+        } else if (allOpened) {
+          setMessage(`${already.fileName} is already open.`);
+        }
+      }
+      // Said last, so the others opening doesn't talk over it.
+      if (unreadable.length > 0) {
+        // Something is open if anything was picked and opened — the tab list
+        // read here may be a render behind.
+        setStatus(liveTabs.current.activeId || fresh.length > 0 ? "error" : "idle");
+        setMessage(
+          `Couldn't read ${unreadable.map((n) => `"${n}"`).join(", ")}. ${unreadable.length > 1 ? "They" : "It"} may have been moved or be open in another app.`,
+        );
+      }
+    } catch {
+      // A picker the browser refused (a policy, a sandboxed frame): the input
+      // still works.
+      openInputRef.current?.click();
+    }
+  });
 
-  /** Open several files, each in its own tab (a multi-select pick or a drop). */
+  /** Open several files, each in its own tab (a multi-select pick or a drop).
+   * True when every one opened; anything else has already been reported. */
   const openFiles = useCallback(
-    async (files: FileList | File[] | null | undefined) => {
+    async (files: FileList | File[] | null | undefined, handles?: Map<File, FileHandle>): Promise<boolean> => {
       // A dialog (Organise, Compress, Finish…) acts on whatever document is in
       // front when it's confirmed, and so does an operation still running (OCR,
       // export). A file dropped then opens a tab that comes to the front *behind*
@@ -474,7 +545,7 @@ export function App() {
       // document. So nothing opens until they're done.
       if (aModalIsOpen() || busyRef.current) {
         setMessage("Finish what's open first, then drop the file again.");
-        return;
+        return false;
       }
       const picked = [...(files ?? [])];
       // Pictures picked together become one PDF, a page each in the order
@@ -503,7 +574,7 @@ export function App() {
         else failed.push(...images.map((f) => f.name));
       }
       for (const f of list) {
-        if (await openFile(f)) opened++;
+        if (await openFile(f, handles?.get(f))) opened++;
         else failed.push(f.name);
       }
       if (list.length + (images.length > 0 ? 1 : 0) > 1) {
@@ -528,6 +599,7 @@ export function App() {
           setMessage(head + why);
         }
       }
+      return failed.length === 0 && !pictureReason;
     },
     [openFile, openImages],
   );
@@ -637,10 +709,14 @@ export function App() {
       // download finished (a cancelled "Save as…" looks the same from here),
       // and closing deletes the session copy that would otherwise hold the work.
       const edited = id === activeId ? frontChanges > 0 : (tabs.find((t) => t.id === id)?.changeCount ?? 0) > 0;
-      if (edited) setConfirmCloseId(id);
+      // Saved back to its own file, though, it's known to be there: the write
+      // finished before "Saved" was shown.
+      const t = tabs.find((x) => x.id === id);
+      const savedInPlace = !!t?.saved?.inPlace && !(id === activeId ? frontUnsaved : t.unsaved);
+      if (edited && !savedInPlace) setConfirmCloseId(id);
       else closeTab(id);
     },
-    [busy, activeId, frontChanges, tabs, closeTab],
+    [busy, activeId, frontChanges, frontUnsaved, tabs, closeTab],
   );
 
   /** Every open document, exported and bundled into one ZIP. */
@@ -705,7 +781,16 @@ export function App() {
   // ---- What the editor reports and asks for ----
   const onLive = useCallback((l: LiveDoc) => setLive(l), []);
   const onSaved = useCallback(
-    (id: string, mark: SavedMark) => setTabs((list) => list.map((t) => (t.id === id ? { ...t, saved: mark } : t))),
+    (id: string, mark: SavedMark, saveAs?: { handle: FileHandle; fileName: string }) =>
+      // Saved as another file: the tab is that file now, as in any editor.
+      // Written to disk, that file has no password (the user was told), so the
+      // next save mustn't warn that it's about to remove one. `locked` stays:
+      // it keeps the unlocked copy out of the browser's storage.
+      setTabs((list) =>
+        list.map((t) =>
+          t.id === id ? { ...t, saved: mark, ...saveAs, handleLocked: mark.inPlace ? false : t.handleLocked } : t,
+        ),
+      ),
     [],
   );
   // OCR added text to these bytes' pages. Every tab showing the same bytes
@@ -731,9 +816,13 @@ export function App() {
   // refresh or back-navigation would otherwise silently discard all edits.
   // Downloaded work is let go without the browser's prompt only when the
   // session copy holds it too: the download itself can't be confirmed.
-  const atRisk = (edited: boolean, unsaved: boolean, locked: boolean) =>
-    unsaved || (edited && (!autosaveOn || locked));
-  const anyBackgroundChanges = tabs.some((t) => t.id !== activeId && atRisk(t.changeCount > 0, t.unsaved, t.locked));
+  // Saved back to its own file, it's known to be on disk — unlike a download,
+  // which may not have finished — so it isn't at risk (as closing it isn't).
+  const atRisk = (edited: boolean, unsaved: boolean, locked: boolean, inPlace = false) =>
+    unsaved || (edited && !inPlace && (!autosaveOn || locked));
+  const anyBackgroundChanges = tabs.some(
+    (t) => t.id !== activeId && atRisk(t.changeCount > 0, t.unsaved, t.locked, !!t.saved?.inPlace),
+  );
   // The document in front is asked at the moment of leaving, not taken from
   // its last report: that report reaches the shell a render after the editor
   // changes, and an undo back to what was downloaded would still warn (or an
@@ -751,7 +840,7 @@ export function App() {
       const g = leaveGuard.current;
       const now = editorRef.current?.park();
       const counts = now && g.front && now.id === g.front.id ? now : { changeCount: g.frontChanges, unsaved: g.frontUnsaved };
-      const frontAtRisk = !!g.front && g.atRisk(counts.changeCount > 0, counts.unsaved, g.front.locked);
+      const frontAtRisk = !!g.front && g.atRisk(counts.changeCount > 0, counts.unsaved, g.front.locked, !!g.front.saved?.inPlace);
       if (!frontAtRisk && !g.anyBackgroundChanges) return;
       e.preventDefault();
       e.returnValue = "";
@@ -985,6 +1074,7 @@ export function App() {
         onSwitch={onSwitch}
         onCloseTab={onCloseTab}
         onOpenAnother={openAnother}
+        openElsewhere={openElsewhere}
         onDownloadAll={onDownloadAll}
         navOpen={navOpen}
         setNavOpen={setNavOpen}

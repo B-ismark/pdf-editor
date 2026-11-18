@@ -586,7 +586,10 @@ test("user-facing counts are written as English", async ({ page }) => {
  * document, so "make me a file" had no one place to look.
  */
 test.describe("Export split button", () => {
-  const OUTPUTS = ["Download with password", "Split into files", "Compress PDF", "Sign with certificate", "Export as images", "Export text (.txt)"];
+  // "Save as…" is there because Chromium can pick where a file goes; "Save to
+  // <file>" and "Share" only show with an opened-in-place file / a share sheet
+  // (`saveto.spec`).
+  const OUTPUTS = ["Save as…", "Print", "Download with password", "Split into files", "Compress PDF", "Sign with certificate", "Export as images", "Export text (.txt)"];
 
   test("the caret opens Export, which holds every way to make a file", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
@@ -599,7 +602,9 @@ test.describe("Export split button", () => {
     await expect(caret).toHaveAttribute("aria-expanded", "true");
     const menu = page.getByRole("menu", { name: "Export" });
     const items = menu.getByRole("menuitem");
-    await expect(items).toHaveText(["Download PDF", ...OUTPUTS]);
+    // A row's shortcut ("Ctrl+P") is shown after its label on a desktop.
+    const starts = (l: string) => new RegExp(`^${l.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`);
+    await expect(items).toHaveText(["Download PDF", ...OUTPUTS].map(starts));
     // Focus goes in, the arrows walk it, Escape gives it back to the caret.
     await expect(items.first()).toBeFocused();
     await page.keyboard.press("ArrowDown");

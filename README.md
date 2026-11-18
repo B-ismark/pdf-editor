@@ -62,6 +62,12 @@ and is **mobile- and tablet-first**:
 - **Crop** — keep part of a page: drag the frame or type the margins, for one
   page or every page at once (⋯ menu or the command palette). Undoable, and
   shown cropped everywhere — the page, the sidebar, Organise.
+- **Save, Print, Share** — <kbd>Ctrl</kbd>+<kbd>S</kbd> saves straight back to
+  the file you opened (Chrome and Edge, which let a page write to a file you
+  chose), or asks where to save; elsewhere it downloads. **Print**
+  (<kbd>Ctrl</kbd>+<kbd>P</kbd>) prints the edited document, not the app around
+  it. **Share** hands the finished PDF to your device's share sheet (phones,
+  Safari, Edge). All in the Export menu.
 - **Pictures to PDF** — open or drop JPEG and PNG pictures and they become a
   PDF, a page each, in the order picked. Photos stand the right way up, and
   what the camera recorded (location, device, time, comments) is left out of
@@ -290,6 +296,14 @@ A pragmatic, client-side editor — worth knowing where the seams are:
   A4 page's long side. A JPEG goes in as it is, with no loss; a PNG is
   re-compressed without loss. Other picture types (HEIC, WebP, GIF) aren't read
   yet.
+- **Saving back to the file needs Chrome or Edge.** Other browsers download a
+  copy instead. The app can write only to a file you opened through its own
+  picker or chose with Save as… — not one you dragged in — and only while the
+  tab is open: a restored session saves as a new file. A file opened with a
+  password is saved back *without* it, after a warning.
+- **Printing is at 150 dpi.** The pages are drawn as pictures for the print
+  dialog, as browsers' own PDF viewers do — sharp on paper, but text in a
+  "Save as PDF" from the print dialog isn't selectable. Download for that.
 - **Page numbers / watermark / organize** rebuild the document, so they bake in
   (and reset) the current text edits — do them as a finishing step.
 - **Password-protected PDFs open, and download without a password unless you

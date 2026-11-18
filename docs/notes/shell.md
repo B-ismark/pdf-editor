@@ -245,3 +245,47 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   editor's layer. Before, the editor's own listener took a dialog's removal
   for Back, and a deselect in the same render as a dialog opening closed the
   dialog at once. `protect.spec` guards both.
+
+- **Save in place, Save as, Share, Print (8c)** live in `fileAccess.ts` and
+  `print.ts`; each is optional, asked for (`canOpenInPlace`, `canSaveAs`,
+  `canShareFiles`) and falls back — the file input to open, a download to save.
+  The Export rows hide when the browser can't (`hidden`), never show disabled.
+  - A file's *handle* (`OpenDoc.handle`) comes only from `pickFiles` (Ctrl+O /
+    Choose PDF on Chromium) or Save as, is memory-only and is lost on restore.
+    Pictures never get one — saving a PDF over a JPEG. A rebuild that replaces
+    the tab (Organise) keeps it. Picking a file that's already open
+    (`isSameEntry`) goes to its tab: two tabs on one file save over each other.
+    For the same reason Save as refuses a file another tab has open
+    (`openElsewhere`); onto its *own* file it is Save, and a password-opened
+    file gets the same warning. Files are read with `allSettled`: one that's gone
+    doesn't cost the rest, and is named *after* they open (or the load
+    message talks over it).
+  - `handleLocked`, not `locked`, decides the "Save without its password?"
+    warning: it's about the file on disk, and clears once that's written
+    (in place or Save as). `locked` stays — it keeps the unlocked copy out of
+    the browser's storage.
+  - Save / Save as / Print / Share run one at a time (`exclusive`, a ref set at
+    once — the busy status lands a render later); a held Ctrl+S is one save.
+    On a Mac only ⌘ — Ctrl+P there is "caret up" in text. Under a dialog Ctrl+S
+    is swallowed (no "save web page"), Ctrl+P left to the browser.
+  - Share does **not** mark the document saved: a share target may keep nothing.
+  - Permission is asked (`mayWrite`) **before** the export: the prompt needs
+    the click, and a long build outlives it. Share can't do that (the file must
+    exist first), so a `NotAllowedError` becomes the "Ready to share"
+    dialog, whose button is the fresh tap.
+  - Ctrl+S / Ctrl+P are taken from the browser only while a document is open
+    (its own "save page" / "print page" would save or print the app).
+  - Saved in place sets `SavedMark.inPlace`: the counter reads "Saved", and
+    closing doesn't ask (the write finished; a download might not have).
+  - Print draws its own raster pages into `#print-root` and hides the app under
+    `@media print` — no iframe (needs a CSP change, and a built-in viewer
+    phones lack). The hiding keys on a `printing-doc` class on `body`, set
+    only while the pages are there (not `:has`, which older engines drop
+    whole — the app then prints itself), so a print the
+    browser starts itself still prints the screen, not blank paper. Each page
+    size gets a named `@page` (`page:` on its image) in a constructed sheet, so
+    a landscape page gets a landscape sheet. Pages go on `afterprint` or when
+    print media ends, whichever comes.
+  - Playwright gets no `filechooser` for `showOpenFilePicker`, so a spec that
+    opens through the input on Chromium deletes it first (`tabs.spec` Ctrl+O),
+    and `saveto.spec` stubs the pickers.
