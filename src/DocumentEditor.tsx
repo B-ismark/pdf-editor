@@ -28,6 +28,7 @@ import { PageNav } from "./components/PageNav";
 import { PageJump } from "./components/PageJump";
 import { CommandPalette, GROUP_LABEL, ariaKeys, type Command, type CommandGroup } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
+import { leftOutNote } from "./pdf/standardText";
 import { findMatches, findPatternMatches, joinPage, extractText, type FindMatch, type PatternHit } from "./pdf/find";
 import { PATTERN_PRESETS, customMatcher } from "./pdf/patterns";
 import { fitCrop, isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
@@ -959,11 +960,16 @@ export const DocumentEditor = memo(function DocumentEditor({
   }, [onLive, activeId, docHistory.state, changeCount, unsaved]);
 
 
-  /** Export the current edits to fresh bytes so finishing ops build on them. */
-  const bakeCurrent = useCallback(async (): Promise<ArrayBuffer> => {
+  /** Export the current edits to fresh bytes so finishing ops build on them.
+   * `leftOut` is the note for what a standard font couldn't write, or "". */
+  const bakeCurrent = useCallback(async (): Promise<{ buf: ArrayBuffer; leftOut: string }> => {
     const { exportPdf } = await import("./pdf/exporter");
-    const out = await exportPdf(pdf!, { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, pages: planned });
-    return toAB(out);
+    let leftOut = "";
+    const out = await exportPdf(pdf!, {
+      edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, pages: planned,
+      onDropped: (chars) => (leftOut = leftOutNote(chars)),
+    });
+    return { buf: toAB(out), leftOut };
     // `losslessRaster` is read for the export, so it has to be a dependency —
     // otherwise this captures whatever it was when `pdf` last changed.
   }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, planned]);
@@ -1009,7 +1015,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   // before committing: estimate (bake once, then compress at the chosen preset)
   // then download the previewed bytes. The baked bytes don't depend on the
   // preset, so they're cached across estimates for the life of the dialog.
-  const compressBaked = useRef<{ buf: ArrayBuffer; sizes: { width: number; height: number }[]; before: number } | null>(null);
+  const compressBaked = useRef<{ buf: ArrayBuffer; sizes: { width: number; height: number }[]; before: number; leftOut: string } | null>(null);
   const compressOut = useRef<{ bytes: Uint8Array; lossless: boolean; helped: boolean; before: number; after: number } | null>(null);
   // Cached text-preserving (image-optimised) result — computing it decodes and
   // re-encodes images, so don't redo it each time "Keep text" is re-selected.
@@ -1034,11 +1040,11 @@ export const DocumentEditor = memo(function DocumentEditor({
         // The baked document already re-serialises through pdf-lib with object
         // streams and stripped metadata, keeping selectable text — that IS the
         // lossless result, and the size to beat for the rasterising presets.
-        const baked = await bakeCurrent();
+        const { buf: baked, leftOut } = await bakeCurrent();
         // The baked file is in shown order with the turns applied, and its
         // pages are re-imaged as shown.
         const sizes = shown.map(shownSize);
-        compressBaked.current = { buf: baked, sizes, before: baked.byteLength };
+        compressBaked.current = { buf: baked, sizes, before: baked.byteLength, leftOut };
       }
       const { buf, sizes, before } = compressBaked.current;
       if (preset.kind === "lossless") {
@@ -1070,6 +1076,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   const downloadCompress = useCallback(() => {
     const out = compressOut.current;
     if (!out) return;
+    const leftOut = compressBaked.current?.leftOut ?? "";
     setCompressOpen(false);
     const base = compressName.current.replace(/\.pdf$/i, "");
     const suffix = out.lossless ? "-optimized.pdf" : out.helped ? "-compressed.pdf" : ".pdf";
@@ -1080,11 +1087,11 @@ export const DocumentEditor = memo(function DocumentEditor({
     setStatus("ready");
     const fmt = (n: number) => (n < 1_000_000 ? Math.round(n / 1000) + " KB" : (n / 1_000_000).toFixed(2) + " MB");
     setMessage(
-      out.lossless
+      (out.lossless
         ? `Optimized, text kept — ${fmt(out.before)}.`
         : out.helped
           ? `Compressed — ${fmt(out.before)} → ${fmt(out.after)} (${Math.round((1 - out.after / out.before) * 100)}% smaller).`
-          : `Already compact — kept the text version at ${fmt(out.before)}.`,
+          : `Already compact — kept the text version at ${fmt(out.before)}.`) + leftOut,
     );
     compressBaked.current = null;
     compressOut.current = null;
@@ -1101,13 +1108,13 @@ export const DocumentEditor = memo(function DocumentEditor({
     ): Promise<void> => {
       if (!pdf) throw new Error("No document");
       const mark = markNow.current;
-      const baked = await bakeCurrent();
+      const { buf: baked, leftOut } = await bakeCurrent();
       const { signPdf } = await import("./pdf/sign");
       const signed = await signPdf(baked, identity, meta);
       downloadBytes(signed, fileName.replace(/\.pdf$/i, "") + "-signed.pdf");
       onSaved(activeId, mark);
       setStatus("ready");
-      setMessage("Signed the document and downloaded it.");
+      setMessage("Signed the document and downloaded it." + leftOut);
     },
     [pdf, bakeCurrent, fileName, downloadBytes],
   );
@@ -1203,7 +1210,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     setStatus("working");
     setMessage("Rendering images…");
     try {
-      const baked = await bakeCurrent();
+      const { buf: baked, leftOut } = await bakeCurrent();
       const { renderImages } = await import("./pdf/finishOps");
       const urls = await renderImages(baked, shown.length, 2, (p, t) =>
         setMessage(`Rendering images… page ${p}/${t}`),
@@ -1214,7 +1221,7 @@ export const DocumentEditor = memo(function DocumentEditor({
         // A single page downloads as a plain PNG — friendlier than a one-file zip.
         downloadBytes(dataUrlToBytes(urls[0]), `${base}.png`, "image/png");
         setStatus("ready");
-        setMessage("Exported 1 image.");
+        setMessage("Exported 1 image." + leftOut);
       } else {
         // Bundle every page into one ZIP so no download is blocked and the
         // success message is honest (browsers block the 2nd+ auto-download).
@@ -1222,7 +1229,7 @@ export const DocumentEditor = memo(function DocumentEditor({
         const zip = makeZip(urls.map((u, i) => ({ name: `${base}-p${i + 1}.png`, data: dataUrlToBytes(u) })));
         downloadBytes(zip, `${base}-images.zip`, "application/zip");
         setStatus("ready");
-        setMessage(`Exported ${urls.length} images as a ZIP.`);
+        setMessage(`Exported ${urls.length} images as a ZIP.${leftOut}`);
       }
     } catch (err) {
       setStatus("error");
@@ -2331,9 +2338,16 @@ export const DocumentEditor = memo(function DocumentEditor({
     const flattened = redactions.length > 0 ? " Redacted pages were flattened to images." : "";
     // A copy made without the password the file opened with says so.
     const noPassword = locked && !password ? " This copy has no password. To add one, use Download with password." : "";
+    // What a standard font couldn't write and the file leaves out, though the
+    // page on screen shows it (see standardText.ts).
+    let leftOut = "";
     try {
       const { exportPdf } = await import("./pdf/exporter");
-      const out = await exportPdf(pdf, exportInput(password), (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`));
+      const out = await exportPdf(
+        pdf,
+        { ...exportInput(password), onDropped: (chars) => (leftOut = leftOutNote(chars)) },
+        (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`),
+      );
       const editedName = fileName.replace(/\.pdf$/i, "") + "-edited.pdf";
       if (to.kind === "save" || to.kind === "save-as") {
         const target = to.target;
@@ -2342,7 +2356,7 @@ export const DocumentEditor = memo(function DocumentEditor({
         onSaved(activeId, { ...mark, inPlace: true }, to.kind === "save-as" ? { handle: target, fileName: target.name } : undefined);
         setStatus("ready");
         // Over a locked file, the user agreed to this before it was built.
-        setMessage(`Saved to ${target.name}.${flattened}${to.kind === "save-as" ? noPassword : ""}`);
+        setMessage(`Saved to ${target.name}.${flattened}${leftOut}${to.kind === "save-as" ? noPassword : ""}`);
         return;
       }
       if (to.kind === "share") {
@@ -2355,7 +2369,7 @@ export const DocumentEditor = memo(function DocumentEditor({
         } else if (shared === "shared") {
           // Not marked saved: a share target ("Copy", a message draft) may
           // keep nothing, so the work still needs saving somewhere.
-          setMessage(`Shared ${editedName}.${flattened}${noPassword}`);
+          setMessage(`Shared ${editedName}.${flattened}${leftOut}${noPassword}`);
         } else setMessage("Not shared.");
         return;
       }
@@ -2364,6 +2378,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       setStatus("ready");
       setMessage(
         (redactions.length > 0 ? "Downloaded — redacted pages were flattened to images." : "Downloaded edited PDF.") +
+          leftOut +
           (password ? " It opens only with the password you set." : noPassword),
       );
     } catch (err) {
@@ -2480,12 +2495,18 @@ export const DocumentEditor = memo(function DocumentEditor({
     setMessage("Preparing to print…");
     try {
       const { exportPdf } = await import("./pdf/exporter");
-      const out = await exportPdf(pdf, exportInput(), (p, t) => setMessage(`Preparing to print… page ${p}/${t}`));
+      let leftOut = "";
+      const out = await exportPdf(
+        pdf,
+        { ...exportInput(), onDropped: (chars) => (leftOut = leftOutNote(chars)) },
+        (p, t) => setMessage(`Preparing to print… page ${p}/${t}`),
+      );
       const { printPdf } = await import("./print");
       const bytes = out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
       await printPdf(bytes, (p, t) => setMessage(`Preparing to print… drawing page ${p}/${t}`));
       setStatus("ready");
-      setMessage("");
+      // The print is the file, so it leaves out what the download would.
+      setMessage(leftOut.trim());
     } catch (err) {
       setStatus("error");
       setMessage(staleBuildMessage(err) ?? "Couldn't prepare the document for printing. Please try again.");

@@ -2,6 +2,7 @@ import { LineCapStyle, PDFArray, PDFCatalog, PDFCheckBox, PDFDict, PDFDocument, 
 import { fitScale, roomAfter } from "./lineFit";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
+import { sanitize } from "./standardText";
 import { preparePassword } from "./password";
 import {
   assertNoStructureTree,
@@ -107,6 +108,9 @@ export interface ExportInput {
   /** Encrypt the download with this password (AES-256), needed to open it.
    *  Used for this one file and never kept. */
   password?: string;
+  /** Told, once the file is built, which characters a standard font couldn't
+   *  draw and were left out (see standardText.ts). Not called if none were. */
+  onDropped?: (chars: string[]) => void;
 }
 
 /** The part of a finished page the reader sees, in the page's own user space:
@@ -131,16 +135,17 @@ function drawPageNumber(page: PDFPage, font: PDFFont, label: string, opts: PageN
 }
 
 /** Stamp a diagonal text watermark centred on a finished page. */
-function drawWatermark(page: PDFPage, font: PDFFont, opts: WatermarkOptions, frame: ViewFrame): void {
-  if (!opts.text.trim()) return;
+function drawWatermark(page: PDFPage, font: PDFFont, opts: WatermarkOptions, frame: ViewFrame, dropped: Set<string>): void {
+  const text = sanitize(opts.text, font, dropped);
+  if (!text.trim()) return;
   const c = hexToRgb(opts.color);
   const rad = (opts.angle * Math.PI) / 180;
-  const len = font.widthOfTextAtSize(opts.text, opts.size);
+  const len = font.widthOfTextAtSize(text, opts.size);
   const { width, height } = frame;
   // Start point so the text's midpoint lands at the page centre.
   const x = frame.x + width / 2 - (len / 2) * Math.cos(rad);
   const y = frame.y + height / 2 - (len / 2) * Math.sin(rad);
-  page.drawText(opts.text, {
+  page.drawText(text, {
     x,
     y,
     size: opts.size,
@@ -153,7 +158,7 @@ function drawWatermark(page: PDFPage, font: PDFFont, opts: WatermarkOptions, fra
 
 /** Fill the source document's AcroForm from user values and flatten it, so the
  * filled appearances bake into the page content that gets copied out. */
-function fillAndFlattenForm(src: PDFDocument, formValues: Record<string, string | boolean>): void {
+function fillAndFlattenForm(src: PDFDocument, formValues: Record<string, string | boolean>, dropped: Set<string>): void {
   if (Object.keys(formValues).length === 0) return;
   try {
     const form = src.getForm();
@@ -161,8 +166,11 @@ function fillAndFlattenForm(src: PDFDocument, formValues: Record<string, string 
       const name = field.getName();
       if (!(name in formValues)) continue;
       const v = formValues[name];
-      if (field instanceof PDFTextField) field.setText(typeof v === "string" ? v : "");
-      else if (field instanceof PDFCheckBox) (v ? field.check() : field.uncheck());
+      if (field instanceof PDFTextField) {
+        // Its appearance is drawn in the form's default font, a standard one
+        // (asked for only here: asking embeds it).
+        field.setText(typeof v === "string" ? sanitize(v, form.getDefaultFont(), dropped) : "");
+      } else if (field instanceof PDFCheckBox) (v ? field.check() : field.uncheck());
     }
     form.flatten();
   } catch {
@@ -280,7 +288,7 @@ function rotatedBox(x: number, y: number, w: number, h: number, rotDeg: number) 
 }
 
 /** Draw vector annotations onto a pdf-lib page (PDF coords, y up). */
-function drawVectorAnnots(page: PDFPage, annots: Annotation[], helv: PDFFont): void {
+function drawVectorAnnots(page: PDFPage, annots: Annotation[], helv: PDFFont, dropped: Set<string>): void {
   for (const a of annotationPaintOrder(annots)) {
     const c = hexToRgb(a.color);
     const color = rgb(c.r, c.g, c.b);
@@ -333,7 +341,7 @@ function drawVectorAnnots(page: PDFPage, annots: Annotation[], helv: PDFFont): v
         page.drawLine({ start: a.pts[i - 1], end: a.pts[i], thickness: a.strokeWidth, color });
       }
     } else if (a.kind === "note") {
-      const text = sanitize(a.text || " ", helv);
+      const text = sanitize(a.text || " ", helv, dropped);
       const w = helv.widthOfTextAtSize(text, NOTE_SIZE) + NOTE_PAD * 2;
       const h = NOTE_SIZE + NOTE_PAD * 2;
       // Turned about its top-left anchor, as the overlay is. pdf-lib turns each
@@ -453,20 +461,6 @@ function drawRasterAnnots(
   }
 }
 
-/** Drop characters the standard (WinAnsi) fonts cannot encode. */
-function sanitize(text: string, font: PDFFont): string {
-  let out = "";
-  for (const ch of text) {
-    try {
-      font.encodeText(ch);
-      out += ch;
-    } catch {
-      out += ch === "\t" ? "    " : "";
-    }
-  }
-  return out;
-}
-
 /**
  * Produce a new PDF applying text edits, new text boxes, and redactions.
  *
@@ -488,6 +482,8 @@ export async function exportPdf(
   onProgress?: (page: number, total: number) => void,
 ): Promise<Uint8Array> {
   const { edits, textBoxes, redactions, annotations, stamps, links = [], formValues = {}, pageNumbers, watermark, losslessRaster = false } = input;
+  // Characters a standard font couldn't draw, left out of the file.
+  const dropped = new Set<string>();
   // Which source pages ship, where, and turned how far. Overlay objects keep
   // their *source* page index, so a page's markup is drawn on it wherever it
   // goes; pages left out of the plan were deleted and must not survive.
@@ -503,7 +499,7 @@ export async function exportPdf(
   // preview showed at *i*. On a malformed tree they differ, and the raster
   // would replace the wrong page.
   alignPageTree(out, loaded.pages.map((p) => p.ref));
-  fillAndFlattenForm(out, formValues);
+  fillAndFlattenForm(out, formValues, dropped);
   // The finished page for each source page, by source index: the original, or
   // the raster that replaces it. Put in plan order once, at the end.
   const finished: PDFPage[] = out.getPages();
@@ -580,7 +576,7 @@ export async function exportPdf(
     // move by the view's own corner only — never by the crop's.
     const applyPageLayers = (page: PDFPage, frame: ViewFrame, origin: { x: number; y: number }) => {
       if (pageNumbers) drawPageNumber(page, helv, String(pageNumbers.start + slot.pos), pageNumbers, frame);
-      if (watermark && wmFont) drawWatermark(page, wmFont, watermark, frame);
+      if (watermark && wmFont) drawWatermark(page, wmFont, watermark, frame, dropped);
       addLinkAnnots(out, page, pageLinks, origin);
     };
     // What the reader will see of the page, in view space: the plan's crop, or
@@ -629,9 +625,13 @@ export async function exportPdf(
         const src = await embedder.get(i, fragment.itemIndex);
         if (src && src.covers(edit!.text)) font = src.font;
       }
-      if (!font) font = await getFont(standardFontKey(style.font, style.bold, style.italic));
-
-      const text = sanitize(edit!.text, font);
+      // Only a standard font is sanitised. The document's own face has
+      // already been checked by `covers`, and in it a missing glyph — a
+      // space a subset left out, say — encodes as glyph 0, as "?" does when
+      // the subset has no "?" either; sanitize would take the spaces out.
+      const text = font
+        ? edit!.text
+        : sanitize(edit!.text, (font = await getFont(standardFontKey(style.font, style.bold, style.italic))), dropped);
       // Kept to the room before the next run on its line — see lineFit.ts.
       const k = fitScale(font.widthOfTextAtSize(text, style.size), fragment.width, roomAfter(fragment, pageData.fragments, edits));
       const textWidth = font.widthOfTextAtSize(text, style.size) * k;
@@ -665,7 +665,7 @@ export async function exportPdf(
       const th = (-rot * Math.PI) / 180;
       box.text.split("\n").forEach((line, i) => {
         const d = i * lineStep;
-        page.drawText(sanitize(line, font), {
+        page.drawText(sanitize(line, font, dropped), {
           x: box.x + d * Math.sin(th),
           y: box.y - d * Math.cos(th),
           size: box.style.size,
@@ -676,7 +676,7 @@ export async function exportPdf(
       });
     }
 
-    drawVectorAnnots(page, pageAnnots, helv);
+    drawVectorAnnots(page, pageAnnots, helv, dropped);
 
     for (const s of pageStamps) {
       const img = await embedStamp(out, s.dataUrl);
@@ -767,7 +767,9 @@ export async function exportPdf(
   // Appearances were generated when (and if) the form was flattened; asking
   // pdf-lib to regenerate every field's on save would rewrite the untouched
   // ones and throws on fields whose /DA it can't parse.
-  return out.save({ updateFieldAppearances: false });
+  const bytes = await out.save({ updateFieldAppearances: false });
+  if (dropped.size > 0) input.onDropped?.([...dropped]);
+  return bytes;
 }
 
 /** Render a page to an image with edits, text boxes, and redactions baked in,
