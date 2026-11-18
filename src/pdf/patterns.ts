@@ -1,4 +1,4 @@
-import type { PatternMatcher } from "./find";
+import type { PatternMatcher } from "./patternScan";
 
 /**
  * The patterns "Redact patterns" offers.
@@ -73,8 +73,10 @@ export const PATTERN_PRESETS: PatternPreset[] = [
     example: "GB82 WEST 1234 5698 7654 32",
     matcher: {
       kind: "iban",
-      re: /\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b/g,
+      // Any case: "gb82 west …" is still an IBAN (the check upper-cases it).
+      re: /\b[A-Z]{2}\d{2}(?: ?[A-Z0-9]{4}){2,7}(?: ?[A-Z0-9]{1,4})?\b/gi,
       accept: ibanValid,
+      resumeInside: true,
     },
   },
   {
@@ -85,6 +87,7 @@ export const PATTERN_PRESETS: PatternPreset[] = [
       kind: "card",
       re: /(?<![\d-])\d(?:[ -]?\d){12,18}(?![\d-])/g,
       accept: luhn,
+      resumeInside: true,
     },
   },
   {
@@ -121,7 +124,19 @@ export const PATTERN_PRESETS: PatternPreset[] = [
     example: "+44 20 7946 0958 · (555) 123-4567",
     matcher: {
       kind: "phone",
-      re: /(?<![\w+])(?:\+\d{1,3}[ .-]?)?(?:\(\d{1,5}\)[ .-]?)?\d{2,5}(?:[ .-]?\d{2,5}){1,4}(?![\w])/g,
+      re: new RegExp(
+        [
+          // The first group: after a country code or an area code in brackets
+          // it can be one digit ("+33 1 23 45 67 89", "+31 6 12345678"); a
+          // North American number can open with its "1-"; otherwise two or
+          // more, so "1 000 000" isn't a phone number.
+          String.raw`(?<![\w+])(?:(?:\+\d{1,3}[ .-]?(?:\(\d{1,5}\)[ .-]?)?|\(\d{1,5}\)[ .-]?)\d{1,5}|1[ .-]\d{3}|\d{2,5})(?:[ .-]?\d{2,5}){1,4}(?!\w)`,
+          // Digits drawn one to a box, as on a form's comb field: the page
+          // joins them with spaces.
+          String.raw`(?<![\w+.-])\d(?: \d){6,14}(?![\w.-])`,
+        ].join("|"),
+        "g",
+      ),
       // Seven to fifteen digits (E.164's ceiling): fewer is a reference
       // number or a price, more is something else.
       accept: (s) => {
@@ -130,6 +145,11 @@ export const PATTERN_PRESETS: PatternPreset[] = [
         // A span of years (2019-2024) has the shape of a number but isn't one.
         return !/^(?:1[89]|20)\d\d ?[-–] ?(?:1[89]|20)\d\d$/.test(s);
       },
+      // Two numbers side by side read as one too long to be a phone number.
+      // Split them only where the first could stand alone *as a phone
+      // number*: from a "+", a "(" or a trunk "0". Any 16-digit reference
+      // would split into two "phone numbers" otherwise.
+      piece: (s) => /^[+(0]/.test(s),
     },
   },
 ];
@@ -140,12 +160,18 @@ export const PATTERN_PRESETS: PatternPreset[] = [
 export function customMatcher(source: string): PatternMatcher | { error: string } | null {
   const src = source.trim();
   if (!src) return null;
-  let re: RegExp;
-  try {
-    re = new RegExp(src, "giu");
-  } catch {
-    return { error: "That isn't a pattern this browser can read." };
+  let re: RegExp | null = null;
+  // Unicode mode first (so \p{L} and astral characters work), then without
+  // it: it refuses escapes people type out of habit, like "INV\-\d+".
+  for (const flags of ["giu", "gi"]) {
+    try {
+      re = new RegExp(src, flags);
+      break;
+    } catch {
+      /* try the next */
+    }
   }
+  if (!re) return { error: "That isn't a pattern this browser can read." };
   if (re.test("")) return { error: "That pattern also matches empty text. Make it match at least one character." };
   return { kind: "custom", re };
 }

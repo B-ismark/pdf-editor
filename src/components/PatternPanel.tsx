@@ -10,15 +10,19 @@ interface Props {
   kinds: string[];
   custom: string;
   customError: string | null;
+  /** The custom pattern's hits are still being looked for. */
+  pending: boolean;
+  /** More hits than can be reviewed: none are listed. */
+  tooMany: boolean;
   hits: PatternHit[];
-  /** Hits the person has unticked: found, but left alone. */
+  /** Keys of hits the person has unticked: found, but left alone. */
   excluded: ReadonlySet<string>;
   activeId: string | null;
   /** Page labels as shown (the page plan can reorder and drop pages). */
   pageLabel: (pageIndex: number) => string;
   onToggleKind: (id: string) => void;
   onCustom: (source: string) => void;
-  onToggleHit: (id: string) => void;
+  onToggleHit: (key: string) => void;
   onSetAll: (on: boolean) => void;
   onShow: (hit: PatternHit) => void;
   onRedact: () => void;
@@ -50,6 +54,8 @@ export function PatternPanel({
   kinds,
   custom,
   customError,
+  pending,
+  tooMany,
   hits,
   excluded,
   activeId,
@@ -67,7 +73,7 @@ export function PatternPanel({
     ref.current?.querySelector<HTMLElement>("input")?.focus();
   }, []);
 
-  const chosen = hits.filter((h) => !excluded.has(h.id)).length;
+  const chosen = hits.filter((h) => !excluded.has(h.key)).length;
   const byPage = useMemo(() => {
     const m = new Map<number, PatternHit[]>();
     for (const h of hits) m.set(h.pageIndex, [...(m.get(h.pageIndex) ?? []), h]);
@@ -130,9 +136,13 @@ export function PatternPanel({
         <span className="label-large" aria-live="polite">
           {!anyKind
             ? "Choose what to look for"
-            : hits.length === 0
-              ? "Nothing found"
-              : `${chosen} of ${hits.length} selected`}
+            : tooMany
+              ? "Too many matches to review. Make the pattern more specific."
+              : hits.length === 0
+                ? pending
+                  ? "Searching…"
+                  : "Nothing found"
+                : `${chosen} of ${hits.length} selected${pending ? " · searching…" : ""}`}
         </span>
         {hits.length > 0 && (
           <button className="patterns__all" onClick={() => onSetAll(chosen < hits.length)}>
@@ -148,14 +158,14 @@ export function PatternPanel({
             {list.map((h) => (
               <div
                 key={h.id}
-                className={`patterns__hit${h.id === activeId ? " patterns__hit--on" : ""}${excluded.has(h.id) ? " patterns__hit--off" : ""}`}
+                className={`patterns__hit${h.id === activeId ? " patterns__hit--on" : ""}${excluded.has(h.key) ? " patterns__hit--off" : ""}`}
                 data-hit={h.id}
                 data-kind={h.kind}
               >
                 <input
                   type="checkbox"
-                  checked={!excluded.has(h.id)}
-                  onChange={() => onToggleHit(h.id)}
+                  checked={!excluded.has(h.key)}
+                  onChange={() => onToggleHit(h.key)}
                   aria-label={`Redact ${KIND_LABEL[h.kind] ?? h.kind}: ${h.text}`}
                 />
                 <button className="patterns__show" onClick={() => onShow(h)} data-tip="Show on the page">
@@ -169,14 +179,15 @@ export function PatternPanel({
       </div>
 
       <p className="patterns__note body-small">
-        Searches the page text, including recognised text. A scanned page needs Recognise text first.
+        Searches the page's own text, including recognised text. Form fields, notes and text you've added
+        aren't searched, and a scanned page needs Recognise text first.
       </p>
 
       <div className="patterns__foot">
         <button className="btn btn--text" onClick={onClose}>
           Cancel
         </button>
-        <button className="btn btn--filled" onClick={onRedact} disabled={chosen === 0}>
+        <button className="btn btn--filled" onClick={onRedact} disabled={chosen === 0 || pending}>
           {chosen === 0 ? "Redact" : `Redact ${chosen}`}
         </button>
       </div>

@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fixtures, PERSONAL } from "./fixtures";
+import { fixtures, PERSONAL, TRICKY } from "./fixtures";
 import { open, setLossless } from "./helpers";
 import { ibanValid, luhn } from "../src/pdf/patterns";
 
@@ -169,5 +169,156 @@ test("on a phone the panel is a sheet that fits the screen", async ({ browser })
   const overflow = await panel(page).evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow, "nothing in the sheet runs off its side").toBeLessThanOrEqual(0);
   await expect(panel(page).getByRole("button", { name: /^Redact \d+$/ })).toBeInViewport();
+  await ctx.close();
+});
+
+/* ---- From review ---- */
+
+/** Wait until the custom pattern's search (in its worker) has answered. */
+async function settled(page: Page) {
+  await expect(panel(page).locator(".patterns__summary")).not.toContainText(/searching/i);
+}
+
+test("the hard cases are covered: neighbours a checksum refuses, short first groups, comb digits, a turned line, a custom pattern over an email", async ({ page, browser }) => {
+  test.setTimeout(120_000);
+  await open(page, (await fixtures()).tricky);
+  await setLossless(page);
+  expect(await redPixels(page), "the fixture has red to remove").toBeGreaterThan(50);
+
+  await openPatterns(page);
+  await panel(page).getByRole("textbox", { name: "Custom pattern" }).fill(TRICKY.custom);
+  await settled(page);
+  const list = await listed(page);
+  // The real hit, not the hit plus its neighbour (and not nothing at all).
+  expect(list).toContain(TRICKY.lines[0].hit);
+  expect(list).toContain(TRICKY.lines[1].hit);
+  expect(list, "the country code is part of the number").toContain(TRICKY.lines[2].hit);
+  expect(list, "the leading 1- is part of the number").toContain(TRICKY.lines[3].hit);
+  expect(list, "an IBAN in lower case").toContain(TRICKY.lines[4].hit);
+  expect(list, "the patient's name isn't lost to the email beside it").toContain("Patient: John Smith <");
+
+  await panel(page).getByRole("button", { name: /^Redact \d+$/ }).click();
+  const view = await exportAndView(page, browser);
+  expect(await redPixels(view), "no red left after export").toBe(0);
+  await view.close();
+});
+
+test("a custom pattern that would hang the tab is stopped, and the tab stays responsive", async ({ page }) => {
+  await open(page, (await fixtures()).personal);
+  await openPatterns(page);
+  const input = panel(page).getByRole("textbox", { name: "Custom pattern" });
+  // Exponential on a long word: "GB00WEST12345698765432" is on the page.
+  await input.fill(String.raw`((\w+)+)+;`);
+  const t0 = Date.now();
+  expect(await page.evaluate(() => 1 + 1), "the page still answers").toBe(2);
+  expect(Date.now() - t0, "and answers at once").toBeLessThan(1000);
+  await expect(panel(page).getByRole("alert")).toContainText("too long", { timeout: 8000 });
+  // The presets' hits are still there, and a sensible pattern works again.
+  await expect.poll(() => listed(page)).toContain(PERSONAL.lines[0].hit);
+  await input.fill(String.raw`INV\-\d{6}`); // an escape the unicode mode refuses
+  await expect(panel(page).getByRole("alert")).toHaveCount(0);
+  await expect.poll(() => listed(page)).toContain(PERSONAL.custom.hit);
+});
+
+test("a pattern that matches too much asks to be narrowed rather than listing it all", async ({ page }) => {
+  await open(page, (await fixtures()).sample);
+  await openPatterns(page);
+  await panel(page).getByRole("textbox", { name: "Custom pattern" }).fill(".");
+  await expect(panel(page).getByText(/Too many matches/)).toBeVisible();
+  await expect(panel(page).locator(".patterns__hit")).toHaveCount(0);
+  await expect(panel(page).getByRole("button", { name: "Redact", exact: true })).toBeDisabled();
+});
+
+test("what was unticked stays unticked: through picking the command again, and through an edit to the line", async ({ page }) => {
+  await open(page, (await fixtures()).tricky);
+  await openPatterns(page);
+  await panel(page).getByRole("textbox", { name: "Custom pattern" }).fill(TRICKY.custom);
+  await settled(page);
+  const email = panel(page).getByRole("checkbox", { name: "Redact Email: john@example.com" });
+  await email.uncheck();
+  const summary = panel(page).locator(".patterns__summary");
+  const before = await summary.textContent();
+
+  // The command picked again from the ⋯ menu, beside the open panel.
+  await page.click('[aria-label="More actions"]');
+  await page.locator(".menu__item", { hasText: "Redact patterns" }).click();
+  await expect(email).not.toBeChecked();
+  await expect(summary).toHaveText(before!);
+
+  // Text typed before the email on its own line moves it along the line.
+  await page.locator(".fragment", { hasText: "Patient" }).click();
+  await page.keyboard.press("Home");
+  await page.keyboard.type("Re ");
+  await expect(panel(page).getByRole("checkbox", { name: "Redact Email: john@example.com" })).not.toBeChecked();
+});
+
+test("opening leaves the view where it was; Show always goes to the hit, the active one too", async ({ page }) => {
+  await open(page, (await fixtures()).sample);
+  const scroller = page.locator(".viewer__scroll");
+  await scroller.evaluate((el) => (el.scrollTop = 2400));
+  await page.waitForTimeout(300);
+  const at = await scroller.evaluate((el) => el.scrollTop);
+  await openPatterns(page);
+  await expect(panel(page).locator(".patterns__hit").first()).toBeVisible();
+  await page.waitForTimeout(600);
+  expect(Math.abs((await scroller.evaluate((el) => el.scrollTop)) - at), "opening didn't move the page").toBeLessThan(2);
+
+  const first = panel(page).locator(".patterns__show").first();
+  await first.click();
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop)).toBeLessThan(400);
+  await scroller.evaluate((el) => (el.scrollTop = 5000));
+  await first.click();
+  await expect.poll(() => scroller.evaluate((el) => el.scrollTop), { message: "Show on the active hit goes back to it" }).toBeLessThan(400);
+});
+
+test("closing hands focus back; a selection made beside the panel has its controls and its own Escape", async ({ page }) => {
+  await open(page, (await fixtures()).personal);
+  await page.click('[aria-label="More actions"]');
+  await page.locator(".menu__item", { hasText: "Redact patterns" }).click();
+  await expect(panel(page)).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel(page)).toHaveCount(0);
+  await expect(page.locator('[aria-label="More actions"]'), "focus isn't dropped on the page body").toBeFocused();
+
+  // Redact one hit, then open the panel again and pick that redaction.
+  await openPatterns(page);
+  await panel(page).getByRole("button", { name: /^Redact \d+$/ }).click();
+  await openPatterns(page);
+  await page.locator(".redaction").first().click();
+  await expect(page.locator(".selbar"), "the selection's controls show while the panel has the column").toBeVisible();
+  await page.locator(".viewer__scroll").focus();
+  await page.keyboard.press("Escape");
+  await expect(page.locator(".selbar")).toHaveCount(0);
+  await expect(panel(page), "the first Escape deselects; the panel stays").toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel(page)).toHaveCount(0);
+});
+
+test("on a phone the sheet never hides the hit it shows, and Back closes it", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const page = await ctx.newPage();
+  // The last hit of a long document: near the foot of its last page, where
+  // the view can't scroll any further to bring it out from under the sheet
+  // unless the sheet makes room for itself.
+  await open(page, (await fixtures()).sample);
+  await openPatterns(page);
+  const rows = panel(page).locator(".patterns__show");
+  await expect(rows.first()).toBeVisible();
+  await rows.last().click();
+  const sheet = (await panel(page).boundingBox())!;
+  // The view scrolls smoothly across the whole document: wait for it to land.
+  await expect
+    .poll(
+      async () => {
+        const hit = await page.locator(".findhit--active").first().boundingBox();
+        return hit ? hit.y + hit.height : Infinity;
+      },
+      { message: "the hit lands above the sheet", timeout: 6000 },
+    )
+    .toBeLessThanOrEqual(sheet.y + 0.5);
+
+  await page.goBack();
+  await expect(panel(page)).toHaveCount(0);
+  await expect(page.locator(".page").first(), "Back closed the sheet, not the app").toBeVisible();
   await ctx.close();
 });

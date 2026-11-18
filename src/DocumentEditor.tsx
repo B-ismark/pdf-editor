@@ -28,7 +28,7 @@ import { PageNav } from "./components/PageNav";
 import { PageJump } from "./components/PageJump";
 import { CommandPalette, GROUP_LABEL, ariaKeys, type Command, type CommandGroup } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
-import { findMatches, findPatternMatches, extractText, type FindMatch, type PatternHit } from "./pdf/find";
+import { findMatches, findPatternMatches, joinPage, extractText, type FindMatch, type PatternHit } from "./pdf/find";
 import { PATTERN_PRESETS, customMatcher } from "./pdf/patterns";
 import { isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
 import { boxCX, boxCY } from "./pdf/bbox";
@@ -37,6 +37,7 @@ import { downloadBytes, downloadText } from "./download";
 import { plural } from "./plural";
 import type { PageNumberOptions, PageRef, WatermarkOptions } from "./pdf/types";
 import { useHistory } from "./hooks/useHistory";
+import { useCustomPattern } from "./hooks/useCustomPattern";
 import { EMPTY_DOC, aModalIsOpen, toAB, type EditorHandle, type LiveDoc, type OpenDoc, type SavedMark, type Status } from "./workspace";
 import { usePageArrays, usePageRecords, usePageSets } from "./hooks/usePageBuckets";
 import { DocTabs } from "./components/DocTabs";
@@ -592,17 +593,30 @@ export const DocumentEditor = memo(function DocumentEditor({
     [pdf, fontsVersion],
   );
   const custom = useMemo(() => customMatcher(patternCustom), [patternCustom]);
-  const patternHits: PatternHit[] = useMemo(() => {
-    if (!pdf || !patternOpen) return [];
+  // The shown pages' text as the patterns see it, joined once and shared by
+  // the presets (matched here) and a custom pattern (matched in a worker, which
+  // can be stopped: see useCustomPattern).
+  const patternJoined = useMemo(
+    () => (pdf && patternOpen ? shown.map((p) => joinPage(p, edits)) : null),
+    [pdf, patternOpen, shown, edits],
+  );
+  const customRun = useCustomPattern(custom && !("error" in custom) ? patternCustom.trim() : "", patternJoined);
+  const patternResult = useMemo(() => {
+    if (!pdf || !patternOpen || !patternJoined) return { hits: [] as PatternHit[], tooMany: false };
     const matchers = PATTERN_PRESETS.filter((p) => patternKinds.includes(p.id)).map((p) => p.matcher);
-    if (custom && !("error" in custom)) matchers.push(custom);
-    return findPatternMatches(shown, edits, matchers, fontFor);
-  }, [pdf, patternOpen, patternKinds, custom, shown, edits, fontFor]);
+    return findPatternMatches(shown, edits, matchers, {
+      fontFor,
+      joined: patternJoined,
+      extra: customRun.spans ? { kind: "custom", spans: customRun.spans } : null,
+    });
+  }, [pdf, patternOpen, patternJoined, patternKinds, customRun.spans, shown, edits, fontFor]);
+  const patternTooMany = patternResult.tooMany || customRun.tooMany;
+  const patternHits: PatternHit[] = patternTooMany ? [] : patternResult.hits;
   const matches: FindMatch[] = useMemo(() => {
     if (pdf && findOpen && findQuery) return findMatches(shown, edits, findQuery, fontFor);
     if (patternOpen)
       return patternHits.flatMap((h) =>
-        patternExcluded.has(h.id) ? h.boxes.map((b) => ({ ...b, off: true })) : h.boxes,
+        patternExcluded.has(h.key) ? h.boxes.map((b) => ({ ...b, off: true })) : h.boxes,
       );
     return [];
   }, [pdf, shown, findOpen, findQuery, edits, fontFor, patternOpen, patternHits, patternExcluded]);
@@ -654,9 +668,19 @@ export const DocumentEditor = memo(function DocumentEditor({
   // around the same one — a page turned or moved in the sidebar — mustn't throw
   // the view back to it from wherever you are working.
   const scrolledTo = useRef<string | null>(null);
+  // Opening Redact patterns leaves the view where the person was reading: its
+  // first hit becomes active without throwing the page to it.
+  const holdScroll = useRef(false);
+  // "Show" on a row always scrolls, even to the hit already active.
+  const [showNonce, setShowNonce] = useState(0);
   useEffect(() => {
     if (!activeMatch || !pdf) {
       scrolledTo.current = null;
+      return;
+    }
+    if (holdScroll.current) {
+      holdScroll.current = false;
+      scrolledTo.current = activeMatch.id;
       return;
     }
     if (activeMatch.id === scrolledTo.current) return;
@@ -680,7 +704,8 @@ export const DocumentEditor = memo(function DocumentEditor({
       top: scroller.scrollTop + offsetFromScrollTop - scroller.clientHeight / 3,
       behavior: "smooth",
     });
-  }, [activeMatch, pdf, shownBySource, vp.scale]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- showNonce forces a scroll
+  }, [activeMatch, pdf, shownBySource, vp.scale, showNonce]);
 
   const nextMatch = useCallback(() => {
     setFindActive((i) => (matches.length ? (i + 1) % matches.length : 0));
@@ -689,30 +714,64 @@ export const DocumentEditor = memo(function DocumentEditor({
     setFindActive((i) => (matches.length ? (i - 1 + matches.length) % matches.length : 0));
   }, [matches.length]);
   const openFind = useCallback(() => {
+    holdScroll.current = false;
     setSelection(null);
     setPatternOpen(false);
     setFindActive(0);
     setFindOpen(true);
   }, []);
   const closeFind = useCallback(() => {
+    holdScroll.current = false;
     setFindOpen(false);
     setFindQuery("");
     setPatternOpen(false);
   }, []);
+  // Where focus was when the panel opened, to give it back on close.
+  const patternOpener = useRef<HTMLElement | null>(null);
+  const patternOpenRef = useRef(patternOpen);
+  patternOpenRef.current = patternOpen;
   const openPatterns = useCallback(() => {
+    // Already open (picked again from the ⋯ menu or the palette, which stay
+    // usable beside it): just go back to it. Starting over would quietly
+    // re-tick every hit the person had chosen to keep.
+    if (patternOpenRef.current) {
+      document.querySelector<HTMLElement>(".patterns input")?.focus();
+      return;
+    }
+    const active = document.activeElement;
+    patternOpener.current = active instanceof HTMLElement && active !== document.body ? active : null;
     setSelection(null);
     setMulti([]);
     setFindOpen(false);
     setFindQuery("");
     setFindActive(0);
     setPatternExcluded(new Set());
+    holdScroll.current = true;
     setPatternOpen(true);
   }, []);
+  // Closing the panel hands focus back to what opened it — or, when that has
+  // gone (a menu row, the palette, the find bar), to the ⋯ menu the command
+  // lives in — rather than dropping it on the page body. Only when focus is
+  // actually lost: a click on the page that closed it keeps its own.
+  const wasPatternOpen = useRef(false);
+  useEffect(() => {
+    if (wasPatternOpen.current && !patternOpen) {
+      const lost = !document.activeElement || document.activeElement === document.body;
+      if (lost) {
+        const back = patternOpener.current?.isConnected
+          ? patternOpener.current
+          : document.querySelector<HTMLElement>('[aria-label="More actions"]');
+        back?.focus();
+      }
+      patternOpener.current = null;
+    }
+    wasPatternOpen.current = patternOpen;
+  }, [patternOpen]);
 
   /** Redact every ticked pattern hit (one undo step). */
   const redactPatterns = useCallback(() => {
     // Exactly the boxes highlighted, as with "Redact all".
-    const chosen = patternHits.filter((h) => !patternExcluded.has(h.id));
+    const chosen = patternHits.filter((h) => !patternExcluded.has(h.key));
     if (chosen.length === 0 || !pdf) return;
     doc.set((d) => ({
       ...d,
@@ -732,8 +791,9 @@ export const DocumentEditor = memo(function DocumentEditor({
       ],
     }));
     const n = chosen.length;
+    // The message only: the status belongs to whatever else is running (OCR
+    // can be, beside this panel), and isn't this action's to clear.
     setMessage(`Redacted ${n} item${n === 1 ? "" : "s"}. Undo brings them back.`);
-    setStatus("ready");
     closeFind();
   }, [patternHits, patternExcluded, pdf, doc, closeFind]);
 
@@ -1405,7 +1465,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   // text elements are always editable, so there's no "edit mode" to leave).
   const backGuard = useRef(false);
   const consumingGuard = useRef(false);
-  const dismissable = compact && (editingId != null || sheetOpen || selection != null);
+  const dismissable = compact && (editingId != null || sheetOpen || selection != null || patternOpen);
   // On a phone the zoom pill yields to the top-centre contextual bar (find,
   // multi-select, a selection). The page field lives in it, so a hidden pill
   // closes the field — otherwise it would reopen, focused, keyboard up, the
@@ -1459,11 +1519,13 @@ export const DocumentEditor = memo(function DocumentEditor({
         setSheetOpen(false);
       } else if (selection != null) {
         setSelection(null);
+      } else if (patternOpen) {
+        closeFind();
       }
     };
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [editingId, sheetOpen, selection]);
+  }, [editingId, sheetOpen, selection, patternOpen, closeFind]);
 
   // When the properties sheet opens on a phone, the fixed bottom sheet can
   // cover the selected object — so you can't see your style/colour edits land.
@@ -1961,6 +2023,13 @@ export const DocumentEditor = memo(function DocumentEditor({
         e.preventDefault();
         setPendingStamp(null);
         setMessage("");
+        return;
+      }
+      // A selection made beside the open patterns panel goes first, as it
+      // would anywhere else; the next Escape closes the panel.
+      if (e.key === "Escape" && patternOpen && selection) {
+        e.preventDefault();
+        setSelection(null);
         return;
       }
       if (e.key === "Escape" && (findOpen || patternOpen)) {
@@ -2553,7 +2622,15 @@ export const DocumentEditor = memo(function DocumentEditor({
       docked={!compact}
       kinds={patternKinds}
       custom={patternCustom}
-      customError={custom && "error" in custom ? custom.error : null}
+      customError={
+        custom && "error" in custom
+          ? custom.error
+          : customRun.slow
+            ? "That pattern takes too long to run. Make it more specific."
+            : null
+      }
+      pending={customRun.pending}
+      tooMany={patternTooMany}
       hits={patternHits}
       excluded={patternExcluded}
       activeId={patternHits.find((h) => h.boxes.some((b) => b.id === activeMatch?.id))?.id ?? null}
@@ -2569,10 +2646,13 @@ export const DocumentEditor = memo(function DocumentEditor({
   return next;
         })
       }
-      onSetAll={(on) => setPatternExcluded(on ? new Set() : new Set(patternHits.map((h) => h.id)))}
+      onSetAll={(on) => setPatternExcluded(on ? new Set() : new Set(patternHits.map((h) => h.key)))}
       onShow={(h) => {
         const i = matches.findIndex((m) => m.id === h.boxes[0].id);
-        if (i >= 0) setFindActive(i);
+        if (i < 0) return;
+        setFindActive(i);
+        scrolledTo.current = null;
+        setShowNonce((n) => n + 1);
       }}
       onRedact={redactPatterns}
       onClose={closeFind}
@@ -2652,7 +2732,7 @@ export const DocumentEditor = memo(function DocumentEditor({
         )}
         <div className="viewer">
           <div
-            className={`viewer__scroll${sheetOpen && compact ? " viewer__scroll--sheet" : ""}`}
+            className={`viewer__scroll${(sheetOpen || patternOpen) && compact ? " viewer__scroll--sheet" : ""}`}
             ref={vp.viewportRef}
             {...vp.handlers}
           >
@@ -2870,7 +2950,8 @@ export const DocumentEditor = memo(function DocumentEditor({
               the Inspector for the full controls. */}
           {selection &&
             selection.kind !== "stamp" &&
-            (compact ? !sheetOpen : !inspectorOpen) && (
+            // Desktop: also while Redact patterns has the Inspector's column.
+            (compact ? !sheetOpen : !inspectorOpen || patternOpen) && (
               <SelectionBar
                 key={`${selection.kind}-${selection.id}`}
                 selection={selection}

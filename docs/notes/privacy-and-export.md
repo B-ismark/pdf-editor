@@ -71,17 +71,34 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   every overlay does. Case folding keeps a
   map back to the original indices (Turkish "İ" lower-cases to two code
   points). Don't tighten any of this without `export.spec`'s hostile-text test.
-- **Redact patterns searches a page's *joined* text** (`findPatternMatches`
-  in `pdf/find.ts`, presets in `pdf/patterns.ts`). Runs on one line are joined
-  (a space where the gap is wider than 0.15em) so a number a producer split
-  into runs still matches; each hit becomes one box per run it touches,
-  measured by the same code as Find. Presets never match `\s`, so a hit can't
-  run on into the next line. Where two presets claim the same text, the earlier
-  in `PATTERN_PRESETS` keeps it, so specific formats go first; checksums (Luhn,
-  IBAN mod-97) turn away look-alikes. A custom pattern is the person's own
-  regex, run on the main thread: a catastrophic one can hang the tab, and only
-  their own. Picture-only pages have no text to search until Recognise text.
-  Nothing is redacted until "Redact", and then in one history step.
+- **Redact patterns searches a page's *joined* text** (`joinPage` and
+  `findPatternMatches` in `pdf/find.ts`; matching in `pdf/patternScan.ts`;
+  presets in `pdf/patterns.ts`). Runs on one line, judged in the text's own
+  direction so a turned line joins too, are joined (a space where the gap is
+  wider than 0.15em) so a number a producer split into runs still matches;
+  each hit becomes one box per run it touches, measured by the same code as
+  Find. Presets never match `\s`, so a hit can't run on into the next line.
+  - *A refused run is cut back, not dropped.* A regex takes the hit plus its
+    neighbour (a card and its CVV, an IBAN and "BIC", two phone numbers) and
+    the checksum refuses the lot, so `scanText` retries the shortest leading
+    piece that passes. Each preset says how: cards and IBANs also look again
+    from inside a refused run; phone numbers split only where the piece
+    starts like one (`+`, `(`, a trunk `0`), or every 16-digit reference
+    becomes two "phone numbers".
+  - *Overlap decides the label, never the cover.* The earlier preset keeps
+    shared text; whatever a later one (a custom pattern) found beyond it is
+    kept as hits of its own.
+  - *A custom pattern runs in a worker* (`patternWorker.ts`, via
+    `useCustomPattern`), after typing settles, and is stopped after 2s: a
+    catastrophic regex would otherwise freeze the tab and any unsaved work.
+    Presets run on the page. Over `MAX_PATTERN_HITS` the panel asks for a
+    narrower pattern instead of listing everything.
+  - *Unticked hits are remembered by what they are* (`PatternHit.key`: kind,
+    page, text, occurrence), not by offset, so an edit elsewhere on the line
+    doesn't quietly re-tick one.
+  Form fields, notes and added text aren't searched (the panel says so);
+  picture-only pages need Recognise text first. Nothing is redacted until
+  "Redact", and then in one history step.
 - **Export edits the loaded file in place; it doesn't rebuild one.** That keeps
   catalog-level structure (outline, page labels, tags, `/Lang`, named
   destinations, layers, the form) and shares what the source shared. It also

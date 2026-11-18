@@ -143,7 +143,16 @@ type-checking can't see, and each exists because it broke once:
   pattern that doesn't compile or matches empty text is refused with an alert.
   Escape leaves the page untouched; the find bar leads to the panel and the two
   never show together; on a phone the sheet fits and its Redact button is in
-  view.
+  view. From review, on the `tricky` fixture (every hard case in red): a hit
+  beside a neighbour its checksum refuses, a phone number's one-digit first
+  group and leading "1-", a lower-case IBAN, a custom pattern over an email,
+  comb digits and a number split across a turned line all leave no red. A
+  catastrophic custom pattern is stopped with the tab still answering; "."
+  asks to be narrowed; unticked hits survive picking the command again and an
+  edit to their line; opening doesn't move the view and Show always scrolls;
+  focus returns to ⋯ on close; a selection beside the panel gets its
+  SelectionBar and the first Escape; on a phone the last hit of a long
+  document lands above the sheet, and Back closes the sheet.
 - `update.spec.ts` — the site redeployed under an open page: an on-demand
   part whose file is gone (a 404'd chunk) doesn't open, the document and its
   edits stay on screen, no modal is left half-open, and a banner offers a
