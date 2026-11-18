@@ -60,21 +60,46 @@ export interface FragmentFont {
   italic: boolean;
 }
 
-/** An interactive AcroForm field detected on a page (text or checkbox). */
+/** A value a form field can hold: text (a text box, a radio group's chosen
+ * option, a dropdown's), on/off (a checkbox), or several options (a list that
+ * takes more than one). */
+export type FormValue = string | boolean | string[];
+
+/** One option of a dropdown or list: the value the file stores, and the text
+ * it shows (often the same). */
+export interface FormOption {
+  value: string;
+  label: string;
+}
+
+/** An interactive AcroForm field's widget, detected on a page. A field with
+ * several widgets (a radio group, a name repeated on every page) has one entry
+ * per widget, all with the same `name`. */
 export interface FormField {
   /** Unique per widget: `${pageIndex}:field:${i}`. */
   id: string;
   /** AcroForm field name (the export key). */
   name: string;
   pageIndex: number;
-  type: "text" | "checkbox";
+  /** `choice` is a dropdown (`combo`) or a list. */
+  type: "text" | "checkbox" | "radio" | "choice";
   /** Widget rect in PDF units (bottom-left origin). */
   rect: { x: number; y: number; width: number; height: number };
   /** Initial value from the source PDF. */
-  defaultValue: string | boolean;
+  defaultValue: FormValue;
   readOnly?: boolean;
-  /** Text fields only: single-line comb/limit hints. */
+  /** Text: takes several lines. */
   multiline?: boolean;
+  /** Text: the most characters it takes. */
+  maxLength?: number;
+  /** Radio: the value this button sets its group to. */
+  onValue?: string;
+  /** Choice: the options, in the file's order. */
+  options?: FormOption[];
+  /** Choice: a dropdown (else a list). */
+  combo?: boolean;
+  /** Choice (list): more than one option can be chosen. */
+  multiSelect?: boolean;
 }
 
 /** Everything needed to render and edit one page. */
@@ -322,7 +347,10 @@ export interface DocState {
   /** Optional — absent in older persisted sessions. */
   links?: LinkAnnot[];
   /** Filled AcroForm values, keyed by field name. */
-  formValues?: Record<string, string | boolean>;
+  formValues?: Record<string, FormValue>;
+  /** Export the form flattened into the page (its fields' values become
+   * page content, no longer fillable). Absent or false: kept fillable. */
+  formFlatten?: boolean;
   /** Document-wide page numbering (drawn on every page at export). */
   pageNumbers?: PageNumberOptions | null;
   /** Document-wide diagonal watermark (drawn on every page at export). */

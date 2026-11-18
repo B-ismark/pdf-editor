@@ -217,3 +217,31 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
 - **Download via `src/download.ts`.** It attaches the anchor before clicking and
   defers `revokeObjectURL`; revoking synchronously races the browser's fetch of
   the blob and cancels downloads on Firefox/Safari.
+- **Forms (`formFill.ts`).** Every field kind is filled in the preview
+  (`FormFieldLayer`) and written by `applyForm`, called from the exporter.
+  The default is **keep fillable**; `DocState.formFlatten` (set from the
+  Document panel's Form section, undoable) flattens. Three traps, each with a
+  spec in `forms.spec`:
+  - **Stored value vs shown text.** pdf.js reports a choice by its export value
+    and a radio button by its on-state; pdf-lib's `select` takes a dropdown's
+    *shown* text and writes it as `/V`, and picks a radio by its `/Opt` export
+    value. `applyForm` translates both ways (`shownText`, `radioOption`) and,
+    once the look is drawn, puts the export value back in `/V`
+    (`storeChoiceValues`).
+  - **The standard font doesn't throw on a missing glyph** — the fork draws
+    "?" instead. `drawable` checks each character first; a field it can't draw
+    keeps its value, gets `/NeedAppearances`, and when flattening is *kept
+    fillable* and reported (`onFormKept` → "“name” stays fillable"), never
+    flattened as "?????". (The exporter's own `sanitize` relies on the same
+    throw, so it writes "?" where it means to drop a character.)
+  - **Flattening per field.** `PDFForm.flatten` does every field or none; a
+    field that must stay is skipped by copying its per-widget step
+    (`flattenField`, which calls pdf-lib's private `findWidgetPage` /
+    `findWidgetAppearanceRef` / `flattenWidgetOntoPage`). If the library
+    renames them, `forms.spec`'s flatten tests fail. An untouched field without
+    a normal appearance is drawn before flattening, or it would flatten to
+    nothing.
+  The preview controls are opaque: the canvas beneath shows the field as the
+  file came, and a changed value mustn't sit over the old one. Fields on a
+  redacted (rasterised) page are removed with the page's content, values and
+  all — the raster is drawn from the original bytes.

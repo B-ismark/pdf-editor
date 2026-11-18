@@ -63,6 +63,8 @@ export interface Fixtures {
   tricky: string;
   /** One page carrying every kind of hidden information — see {@link HIDDEN}. */
   hidden: string;
+  /** One page with one form field of every kind — see {@link FORM}. */
+  form: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
@@ -270,6 +272,7 @@ async function build(): Promise<Fixtures> {
     personal: write("personal.pdf", await personalPdf()),
     tricky: write("tricky.pdf", await trickyPdf()),
     hidden: write("hidden.pdf", await hiddenPdf()),
+    form: write("form.pdf", await formPdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -1179,4 +1182,68 @@ async function hiddenPdf(): Promise<Uint8Array> {
   info.set(PDFName.of("Company"), str(H.company));
   ctx.trailerInfo.ID = ctx.obj([PDFHexString.of("00112233445566778899aabbccddeeff"), PDFHexString.of("00112233445566778899aabbccddeeff")]);
   return doc.save({ useObjectStreams: false });
+}
+
+/**
+ * A form with one field of every kind the editor fills.
+ *
+ * Two of them store a different value from the one they show, which is what a
+ * real form does and what the export has to translate: the dropdown's options
+ * are `[export, shown]` pairs, and pdf-lib names its radio buttons' on-states
+ * "0", "1", "2" with the shown values in `/Opt`.
+ */
+export const FORM = {
+  page: { width: 500, height: 560 },
+  label: "APPLICATION FORM",
+  text: { name: "fullName", rect: [40, 470, 240, 22] },
+  multiline: { name: "address", rect: [40, 400, 240, 50] },
+  limited: { name: "postcode", rect: [300, 470, 80, 22], maxLength: 5 },
+  checkbox: { name: "agree", rect: [40, 360, 16, 16] },
+  radio: { name: "size", options: ["Small", "Medium", "Large"], y: 320 },
+  dropdown: {
+    name: "country",
+    rect: [40, 260, 160, 22],
+    options: [
+      ["gh", "Ghana"],
+      ["fr", "France"],
+      ["jp", "Japan"],
+    ] as [string, string][],
+  },
+  list: { name: "languages", rect: [240, 200, 140, 70], options: ["English", "French", "Twi", "Japanese"] },
+  fields: 7,
+};
+
+async function formPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([FORM.page.width, FORM.page.height]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText(FORM.label, { x: 40, y: 520, size: 16, font });
+  const form = doc.getForm();
+  const at = (r: number[]) => ({ x: r[0], y: r[1], width: r[2], height: r[3] });
+
+  form.createTextField(FORM.text.name).addToPage(page, at(FORM.text.rect));
+  const address = form.createTextField(FORM.multiline.name);
+  address.enableMultiline();
+  address.addToPage(page, at(FORM.multiline.rect));
+  const postcode = form.createTextField(FORM.limited.name);
+  postcode.setMaxLength(FORM.limited.maxLength);
+  postcode.addToPage(page, at(FORM.limited.rect));
+  form.createCheckBox(FORM.checkbox.name).addToPage(page, at(FORM.checkbox.rect));
+
+  const size = form.createRadioGroup(FORM.radio.name);
+  FORM.radio.options.forEach((o, i) => size.addOptionToPage(o, page, { x: 40 + i * 60, y: FORM.radio.y, width: 16, height: 16 }));
+
+  const country = form.createDropdown(FORM.dropdown.name);
+  country.addToPage(page, at(FORM.dropdown.rect));
+  country.acroField.dict.set(
+    PDFName.of("Opt"),
+    doc.context.obj(FORM.dropdown.options.map(([v, shown]) => [PDFString.of(v), PDFString.of(shown)])),
+  );
+
+  const langs = form.createOptionList(FORM.list.name);
+  langs.addOptions(FORM.list.options);
+  langs.enableMultiselect();
+  langs.addToPage(page, at(FORM.list.rect));
+
+  return doc.save();
 }

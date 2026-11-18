@@ -71,12 +71,13 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
       });
     });
 
-    // AcroForm widgets → editable form fields (text + checkbox only).
+    // AcroForm widgets → editable form fields. Push buttons and signature
+    // fields aren't filled in, so they aren't offered.
     const fields: FormField[] = [];
     try {
       const annots = await page.getAnnotations();
       annots.forEach((a: Record<string, unknown>, k: number) => {
-        if (a.subtype !== "Widget") return;
+        if (a.subtype !== "Widget" || a.hidden) return;
         const ft = a.fieldType as string | undefined;
         const rect = a.rect as number[] | undefined;
         if (!rect || rect.length < 4) return;
@@ -87,10 +88,36 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
         const name = (a.fieldName as string) || `field-${p}-${k}`;
         const base = { id: `${p}:field:${k}`, name, pageIndex: p, rect: { x, y, width, height }, readOnly: !!a.readOnly };
         if (ft === "Tx") {
-          fields.push({ ...base, type: "text", defaultValue: String(a.fieldValue ?? ""), multiline: !!a.multiLine });
+          const maxLen = typeof a.maxLen === "number" && a.maxLen > 0 ? a.maxLen : undefined;
+          fields.push({
+            ...base,
+            type: "text",
+            defaultValue: String(a.fieldValue ?? ""),
+            ...(a.multiLine ? { multiline: true } : {}),
+            ...(maxLen ? { maxLength: maxLen } : {}),
+          });
         } else if (ft === "Btn" && a.checkBox) {
           const on = a.fieldValue != null && a.fieldValue !== "Off" && a.fieldValue !== false;
           fields.push({ ...base, type: "checkbox", defaultValue: on });
+        } else if (ft === "Btn" && a.radioButton && typeof a.buttonValue === "string") {
+          const v = typeof a.fieldValue === "string" && a.fieldValue !== "Off" ? a.fieldValue : "";
+          fields.push({ ...base, type: "radio", defaultValue: v, onValue: a.buttonValue });
+        } else if (ft === "Ch" && Array.isArray(a.options)) {
+          const options = (a.options as { exportValue?: unknown; displayValue?: unknown }[]).map((o) => {
+            const value = String(o.exportValue ?? o.displayValue ?? "");
+            return { value, label: String(o.displayValue ?? value) };
+          });
+          const raw = a.fieldValue;
+          const chosen = (Array.isArray(raw) ? raw : raw == null || raw === "" ? [] : [raw]).map(String);
+          const multi = !a.combo && !!a.multiSelect;
+          fields.push({
+            ...base,
+            type: "choice",
+            options,
+            defaultValue: multi ? chosen : (chosen[0] ?? ""),
+            ...(a.combo ? { combo: true } : {}),
+            ...(multi ? { multiSelect: true } : {}),
+          });
         }
       });
     } catch {

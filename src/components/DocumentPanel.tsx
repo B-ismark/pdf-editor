@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Icon } from "./Icon";
+import { plural } from "../plural";
 import type { NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/types";
 
 /** One shown page, as far as this panel cares: its size as displayed (points,
@@ -21,6 +22,10 @@ interface Props {
   pageNumbers: PageNumberOptions | null;
   watermark: WatermarkOptions | null;
   lossless: boolean;
+  /** The document's form, when it has one: fields by name, how many are
+   * filled, and whether export flattens it. */
+  form: { fields: number; filled: number; flatten: boolean } | null;
+  onFormFlatten: (flatten: boolean) => void;
   busy: boolean;
   onEditNumbers: () => void;
   onEditWatermark: () => void;
@@ -128,6 +133,8 @@ export function DocumentPanel({
   pageNumbers,
   watermark,
   lossless,
+  form,
+  onFormFlatten,
   busy,
   onEditNumbers,
   onEditWatermark,
@@ -243,6 +250,49 @@ export function DocumentPanel({
           onClear={onClearWatermark}
         />
       </section>
+
+      {/* How the form leaves: still a form, or what was typed, printed into
+          the page. Stored with the document, so it undoes and travels. */}
+      {form && (
+        <section className="docpanel__group" aria-labelledby="docpanel-form">
+          <h3 className="docpanel__label label-medium" id="docpanel-form">Form</h3>
+          <p className="body-medium docpanel__formcount">
+            {form.filled} of {plural(form.fields, "field")} filled
+          </p>
+          <div role="radiogroup" aria-labelledby="docpanel-form">
+            <label className="docpanel__toggle">
+              <input
+                type="radio"
+                name="docpanel-form"
+                checked={!form.flatten}
+                onChange={() => onFormFlatten(false)}
+                aria-describedby="docpanel-keep-hint"
+              />
+              <span>
+                <span className="body-medium">Keep fillable</span>
+                <span className="docpanel__sub body-small" id="docpanel-keep-hint">
+                  The fields stay a form, with your answers in them. Anyone can still change them.
+                </span>
+              </span>
+            </label>
+            <label className="docpanel__toggle">
+              <input
+                type="radio"
+                name="docpanel-form"
+                checked={form.flatten}
+                onChange={() => onFormFlatten(true)}
+                aria-describedby="docpanel-flatten-hint"
+              />
+              <span>
+                <span className="body-medium">Flatten into the page</span>
+                <span className="docpanel__sub body-small" id="docpanel-flatten-hint">
+                  Your answers become part of the page, like print. Nobody can change them as a form.
+                </span>
+              </span>
+            </label>
+          </div>
+        </section>
+      )}
 
       {/* An app setting, not this document's: it is the same switch as the
           one in the ⋯ menu, and applies to every file exported here. */}

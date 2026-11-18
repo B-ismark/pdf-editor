@@ -76,7 +76,7 @@ Read only the section a package points at, not the whole folder.
     - [x] Split, Images → PDF, insert at a position (8a). Guarded by the `pagetools` spec; notes in `docs/notes/pages.md`.
     - [x] Crop (8b). Guarded by the `crop` spec; notes in `docs/notes/pages.md` (view origin, Crop).
   - [x] Print, Share, Save in place (8c). Guarded by the `saveto` spec; notes in `docs/notes/shell.md`.
-  - Complete forms, with a keep-fillable/flatten choice.
+  - [x] Complete forms, with a keep-fillable/flatten choice (8d). Guarded by the `forms` spec; notes in `docs/notes/privacy-and-export.md` (Forms).
   - Outline sidebar; links to a page.
   - Header/footer tokens and Bates numbering.
   - Compare two documents.

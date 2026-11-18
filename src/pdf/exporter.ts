@@ -1,4 +1,4 @@
-import { LineCapStyle, PDFArray, PDFCatalog, PDFCheckBox, PDFDict, PDFDocument, PDFHexString, PDFInvalidObject, PDFName, PDFPage, PDFPageLeaf, PDFPageTree, PDFRef, PDFStream, PDFString, PDFTextField, StandardFonts, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb, type PDFFont } from "@cantoo/pdf-lib";
+import { LineCapStyle, PDFArray, PDFCatalog,  PDFDict, PDFDocument, PDFHexString, PDFInvalidObject, PDFName, PDFPage, PDFPageLeaf, PDFPageTree, PDFRef, PDFStream, PDFString,  StandardFonts, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb, type PDFFont } from "@cantoo/pdf-lib";
 import { fitScale, roomAfter } from "./lineFit";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
@@ -30,6 +30,7 @@ import {
 } from "./fragmentColors";
 import { loadJpegEncoder, type JpegEncoder } from "./jpeg";
 import { yieldToUI } from "./yield";
+import { applyForm } from "./formFill";
 import {
   DEFAULT_STYLE,
   TEXTBOX_LINE_HEIGHT,
@@ -44,6 +45,7 @@ import { annotationPaintOrder, isBoxAnnotation } from "./types";
 import type {
   Annotation,
   Edits,
+  FormValue,
   FragmentFont,
   LinkAnnot,
   LoadedPdf,
@@ -93,7 +95,11 @@ export interface ExportInput {
   stamps: Stamp[];
   links?: LinkAnnot[];
   /** Filled AcroForm values keyed by field name. */
-  formValues?: Record<string, string | boolean>;
+  formValues?: Record<string, FormValue>;
+  /** Flatten the form into the page instead of keeping it fillable. */
+  formFlatten?: boolean;
+  /** Told the fields that were to be flattened but had to stay fillable. */
+  onFormKept?: (names: string[]) => void;
   /** Document-wide page numbering, drawn on every output page. */
   pageNumbers?: PageNumberOptions | null;
   /** Document-wide diagonal watermark, drawn on every output page. */
@@ -149,25 +155,6 @@ function drawWatermark(page: PDFPage, font: PDFFont, opts: WatermarkOptions, fra
     opacity: opts.opacity,
     rotate: degrees(opts.angle),
   });
-}
-
-/** Fill the source document's AcroForm from user values and flatten it, so the
- * filled appearances bake into the page content that gets copied out. */
-function fillAndFlattenForm(src: PDFDocument, formValues: Record<string, string | boolean>): void {
-  if (Object.keys(formValues).length === 0) return;
-  try {
-    const form = src.getForm();
-    for (const field of form.getFields()) {
-      const name = field.getName();
-      if (!(name in formValues)) continue;
-      const v = formValues[name];
-      if (field instanceof PDFTextField) field.setText(typeof v === "string" ? v : "");
-      else if (field instanceof PDFCheckBox) (v ? field.check() : field.uncheck());
-    }
-    form.flatten();
-  } catch {
-    /* No form, or a field type/font we can't flatten — leave as-is. */
-  }
 }
 
 /** Attach clickable URI link annotations to a page (works on vector and
@@ -503,7 +490,6 @@ export async function exportPdf(
   // preview showed at *i*. On a malformed tree they differ, and the raster
   // would replace the wrong page.
   alignPageTree(out, loaded.pages.map((p) => p.ref));
-  fillAndFlattenForm(out, formValues);
   // The finished page for each source page, by source index: the original, or
   // the raster that replaces it. Put in plan order once, at the end.
   const finished: PDFPage[] = out.getPages();
@@ -522,6 +508,10 @@ export async function exportPdf(
   };
 
   const helv = await getFont("Helvetica");
+  // Before any page is copied or rasterised: a flattened field is page
+  // content from here on.
+  const form = applyForm(out, formValues, !!input.formFlatten, helv);
+  if (form.keptFillable.length > 0) input.onFormKept?.(form.keptFillable);
   const wmFont = watermark ? await getFont("HelveticaBold") : null;
 
   // When any existing text is edited, spin up the source-font embedder so the

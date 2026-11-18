@@ -183,6 +183,15 @@ type-checking can't see, and each exists because it broke once:
   own password-opened file warns as Ctrl+S does; a file named "-edited" is
   offered "… copy", never its own name; an already-open file picked with
   another is said to be open — but never over why the other didn't open.
+- `forms.spec.ts` — Package 8d, on the `form` fixture (one field of every
+  kind; a dropdown whose stored values differ from its shown text, and
+  pdf-lib's numbered radio on-states). Read back with upstream pdf-lib: every
+  kind fills, a limit stops typing, the radio is saved as the option it stands
+  for and the dropdown as its stored value, and the file stays a form by
+  default. Flatten prints the answers onto the page (pdf.js text) and leaves no
+  fields. Greek can't be drawn by the standard font: that field stays fillable
+  with `/NeedAppearances`, the user is told, and no "?????" reaches the page.
+  The choice undoes.
 - `crop.spec.ts` — Package 8b. A page whose CropBox starts at 100,200: the
   heading's overlay sits on its glyphs (not off the page), an edit is redrawn
   at the run's own user-space position, and a link drawn 20 points in from
