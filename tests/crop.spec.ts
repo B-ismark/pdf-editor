@@ -228,3 +228,168 @@ test("Organise keeps a page's crop when it moves, and the grid shows it cropped"
   expect(cropped).toBe(1);
   expect(near(b[cropped].crop.width, 595 - 100 * MM, 0.05)).toBe(true);
 });
+
+/** The four margins as the dialog shows them, in mm. */
+async function shown(page: Page) {
+  const v = async (s: string) => Number(await page.getByLabel(`${s} margin, millimetres`).inputValue());
+  return { top: await v("Top"), bottom: await v("Bottom"), left: await v("Left"), right: await v("Right") };
+}
+
+test("the crop frame by keyboard: an edge's arrows move that edge only", async ({ page }) => {
+  const f = await fixtures();
+  await open(page, f.sample);
+  await openCrop(page);
+  await margins(page, { Top: 20, Bottom: 20, Left: 20, Right: 20 });
+  await page.getByRole("button", { name: "Left edge" }).focus();
+  await page.keyboard.press("Shift+ArrowRight");
+  let m = await shown(page);
+  expect(m.left).toBeCloseTo(23.5, 0);
+  expect(m.right).toBe(20);
+  await page.getByRole("button", { name: "Bottom-right corner" }).focus();
+  await page.keyboard.press("Shift+ArrowUp");
+  m = await shown(page);
+  expect(m.bottom).toBeCloseTo(23.5, 0);
+  expect(m.top).toBe(20);
+  // The frame itself still moves as a whole.
+  await page.getByRole("group", { name: "Crop frame" }).focus();
+  await page.keyboard.press("Shift+ArrowLeft");
+  m = await shown(page);
+  expect(m.left).toBeCloseTo(20, 0);
+  expect(m.right).toBeCloseTo(23.5, 0);
+});
+
+test("a margin field can be cleared and retyped", async ({ page }) => {
+  const f = await fixtures();
+  await open(page, f.sample);
+  await openCrop(page);
+  const top = page.getByLabel("Top margin, millimetres");
+  await top.fill("20");
+  await top.click();
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Backspace");
+  await expect(top).toHaveValue("");
+  await page.keyboard.type("10");
+  await expect(top).toHaveValue("10");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("1.5");
+  await expect(top).toHaveValue("1.5");
+  // Left empty, it shows the margin again once you move on.
+  await page.keyboard.press("Control+a");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.press("Tab");
+  await expect(top).toHaveValue("1.5");
+});
+
+test("dragging the frame into an edge keeps its size; a top corner dragged past the bottom leaves the bottom be", async ({ page }) => {
+  const f = await fixtures();
+  await open(page, f.sample);
+  await openCrop(page);
+  await margins(page, { Top: 50, Bottom: 50, Left: 50, Right: 50 });
+  const frame = page.getByRole("group", { name: "Crop frame" });
+  const b = (await frame.boundingBox())!;
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(b.x + b.width / 2 + 600, b.y + b.height / 2, { steps: 5 });
+  await page.mouse.up();
+  let m = await shown(page);
+  expect(m.right).toBe(0);
+  expect(m.left).toBeCloseTo(100, 0);
+
+  await margins(page, { Top: 50, Bottom: 50, Left: 50, Right: 50 });
+  const g = (await page.getByRole("button", { name: "Top-left corner" }).boundingBox())!;
+  await page.mouse.move(g.x + g.width / 2, g.y + g.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(g.x + g.width / 2, g.y + 1000, { steps: 5 });
+  await page.mouse.up();
+  m = await shown(page);
+  expect(m.bottom).toBe(50);
+  expect(m.top).toBeGreaterThan(200);
+});
+
+test("on a small phone the crop preview keeps a usable size", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  const f = await fixtures();
+  await open(page, f.sample);
+  await openCrop(page);
+  const pg = (await page.locator(".crop__page").boundingBox())!;
+  expect(pg.height).toBeGreaterThan(150);
+  // The actions fit the dialog: none is clipped.
+  const dlg = (await page.getByRole("dialog").boundingBox())!;
+  for (const name of ["Whole page", "Cancel"]) {
+    const btn = (await page.getByRole("dialog").getByRole("button", { name }).boundingBox())!;
+    expect(btn.x).toBeGreaterThanOrEqual(dlg.x);
+    expect(btn.x + btn.width).toBeLessThanOrEqual(dlg.x + dlg.width + 0.5);
+  }
+});
+
+test("a link on a cropped page points where it was drawn, not shifted by the crop", async ({ page }) => {
+  const f = await fixtures();
+  await open(page, f.sample);
+  await openCrop(page);
+  await margins(page, { Left: 30, Bottom: 20 });
+  await page.getByRole("dialog").getByRole("button", { name: "Crop", exact: true }).click();
+  await expect(page.getByRole("dialog")).toBeHidden();
+  await pickTool(page, "Link");
+  const pg = (await page.locator(".page").first().boundingBox())!;
+  const scale = pg.width / (595 - 30 * MM);
+  await dragOnPage(page, { x: 20 * scale, y: 20 * scale }, { x: 120 * scale, y: 60 * scale });
+  await page.fill("#link-url", "https://example.com/");
+  await page.waitForTimeout(200);
+  const d = await PDFDocument.load(await download(page));
+  const dict = d.context.lookup(d.getPage(0).node.Annots()!.get(0), PDFDict);
+  const r = dict.lookup(PDFName.of("Rect"), PDFArray).asArray().map((n) => (n as PDFNumber).asNumber());
+  expect(near(r[0], 30 * MM + 20, 1)).toBe(true);
+  expect(near(r[3], 842 - 20, 1)).toBe(true);
+});
+
+test("all pages by margins too big for a smaller page: it keeps its middle, not a sliver at one side", async ({ page }) => {
+  const d = await PDFDocument.create();
+  d.addPage([595, 842]);
+  d.addPage([300, 300]);
+  const file = join(dir, "mixed.pdf");
+  writeFileSync(file, await d.save());
+  await open(page, file);
+  await openCrop(page);
+  await margins(page, { Left: 100, Right: 50 });
+  await page.getByRole("radio", { name: /All 2 pages/ }).check();
+  await page.getByRole("dialog").getByRole("button", { name: "Crop", exact: true }).click();
+  const b = await boxes(await download(page));
+  // Margins too wide for the small page are shrunk alike: the left one stays
+  // twice the right, so the kept strip is where they'd have put it.
+  const left = b[1].crop.x;
+  const right = 300 - b[1].crop.x - b[1].crop.width;
+  expect(right).toBeGreaterThan(0);
+  expect(left / right).toBeCloseTo(2, 1);
+});
+
+test.describe("on a high-density screen", () => {
+  test.use({ deviceScaleFactor: 2 });
+  test("a narrow crop still paints its page", async ({ page }) => {
+    const f = await fixtures();
+    await open(page, f.sample);
+    await openCrop(page);
+    await margins(page, { Left: 150, Right: 40 });
+    // Every page, so the narrow crop is the widest page and sets the fit.
+    await page.getByRole("radio", { name: /All 12 pages/ }).check();
+    await page.getByRole("dialog").getByRole("button", { name: "Crop", exact: true }).click();
+    await expect(page.getByRole("dialog")).toBeHidden();
+    const canvas = page.locator(".page").first().locator("canvas").first();
+    await expect.poll(async () => canvas.evaluate((c: HTMLCanvasElement) => c.width * c.height), { timeout: 10_000 }).toBeGreaterThan(1000);
+    expect(await canvas.evaluate((c: HTMLCanvasElement) => c.width * c.height)).toBeLessThanOrEqual(2 ** 26);
+    // Something is painted in the part that shows: the page's white, at least.
+    await expect
+      .poll(
+        async () =>
+          canvas.evaluate((c: HTMLCanvasElement) => {
+            const page = c.closest(".page")!.getBoundingClientRect();
+            const r = c.getBoundingClientRect();
+            const x = ((page.left + page.width / 2 - r.left) / r.width) * c.width;
+            const y = ((page.top + page.height / 2 - r.top) / r.height) * c.height;
+            return c.getContext("2d")!.getImageData(Math.floor(x), Math.floor(y), 1, 1).data[3];
+          }),
+        { timeout: 15_000 },
+      )
+      .toBe(255);
+  });
+});

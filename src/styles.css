@@ -2741,7 +2741,10 @@ body {
 /* ============ Crop ============ */
 .crop { width: min(560px, 100%); gap: 12px; }
 .crop__stage {
-  height: min(52vh, 460px);
+  /* Never squeezed by the dialog's column: on a short screen the dialog
+     scrolls instead, and the page stays big enough to grab. */
+  height: max(220px, min(52vh, 460px));
+  flex-shrink: 0;
   display: grid;
   place-items: center;
   background: var(--surface-container);
@@ -2795,6 +2798,7 @@ body {
 .crop__input input { width: 100%; min-width: 0; }
 .crop__note { color: var(--on-surface-variant); margin: 0; }
 .dialog__spacer { flex: 1; }
+.crop .dialog__actions { flex-wrap: wrap; }
 @media (max-width: 480px) {
   .crop__fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

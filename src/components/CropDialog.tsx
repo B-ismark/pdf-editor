@@ -16,6 +16,9 @@ export interface Margins {
   left: number;
 }
 
+/** The preview's longest side, in canvas pixels, at most. */
+const PREVIEW_PX = 1600;
+
 const NONE: Margins = { top: 0, right: 0, bottom: 0, left: 0 };
 
 /** A page's crop as margins from the sides it's shown with. */
@@ -32,8 +35,10 @@ export function marginsOf(page: PageData): Margins {
  * space). The same margins suit pages of any size or turn, which is what
  * "All pages" applies. `undefined` keeps the whole page.
  */
-export function cropFromMargins(page: PageData, m: Margins): CropRect | undefined {
+export function cropFromMargins(page: PageData, margins: Margins): CropRect | undefined {
   const s = sheetSize(page);
+  // Held against *this* page: "All pages" brings margins set on another.
+  const m = holdMargins(margins, s.width, s.height);
   const a = sheetToView(m.left, m.top, page);
   const b = sheetToView(s.width - m.right, s.height - m.bottom, page);
   const x = Math.min(a.x, b.x);
@@ -41,28 +46,64 @@ export function cropFromMargins(page: PageData, m: Margins): CropRect | undefine
   return fitCrop({ x, y, width: Math.abs(b.x - a.x), height: Math.abs(b.y - a.y) }, page.viewBox);
 }
 
-/** Keep margins to a page: none negative, and at least `MIN_CROP` left each way. */
-function holdMargins(m: Margins, w: number, h: number, moved: keyof Margins | "all"): Margins {
+type Axis = "start" | "end" | "both";
+
+/**
+ * Keep margins to a page: none negative, and at least `MIN_CROP` left each
+ * way. `x` / `y` say what moved on each axis — its start side (left, top), its
+ * end side (right, bottom), or both, a drag of the whole frame, which keeps
+ * its size and stops at the edge. An axis that didn't move is only kept in.
+ */
+function holdMargins(m: Margins, w: number, h: number, x?: Axis, y?: Axis): Margins {
   const out = { ...m };
-  for (const k of ["top", "right", "bottom", "left"] as const) out[k] = Math.max(0, out[k]);
-  const fix = (a: "left" | "top", b: "right" | "bottom", size: number) => {
+  const fix = (a: "left" | "top", b: "right" | "bottom", size: number, moved?: Axis) => {
     const room = size - Math.min(MIN_CROP, size);
+    if (moved === "both") {
+      // Slid past a side: give the overshoot back to the other, so the
+      // frame's size holds.
+      if (out[a] < 0) (out[b] += out[a]), (out[a] = 0);
+      if (out[b] < 0) (out[a] += out[b]), (out[b] = 0);
+    }
+    out[a] = Math.max(0, out[a]);
+    out[b] = Math.max(0, out[b]);
     if (out[a] + out[b] <= room) return;
-    if (moved === "all") {
-      // A drag of the whole frame: keep its size, stop it at the edge.
+    if (moved === "both") {
       const over = out[a] + out[b] - room;
       if (out[a] >= over) out[a] -= over;
       else out[b] -= over;
-    } else if (moved === a) out[a] = room - out[b];
-    else if (moved === b) out[b] = room - out[a];
+    } else if (moved === "start") out[a] = Math.min(room - out[b], room);
+    else if (moved === "end") out[b] = Math.min(room - out[a], room);
     else {
-      out[a] = Math.min(out[a], room);
-      out[b] = room - out[a];
+      // Neither side moved — margins meant for a bigger page: shrink both
+      // alike, so what's kept stays where it was meant to be.
+      const k = room / (out[a] + out[b]);
+      out[a] *= k;
+      out[b] *= k;
     }
   };
-  fix("left", "right", w);
-  fix("top", "bottom", h);
+  fix("left", "right", w, x);
+  fix("top", "bottom", h, y);
   return out;
+}
+
+/** What a grip moves on each axis. */
+function axes(grip: Grip | "frame"): { x?: Axis; y?: Axis } {
+  if (grip === "frame") return { x: "both", y: "both" };
+  return {
+    x: grip.includes("w") ? "start" : grip.includes("e") ? "end" : undefined,
+    y: grip.includes("n") ? "start" : grip.includes("s") ? "end" : undefined,
+  };
+}
+
+/** Margins after moving a grip (or the frame) by dx, dy points. */
+function shift(s: Margins, grip: Grip | "frame", dx: number, dy: number): Margins {
+  const { x, y } = axes(grip);
+  const next = { ...s };
+  if (x === "both" || x === "start") next.left += dx;
+  if (x === "both" || x === "end") next.right -= dx;
+  if (y === "both" || y === "start") next.top += dy;
+  if (y === "both" || y === "end") next.bottom -= dy;
+  return next;
 }
 
 type Grip = "n" | "s" | "e" | "w" | "ne" | "nw" | "se" | "sw";
@@ -123,11 +164,15 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
     return () => ro.disconnect();
   }, [sheet.width, sheet.height]);
 
-  // The page, rendered once at a size that stays sharp at the stage's scale.
+  // The page, rendered once at a size that stays sharp at the stage's scale —
+  // and no bigger, however large the sheet (a poster would otherwise ask for
+  // more pixels than a phone's canvas allows).
   const [failed, setFailed] = useState(false);
+  const longest = Math.max(page.viewBox.width, page.viewBox.height);
   useEffect(() => {
     const ctrl = new AbortController();
-    renderPageToCanvas(bytes, page.pageIndex, 1.5, ctrl.signal, page.rotation)
+    const el = host.current;
+    renderPageToCanvas(bytes, page.pageIndex, Math.min(1.5, PREVIEW_PX / longest), ctrl.signal, page.rotation)
       .then((c) => {
         if (ctrl.signal.aborted || !host.current) {
           c.width = c.height = 0;
@@ -139,10 +184,17 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
       .catch((e) => {
         if (!ctrl.signal.aborted && (e as Error)?.name !== "AbortError") setFailed(true);
       });
-    return () => ctrl.abort();
-  }, [bytes, page.pageIndex, page.rotation]);
+    return () => {
+      ctrl.abort();
+      // Give the preview's pixels back now, not when the canvas is collected.
+      for (const c of el?.querySelectorAll("canvas") ?? []) c.width = c.height = 0;
+    };
+  }, [bytes, page.pageIndex, page.rotation, longest]);
 
-  const set = (next: Margins, moved: keyof Margins | "all") => setM(holdMargins(next, sheet.width, sheet.height, moved));
+  const hold = (next: Margins, grip: Grip | "frame") => {
+    const { x, y } = axes(grip);
+    return holdMargins(next, sheet.width, sheet.height, x, y);
+  };
 
   // Dragging a grip or the frame. Pointer moves are in screen pixels; margins
   // are in PDF units, so divide by the preview's scale.
@@ -152,51 +204,34 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     drag.current = { grip, x: e.clientX, y: e.clientY, start: m };
+    setDraft({});
   };
   const move = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d || !k) return;
-    const dx = (e.clientX - d.x) / k;
-    const dy = (e.clientY - d.y) / k;
-    const s = d.start;
-    if (d.grip === "frame") {
-      set({ top: s.top + dy, bottom: s.bottom - dy, left: s.left + dx, right: s.right - dx }, "all");
-      return;
-    }
-    const next = { ...s };
-    let moved: keyof Margins = "top";
-    if (d.grip.includes("n")) (next.top = s.top + dy), (moved = "top");
-    if (d.grip.includes("s")) (next.bottom = s.bottom - dy), (moved = "bottom");
-    if (d.grip.includes("w")) (next.left = s.left + dx), (moved = "left");
-    if (d.grip.includes("e")) (next.right = s.right - dx), (moved = "right");
-    // A corner moves two sides; hold each against its opposite.
-    let held = holdMargins(next, sheet.width, sheet.height, moved);
-    if (d.grip.length === 2) held = holdMargins(held, sheet.width, sheet.height, d.grip.includes("n") ? "top" : "bottom");
-    setM(held);
+    setM(hold(shift(d.start, d.grip, (e.clientX - d.x) / k, (e.clientY - d.y) / k), d.grip));
   };
   const end = () => {
     drag.current = null;
   };
 
-  // Arrow keys on a focused grip: a point at a time, ten with Shift.
+  // Arrow keys on a focused grip: a point at a time, ten with Shift. A grip's
+  // keys are its own — they don't also reach the frame around it.
   const nudge = (grip: Grip | "frame") => (e: React.KeyboardEvent) => {
     const step = e.shiftKey ? 10 : 1;
     const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
     const dy = e.key === "ArrowUp" ? -step : e.key === "ArrowDown" ? step : 0;
     if (!dx && !dy) return;
     e.preventDefault();
-    if (grip === "frame") {
-      set({ top: m.top + dy, bottom: m.bottom - dy, left: m.left + dx, right: m.right - dx }, "all");
-      return;
-    }
-    const next = { ...m };
-    let moved: keyof Margins = "top";
-    if (dy && grip.includes("n")) (next.top += dy), (moved = "top");
-    if (dy && grip.includes("s")) (next.bottom -= dy), (moved = "bottom");
-    if (dx && grip.includes("w")) (next.left += dx), (moved = "left");
-    if (dx && grip.includes("e")) (next.right -= dx), (moved = "right");
-    set(next, moved);
+    e.stopPropagation();
+    setDraft({});
+    setM(hold(shift(m, grip, dx, dy), grip));
   };
+
+  // What's typed in a field, while it's being typed: an empty or half-typed
+  // number is kept as text, so it can be cleared and retyped.
+  const [draft, setDraft] = useState<Partial<Record<keyof Margins, string>>>({});
+  const sideGrip: Record<keyof Margins, Grip> = { top: "n", bottom: "s", left: "w", right: "e" };
 
   const field = (side: keyof Margins, label: string) => (
     <label className="crop__field">
@@ -208,13 +243,19 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
           inputMode="decimal"
           min={0}
           step={1}
-          value={Math.round(m[side] * MM * 10) / 10}
+          value={draft[side] ?? Math.round(m[side] * MM * 10) / 10}
           aria-label={`${label} margin, millimetres`}
           onChange={(e) => {
-            const v = Number(e.target.value);
-            if (e.target.value.trim() === "" || !Number.isFinite(v)) return;
-            set({ ...m, [side]: v / MM }, side);
+            const text = e.target.value;
+            setDraft((d) => ({ ...d, [side]: text }));
+            const v = Number(text);
+            if (text.trim() === "" || !Number.isFinite(v)) return;
+            setM(hold({ ...m, [side]: v / MM }, sideGrip[side]));
           }}
+          onBlur={() => setDraft((d) => {
+            const { [side]: _gone, ...rest } = d;
+            return rest;
+          })}
         />
         <span className="body-small" aria-hidden="true">mm</span>
       </span>
@@ -251,6 +292,7 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
               style={frame}
               role="group"
               aria-label="Crop frame"
+              aria-describedby={`${id}-keys`}
               tabIndex={0}
               data-tip="Drag to move the frame"
               onPointerDown={begin("frame")}
@@ -265,6 +307,7 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
                   type="button"
                   className={`crop__grip crop__grip--${g}`}
                   aria-label={GRIP_LABEL[g]}
+                  aria-describedby={`${id}-keys`}
                   onPointerDown={begin(g)}
                   onPointerMove={move}
                   onPointerUp={end}
@@ -275,6 +318,9 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
             </div>
           </div>
         </div>
+        <span className="sr-only" id={`${id}-keys`}>
+          Arrow keys move the frame, or a focused edge or corner; Shift moves ten points. Or type the margins below.
+        </span>
         <div className="crop__fields" role="group" aria-label="Margins to cut">
           {field("top", "Top")}
           {field("bottom", "Bottom")}
@@ -297,7 +343,7 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
           Cropping hides the edges; what's under them stays in the file. To remove something, redact it.
         </p>
         <div className="dialog__actions">
-          <button type="button" className="btn" disabled={keepsAll} onClick={() => setM(NONE)}>
+          <button type="button" className="btn" disabled={keepsAll} onClick={() => (setM(NONE), setDraft({}))}>
             <Icon name="reset" size={16} />
             Whole page
           </button>

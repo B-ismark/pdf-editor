@@ -178,12 +178,12 @@ function fillAndFlattenForm(src: PDFDocument, formValues: Record<string, string 
  * if a value arrives from a restored session or a future call site. A rejected
  * scheme (`javascript:`, `data:`, `file:`, …) drops the annotation rather than
  * writing an active action into a document the user is about to share. */
-function addLinkAnnots(out: PDFDocument, page: PDFPage, links: LinkAnnot[], frame: ViewFrame): void {
+function addLinkAnnots(out: PDFDocument, page: PDFPage, links: LinkAnnot[], origin: { x: number; y: number }): void {
   for (const l of links) {
     const url = safeLinkUrl(l.url);
     if (!url) continue;
-    const x = frame.x + l.x;
-    const y = frame.y + l.y;
+    const x = origin.x + l.x;
+    const y = origin.y + l.y;
     const dict = out.context.obj({
       Type: "Annot",
       Subtype: "Link",
@@ -575,10 +575,13 @@ export async function exportPdf(
     // annotations are then applied uniformly on top. The page number is the
     // page's position in the plan, not its source index — after a reorder the
     // two differ, and the reader counts positions.
-    const applyPageLayers = (page: PDFPage, frame: ViewFrame) => {
+    // `frame` is what the reader sees (the crop, or the whole view) for the
+    // page number and watermark; links are drawn in whole-view space, so they
+    // move by the view's own corner only — never by the crop's.
+    const applyPageLayers = (page: PDFPage, frame: ViewFrame, origin: { x: number; y: number }) => {
       if (pageNumbers) drawPageNumber(page, helv, String(pageNumbers.start + slot.pos), pageNumbers, frame);
       if (watermark && wmFont) drawWatermark(page, wmFont, watermark, frame);
-      addLinkAnnots(out, page, pageLinks, frame);
+      addLinkAnnots(out, page, pageLinks, origin);
     };
     // What the reader will see of the page, in view space: the plan's crop, or
     // the whole view. Page numbers and the watermark are placed against it.
@@ -589,7 +592,7 @@ export async function exportPdf(
       const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, pageEdited, await getJpegEncoder());
       finished[i] = rasterPage;
       replaced.set(oldRef, rasterPage.ref);
-      applyPageLayers(rasterPage, seen);
+      applyPageLayers(rasterPage, seen, { x: 0, y: 0 });
       // The raster is the view at 0,0, so the crop goes on as it is.
       if (slot.crop) rasterPage.setCropBox(seen.x, seen.y, seen.width, seen.height);
       continue;
@@ -693,7 +696,7 @@ export async function exportPdf(
     if (moved) page.pushOperators(popGraphicsState());
 
     const frame = { x: ox + seen.x, y: oy + seen.y, width: seen.width, height: seen.height };
-    applyPageLayers(page, frame);
+    applyPageLayers(page, frame, { x: ox, y: oy });
     // Cropping is the page's CropBox: what's outside it stays in the file,
     // hidden, as every PDF crop leaves it (Redact is what removes things).
     if (slot.crop) page.setCropBox(frame.x, frame.y, frame.width, frame.height);

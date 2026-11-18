@@ -244,8 +244,8 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
 - Marquee hit-testing and the selection bbox of a *rotated text box* are
   approximate.
 - New objects are placed and clamped against the whole page, not the crop, so
-  one can land in the hidden edge (it's still selectable through the rail's
-  undo, and it ships hidden).
+  one can land partly in the hidden edge, its resize handle with it (move it
+  in by its move grip, or undo; whatever stays outside ships hidden).
 - A session saved before the view-origin fix, with overlays on a page whose view
   doesn't start at 0,0, restores them shifted by that corner.
 - A session saved before this change, with overlays on a `/Rotate` page, restores

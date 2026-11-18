@@ -136,6 +136,10 @@ export function isRenderCancelled(err: unknown): boolean {
  * previous handle before starting a new render on the same canvas so the
  * in-flight pdf.js task is torn down first.
  */
+/** The most pixels a page canvas gets: 256 MB of RGBA, well under Chrome's
+ * limit and above anything an uncropped page asked for at the deepest zoom. */
+const MAX_CANVAS_PX = 2 ** 26;
+
 export function renderPage(
   bytes: ArrayBuffer,
   pageIndex: number,
@@ -159,7 +163,12 @@ export function renderPage(
 
     // Backing store at scale × devicePixelRatio; the element's display size is
     // controlled by CSS (the page container), so we don't touch canvas.style.
-    const dpr = window.devicePixelRatio || 1;
+    // Capped in area: a narrow crop fits its *window* to the screen, so the
+    // whole sheet behind it can ask for more pixels than a canvas may hold —
+    // past that the browser paints nothing at all. Fewer pixels only soften
+    // an extreme zoom; everything else reads the canvas by its own size.
+    const want = viewport.width * viewport.height * (window.devicePixelRatio || 1) ** 2;
+    const dpr = (window.devicePixelRatio || 1) * Math.min(1, Math.sqrt(MAX_CANVAS_PX / want));
     canvas.width = Math.max(1, Math.floor(viewport.width * dpr));
     canvas.height = Math.max(1, Math.floor(viewport.height * dpr));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
