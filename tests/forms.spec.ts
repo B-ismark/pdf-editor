@@ -265,8 +265,6 @@ test.describe("what the file keeps", () => {
     // The file says "Tamale"; cleared here. No answer was given; the third chosen.
     await page.getByRole("combobox", { name: E.city.tip }).selectOption("");
     await page.getByRole("radio", { name: `${E.answer.name}: option 3 of 3`, exact: true }).click();
-    // Longer than a line of the box: it wraps, in the preview and the picture.
-    await field(page, E.essay.name).fill("A long answer that runs well past the edge of its box");
     // Flattening: fields that couldn't be flattened are on this page, which
     // becomes a picture — nothing "stays fillable" to report.
     await formPanel(page).getByRole("radio", { name: "Flatten into the page" }).check();
@@ -274,7 +272,14 @@ test.describe("what the file keeps", () => {
     // Over the heading only, nowhere near the fields.
     await pickTool(page, "Redact");
     await dragOnPage(page, { x: box.width * 0.06, y: box.height * 0.03 }, { x: box.width * 0.5, y: box.height * 0.09 });
+    await expect(page.locator(".redaction"), "the box is drawn").toHaveCount(1);
     await pickTool(page, "Select");
+    // Longer than a line of the box: it wraps, in the preview and the picture.
+    // …and then a pasted run with no spaces, far longer than the box shows:
+    // the export mustn't stall measuring it.
+    await field(page, E.essay.name).fill(`A long answer that runs well past the edge of its box ${"x".repeat(20_000)}`);
+    // The last option of a list showing two rows: the preview scrolls to it.
+    await field(page, E.level.name).selectOption(E.level.options[2]);
     const out = await download(page);
     const file = info.outputPath("redacted-form.pdf");
     writeFileSync(file, out);
@@ -299,6 +304,16 @@ test.describe("what the file keeps", () => {
     expect(await dark(second(E.notes.rect)), "a \\r in the file's value breaks the line").toBeGreaterThan(0);
     expect(await dark(second(E.essay.rect)), "a long answer wraps").toBeGreaterThan(0);
     await expect(page.locator(".snackbar__msg").filter({ hasText: "fillable" })).toHaveCount(0);
+    const [lx, ly, lw, lh] = E.level.rect;
+    const marked = await page.locator(".page canvas").first().evaluate((c: HTMLCanvasElement, r: number[]) => {
+      const s = c.width / 500;
+      const [x, y, w, h] = r;
+      const data = c.getContext("2d")!.getImageData(x * s, (560 - y - h) * s, w * s, h * s).data;
+      let n = 0;
+      for (let i = 0; i < data.length; i += 4) if (data[i + 2] > 180 && data[i] < 180 && data[i + 1] > 160) n++;
+      return n;
+    }, [lx, ly + lh / 2, lw, lh / 2]);
+    expect(marked, "the chosen option is shown, marked, in the list's top rows").toBeGreaterThan(0);
   });
 
   test("a dropdown shows its own unlisted value and stays untypeable; a locked field can't be changed", async ({ page }) => {

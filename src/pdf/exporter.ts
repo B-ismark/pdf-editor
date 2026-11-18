@@ -769,28 +769,33 @@ export async function exportPdf(
 }
 
 /** One line of a multi-line answer, broken at spaces (or inside a word too
- * long for a line) to fit `room` — as the preview's text box wraps it. */
-function wrapLine(ctx: CanvasRenderingContext2D, text: string, room: number): string[] {
-  if (text === "" || ctx.measureText(text).width <= room) return [text];
+ * long for a line) to fit `room` — as the preview's text box wraps it. Stops
+ * after `max` lines: the box shows no more, and a huge unbroken value (a
+ * pasted link, a malformed file) mustn't stall the export measuring it. */
+function wrapLine(ctx: CanvasRenderingContext2D, text: string, room: number, max: number): string[] {
+  const fits = (t: string) => ctx.measureText(t).width <= room;
+  if (text === "" || fits(text)) return [text];
   const out: string[] = [];
-  let line = "";
-  for (const word of text.split(/(?<=\s)/)) {
-    const next = line + word;
-    if (ctx.measureText(next.trimEnd()).width <= room) {
-      line = next;
-      continue;
+  let rest = text;
+  while (rest !== "" && out.length < max) {
+    if (fits(rest)) {
+      out.push(rest);
+      break;
     }
-    if (line) out.push(line.trimEnd());
-    line = word;
-    // A word wider than the line: broken where it runs out.
-    while (ctx.measureText(line.trimEnd()).width > room && line.length > 1) {
-      let cut = line.length - 1;
-      while (cut > 1 && ctx.measureText(line.slice(0, cut)).width > room) cut--;
-      out.push(line.slice(0, cut));
-      line = line.slice(cut);
+    // The longest start that fits, found by halving (at least one character).
+    let lo = 1;
+    let hi = rest.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (fits(rest.slice(0, mid).trimEnd())) lo = mid;
+      else hi = mid - 1;
     }
+    // Back to the last space in it, when there is one.
+    const space = rest.slice(0, lo + 1).search(/\s\S*$/);
+    const cut = space > 0 ? space + 1 : lo;
+    out.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).replace(/^\s+/, "");
   }
-  if (line.trimEnd()) out.push(line.trimEnd());
   return out;
 }
 
@@ -851,7 +856,12 @@ function drawRasterForm(
         const chosen = chosenValues(v);
         const options = f.options ?? [];
         const extra = chosen.filter((c) => !options.some((o) => o.value === c)).map((c) => ({ value: c, label: c }));
-        [...options, ...extra].forEach((o, i) => {
+        const all = [...options, ...extra];
+        // Scrolled, as the preview's list is, so the first chosen option shows.
+        const rows = Math.max(1, Math.floor((height - 2) / lineH));
+        const first = all.findIndex((o) => chosen.includes(o.value));
+        const start = first >= rows ? first : 0;
+        all.slice(start, start + rows + 1).forEach((o, i) => {
           const rowTop = top + (2 + lineH * i) * S;
           if (chosen.includes(o.value)) {
             ctx.fillStyle = "#99c1da";
@@ -862,7 +872,11 @@ function drawRasterForm(
         });
       } else {
         const room = (width - 4) * S;
-        const lines = f.multiline ? shownLines(f, v).flatMap((l) => wrapLine(ctx, l, room)) : shownLines(f, v);
+        const rows = Math.max(1, Math.ceil(height / lineH));
+        // A dropdown shows its first chosen option, as the preview does.
+        const lines = f.multiline
+          ? shownLines(f, v).flatMap((l) => wrapLine(ctx, l, room, rows)).slice(0, rows)
+          : shownLines(f, v).slice(0, 1);
         lines.forEach((line, i) => {
           const base = f.multiline ? top + (2 + size + lineH * i) * S : top + ((height + size * 0.7) / 2) * S;
           ctx.fillText(line, left, base);

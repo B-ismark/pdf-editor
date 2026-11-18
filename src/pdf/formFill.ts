@@ -174,7 +174,7 @@ function setValue(field: PDFField, v: FormValue): void {
       // it is too. pdf-lib's `select` takes it by making the dropdown
       // editable; it isn't, so that's put back.
       const editable = field.isEditable();
-      field.select(chosen[0]);
+      field.select(chosen.length === 1 ? chosen[0] : chosen);
       if (!editable) field.disableEditing();
     } else field.select(chosen.length === 1 ? chosen[0] : chosen);
   }
@@ -182,10 +182,10 @@ function setValue(field: PDFField, v: FormValue): void {
 
 /** The values a dropdown or list will hold: a list's `select` throws on a
  * value none of its options has (left from an older version of the file), so
- * a list drops it; a dropdown keeps it. */
+ * a list drops it; a dropdown keeps it (all of them, if it holds several). */
 function keptChoices(field: PDFDropdown | PDFOptionList, v: FormValue): string[] {
   const chosen = Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : [];
-  return field instanceof PDFOptionList ? chosen.filter((x) => hasOption(field, x)) : chosen.slice(0, 1);
+  return field instanceof PDFOptionList ? chosen.filter((x) => hasOption(field, x)) : chosen;
 }
 
 function hasOption(field: PDFDropdown | PDFOptionList, value: string): boolean {

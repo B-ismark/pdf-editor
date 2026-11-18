@@ -244,7 +244,8 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     pages are settled, naming only fields still in the file — one on a
     redacted or deleted page didn't stay anything.
   - **A value no option holds.** A list's `select` throws on one, so a list
-    drops it (`keptChoices`); a dropdown's `select` takes it by making the
+    drops it (`keptChoices`; a redacted page's picture still lists it, as the
+    preview does); a dropdown's `select` takes it by making the
     field editable, so it's drawn as the preview shows it and the editable
     flag put back. `/V` is written from the same kept values the look drew. A list's look draws *every* option, so all of them
     are checked, not just the chosen one. Signatures and push buttons are
@@ -291,9 +292,13 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   withoutForms)`), so the file's original answers aren't baked in, and then
   `drawRasterForm` paints the answers *as they are now* — a tick, a dot, the
   text (broken at `\r` or `\n` and wrapped to the box, at the preview's
-  `fieldFontSize`), a list with every option and the chosen ones marked —
+  `fieldFontSize`; at most the lines the box shows, found by halving, so a
+  huge unbroken value can't stall the export), a list with its options and
+  the chosen ones marked, scrolled to the first chosen as the preview is —
   before the redaction boxes go on, so a box over a field still covers it. A
   field pdf.js paints into the canvas itself even in forms mode (`painted`:
   read-only text, a widget locked with its contents) is left as the canvas
-  drew it; a locked one is read-only in the preview too. Clicking out of a field onto the page
+  drew it; a locked one is read-only in the preview too. (One with no look of
+  its own and no `/NeedAppearances` is painted by neither: blank, a known
+  limit.) Clicking out of a field onto the page
   blurs it, so Delete reaches the selected box rather than the field.
