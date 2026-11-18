@@ -88,8 +88,11 @@ async function installStubs(page: Page, opts: StubOpts): Promise<void> {
         return files.map((f) => handle(f.name, f.b64));
       };
     }
-    w.showSaveFilePicker = async () => {
+    const suggested: string[] = [];
+    w.__suggested = suggested;
+    w.showSaveFilePicker = async (opts?: { suggestedName?: string }) => {
       calls.save++;
+      suggested.push(opts?.suggestedName ?? "");
       if (!o.saveAs) throw abort();
       return handle(o.saveAs);
     };
@@ -557,5 +560,56 @@ test.describe("second review fixes", () => {
     await expect(page.locator(".doctab")).toHaveCount(1);
     await expect(page.locator(".doctab")).toContainText("sample.pdf");
     await expect(page.locator(".snackbar__msg").filter({ hasText: 'Couldn\'t read "typeset.pdf"' }).first()).toBeVisible();
+  });
+});
+
+test.describe("third review fixes", () => {
+  test("Save as onto its own password-opened file warns, as Ctrl+S does", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.locked)], saveAs: "locked.pdf" });
+    await openPicked(page, false);
+    const pw = page.getByRole("dialog", { name: "This PDF is password-protected" });
+    await pw.getByLabel("Password").fill(LOCKED_PASSWORD);
+    await pw.getByLabel("Password").press("Enter");
+    await page.waitForSelector(".page canvas", { timeout: 30_000 });
+    await addText(page, "Unlocked");
+    await page.getByRole("button", { name: "Export options" }).click();
+    await exportMenu(page).getByRole("menuitem", { name: /^Save as…/ }).click();
+    const warn = page.getByRole("alertdialog", { name: "Save without its password?" });
+    await expect(warn).toBeVisible();
+    await warn.getByRole("button", { name: "Go back" }).click();
+    expect(await writes(page)).toEqual([]);
+  });
+
+  test("Save as on a file already named -edited doesn't offer its own name", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [{ ...asStub(f.sample), name: "sample-edited.pdf" }] });
+    await openPicked(page);
+    await page.getByRole("button", { name: "Export options" }).click();
+    await exportMenu(page).getByRole("menuitem", { name: /^Save as…/ }).click();
+    await expect.poll(async () => (await calls(page)).save).toBe(1);
+    const suggested = await page.evaluate(() => (window as unknown as { __suggested: string[] }).__suggested);
+    expect(suggested).toEqual(["sample-edited copy.pdf"]);
+  });
+
+  test("a file already open, picked with another, is said to be open", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.sample)] });
+    await openPicked(page);
+    await page.evaluate(
+      ([a, b]) => {
+        const w = window as unknown as { showOpenFilePicker: () => Promise<unknown[]> };
+        const first = w.showOpenFilePicker;
+        w.showOpenFilePicker = async () => {
+          const [h] = (await first()) as { name: string }[];
+          const fromB64 = (s: string) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+          return [h, { kind: "file", name: a, getFile: async () => new File([fromB64(b)], a, { type: "application/pdf" }), isSameEntry: async (o: { name: string }) => o.name === a }];
+        };
+      },
+      [asStub(f.typeset).name, asStub(f.typeset).b64],
+    );
+    await page.keyboard.press("Control+o");
+    await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+    await expect(page.locator(".snackbar__msg").filter({ hasText: "sample.pdf is already open." }).first()).toBeVisible();
   });
 });

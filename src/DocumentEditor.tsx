@@ -34,7 +34,7 @@ import { fitCrop, isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUse
 import { boxCX, boxCY } from "./pdf/bbox";
 import { findUnsafeCovers, type CoverWarning } from "./pdf/redactionSafety";
 import { downloadBytes, downloadText } from "./download";
-import { canSaveAs, canShareFiles, mayWrite, pdfFile, pickSaveTarget, shareFile, writeTo, type FileHandle } from "./fileAccess";
+import { canSaveAs, canShareFiles, mayWrite, pdfFile, pickSaveTarget, sameFile, shareFile, writeTo, type FileHandle } from "./fileAccess";
 
 /** Where a finished file goes. */
 type Delivery =
@@ -2434,13 +2434,21 @@ export const DocumentEditor = memo(function DocumentEditor({
     if (!pdf) return;
     let target: FileHandle | null;
     try {
-      // "-edited" once: a file already saved as one isn't offered "-edited-edited".
-      target = await pickSaveTarget(fileName.replace(/\.pdf$/i, "").replace(/-edited$/i, "") + "-edited.pdf");
+      // "-edited" once. A file that already is one is offered "… copy" — not
+      // "-edited-edited", and not its own name: Save as makes a copy.
+      const base = fileName.replace(/\.pdf$/i, "");
+      target = await pickSaveTarget(/-edited$/i.test(base) ? `${base} copy.pdf` : `${base}-edited.pdf`);
     } catch {
       setMessage("Couldn't open the save dialog. Use Download instead.");
       return;
     }
     if (!target) return;
+    // Picked its own file: that's Save, and a file that opened with a password
+    // is warned about first, as Ctrl+S warns.
+    if (handle && handleLocked && (await sameFile(target, handle))) {
+      setUnlockWarn(true);
+      return;
+    }
     // Over a file another tab has open, the two would save over each other.
     const other = await openElsewhere(target, activeId);
     if (other) {
@@ -2448,7 +2456,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       return;
     }
     await deliver({ kind: "save-as", target });
-  }), [pdf, fileName, deliver, exclusive, openElsewhere, activeId]);
+  }), [pdf, fileName, handle, handleLocked, deliver, exclusive, openElsewhere, activeId]);
 
   /** Ctrl+S: back to its own file where there is one; else wherever the user
    * picks; else a download — never the browser's "save this web page". */

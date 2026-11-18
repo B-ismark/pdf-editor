@@ -502,13 +502,21 @@ export function App() {
       }
       // (Its own failures it reports itself; they aren't the picker's.)
       if (fresh.length > 0) await openFiles(fresh.map((p) => p.file), new Map(fresh.map((p) => [p.file, p.handle]))).catch(() => {});
-      else if (already && !busyRef.current) {
-        switchTo(already.id);
-        setMessage(`${already.fileName} is already open.`);
+      if (already) {
+        // Said whenever it's picked, not only alone: dropped without a word it
+        // looks like it failed to open.
+        if (fresh.length === 0 && !busyRef.current && !aModalIsOpen()) switchTo(already.id);
+        setMessage(
+          fresh.length === 0 && busyRef.current
+            ? "Finish what's open first, then open the file again."
+            : `${already.fileName} is already open.`,
+        );
       }
       // Said last, so the others opening doesn't talk over it.
       if (unreadable.length > 0) {
-        setStatus(liveTabs.current.activeId ? "error" : "idle");
+        // Something is open if anything was picked and opened — the tab list
+        // read here may be a render behind.
+        setStatus(liveTabs.current.activeId || fresh.length > 0 ? "error" : "idle");
         setMessage(
           `Couldn't read ${unreadable.map((n) => `"${n}"`).join(", ")}. ${unreadable.length > 1 ? "They" : "It"} may have been moved or be open in another app.`,
         );
