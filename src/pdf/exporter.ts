@@ -172,10 +172,28 @@ function drawWatermark(page: PDFPage, font: PDFFont, opts: WatermarkOptions, fra
  * if a value arrives from a restored session or a future call site. A rejected
  * scheme (`javascript:`, `data:`, `file:`, …) drops the annotation rather than
  * writing an active action into a document the user is about to share. */
-function addLinkAnnots(out: PDFDocument, page: PDFPage, links: LinkAnnot[], origin: { x: number; y: number }): void {
+function addLinkAnnots(
+  out: PDFDocument,
+  page: PDFPage,
+  links: LinkAnnot[],
+  origin: { x: number; y: number },
+  pageRef: (source: number) => PDFRef | undefined,
+): void {
   for (const l of links) {
-    const url = safeLinkUrl(l.url);
-    if (!url) continue;
+    // A link to a page names the page itself, so it lands there whatever moved
+    // around it; a page the plan deleted has nothing to land on, and the link
+    // goes rather than pointing at a page that isn't in the file. The ref may
+    // be one a raster replaces later: `retargetPageRefs` moves it over then.
+    let action: Record<string, unknown>;
+    if (l.page != null) {
+      const ref = pageRef(l.page);
+      if (!ref) continue;
+      action = { Dest: [ref, PDFName.of("Fit")] };
+    } else {
+      const url = safeLinkUrl(l.url);
+      if (!url) continue;
+      action = { A: { Type: "Action", S: "URI", URI: PDFString.of(url) } };
+    }
     const x = origin.x + l.x;
     const y = origin.y + l.y;
     const dict = out.context.obj({
@@ -183,8 +201,8 @@ function addLinkAnnots(out: PDFDocument, page: PDFPage, links: LinkAnnot[], orig
       Subtype: "Link",
       Rect: [x, y, x + l.width, y + l.height],
       Border: [0, 0, 0],
-      A: { Type: "Action", S: "URI", URI: PDFString.of(url) },
-    });
+      ...action,
+    } as never);
     page.node.addAnnot(out.context.register(dict));
   }
 }
@@ -567,7 +585,9 @@ export async function exportPdf(
     const applyPageLayers = (page: PDFPage, frame: ViewFrame, origin: { x: number; y: number }) => {
       if (pageNumbers) drawPageNumber(page, helv, String(pageNumbers.start + slot.pos), pageNumbers, frame);
       if (watermark && wmFont) drawWatermark(page, wmFont, watermark, frame, dropped);
-      addLinkAnnots(out, page, pageLinks, origin);
+      addLinkAnnots(out, page, pageLinks, origin, (source) =>
+        planned.has(source) ? finished[source]?.ref : undefined,
+      );
     };
     // What the reader will see of the page, in view space: the plan's crop, or
     // the whole view. Page numbers and the watermark are placed against it.

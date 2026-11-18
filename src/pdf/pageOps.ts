@@ -6,10 +6,11 @@ import {
   PDFDocument,
   PDFName,
   PDFObjectCopier,
+  PDFPage,
+  PDFPageLeaf,
   PDFRef,
   degrees,
   type PDFObject,
-  type PDFPage,
 } from "@cantoo/pdf-lib";
 import { sanitizeDocument } from "./sanitize";
 import { collectGarbage, cutDeletedPages } from "./structure";
@@ -47,12 +48,11 @@ function loadSource(bytes: ArrayBuffer): Promise<PDFDocument> {
  * each page's existing rotation. Handles reorder, delete (omit), merge
  * (multiple sources), and extract (a subset plan).
  *
- * Copies with one `copyPages` call per source. Each call has its own object
- * copier, and the copier is what notices that two pages share a font or an
- * image — so one call per page deep-copied every shared resource once *per
- * page* (a twelve-page file sharing one image came out with twelve). A page
- * the plan uses twice is fine in one call: the copier clones the page itself
- * each time it's asked, and only its resources are shared.
+ * Copies with one object copier per source: the copier is what notices that
+ * two pages share a font or an image, so a copier per page deep-copied every
+ * shared resource once *per page* (a twelve-page file sharing one image came
+ * out with twelve). Pages are copied by hand rather than with `copyPages` so
+ * that a link to a kept page reaches the copy in the tree (see below).
  */
 export async function buildFromPlan(
   plan: PlanEntry[],
@@ -84,8 +84,36 @@ export async function buildFromPlan(
 
   const pages = new Array<PDFPage>(plan.length);
   for (const [key, slots] of slotsBySource) {
-    const copied = await out.copyPages(docs.get(key)!, slots.map((s) => plan[s].index));
-    slots.forEach((slot, i) => (pages[slot] = copied[i]));
+    const src = docs.get(key)!;
+    await src.flush();
+    const copier = PDFObjectCopier.for(src.context, out.context);
+    // What the copier has already copied, by source object. Each kept page's
+    // own ref is entered first, so a link (or any reference) to it — from a
+    // page copied before or after — lands on the page in the new tree. A
+    // reference to a page the plan left out still copies that page on its own,
+    // outside the tree; that one is cut below.
+    const seen = (copier as unknown as { traversedObjects: Map<PDFObject, PDFObject> }).traversedObjects;
+    const claimed = new Map<number, PDFRef>();
+    for (const slot of slots) {
+      const index = plan[slot].index;
+      if (claimed.has(index)) continue;
+      const ref = out.context.nextRef();
+      claimed.set(index, ref);
+      seen.set(src.getPage(index).ref, ref);
+    }
+    // One copier per source, so what pages share (a font, an image) is copied
+    // once. A page the plan uses twice is cloned afresh each time; references
+    // to it go to its first use.
+    for (const slot of slots) {
+      const index = plan[slot].index;
+      const leaf = copier.copy(src.getPage(index).node) as PDFPageLeaf;
+      let ref = claimed.get(index);
+      if (ref) {
+        out.context.assign(ref, leaf);
+        claimed.delete(index);
+      } else ref = out.context.register(leaf);
+      pages[slot] = PDFPage.of(leaf, ref, out);
+    }
   }
 
   plan.forEach((entry, slot) => {
@@ -97,9 +125,9 @@ export async function buildFromPlan(
     out.addPage(page);
   });
 
-  // The copier follows every reference on a page, so a link to a page the plan
-  // left out copies that page too (contents and all), reachable through the
-  // link. Cut it like a deleted page: the link goes, and nothing reaches it.
+  // Anything still a `/Page` outside the tree is a page the plan left out,
+  // copied because something pointed at it: it's cut like a deleted page —
+  // the link goes, and nothing reaches it.
   const inTree = new Set(out.getPages().map((p) => p.ref));
   const stray = new Set<PDFRef>();
   for (const [ref, obj] of out.context.enumerateIndirectObjects()) {

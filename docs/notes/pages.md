@@ -80,6 +80,35 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
   *changes*. Before, any rebuild of the match list (a sidebar action, or just
   text arriving for newly rendered pages) threw the view back to it.
 
+## Outline and links to a page
+
+- **The outline is the file's own, read with pdf.js** (`pdf/outline.ts`,
+  `readOutline`) from the parse the pages already use. pdf.js reports a
+  bookmark's `/Dest`, its GoTo action and a named destination alike as `dest`;
+  each is resolved to a *source* page once, on load. Capped at 2000 entries and
+  32 levels: a crafted file can nest or loop without end. A bookmark that opens
+  nothing in this document (a web address, a script, a dangling name) has
+  `page: null`.
+- **Shown against the document as arranged.** The sidebar's Pages | Outline
+  switch appears only when there are bookmarks. A row goes to its page's
+  *current* position and shows that number; one whose page was deleted (or that
+  opens nothing) stays in the tree, dimmed, `aria-disabled`, and goes nowhere —
+  the structure still reads. Export already keeps the outline and retargets or
+  prunes it (below); the sidebar doesn't edit it.
+- **Both panels stay mounted**, hidden by the attribute (with a CSS rule, since
+  the list's own `display: flex` beats `[hidden]`): the page list keeps its
+  touch listener and roving focus, the outline the sections you opened. The
+  view (Pages or Outline) is the editor's state, so it survives closing the
+  sidebar.
+- **A link to a page** (`LinkAnnot.page`) names the target's *source* index, so
+  it follows the page through moves; the Inspector and the box's tip speak the
+  shown position ("Page 3"). The address is kept while it goes to a page, so
+  switching back finds it. The exporter writes `/Dest [page /Fit]` to the
+  target's `finished` page — a page that a raster replaces later is moved over
+  by `retargetPageRefs` like every other reference to it — and **leaves out a
+  link whose page was deleted**; the Inspector says so first, in red, and the
+  box shows as empty.
+
 ## Export
 
 - `exportPdf` takes `pages`. It draws on every kept source page in user space,
@@ -109,9 +138,18 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
   Download. Page numbers and the watermark are not drawn in by a merge; they
   carry over to the new document as live settings, so they number the merged
   file in its new order.
-- **`buildFromPlan` cuts strays too.** `copyPages` follows a link annotation's
-  `/Dest` into a page that isn't in the plan and copies it along, outside the
-  page tree. Any `/Type /Page` not in the tree is cut and garbage-collected.
+- **`buildFromPlan` points links at the kept page, and cuts strays.**
+  `copyPages` follows a link's `/Dest` (or any reference) into another page and
+  copies that page a *second* time, outside the page tree — for a page the plan
+  kept as much as for one it left out. Cutting every such copy deleted every
+  link between kept pages on Merge, Extract and Split. So pages are copied by
+  hand with one `PDFObjectCopier` per source, whose map of what it has copied
+  is seeded first with each kept page's source ref → its new ref: a reference
+  to a kept page, from any page, lands on the page in the tree. (Matching
+  copies up by their `/Contents` was tried and is wrong: two pages may share a
+  content stream, and a blank page has none.) A page used twice takes links to
+  its first use. Any `/Page` still outside the tree is one the plan left out:
+  it's cut, link and all, and garbage-collected.
 - **Page labels follow their pages.** When the plan isn't the identity,
   `remapPageLabels` (`structure.ts`) rewrites `/PageLabels` one range per kept
   page, with the start number advanced to where that page sat in its range.

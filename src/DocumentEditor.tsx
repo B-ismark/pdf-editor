@@ -45,8 +45,6 @@ type Delivery =
   | { kind: "save"; target: FileHandle }
   | { kind: "save-as"; target: FileHandle }
   | { kind: "share" };
-/** Apple keyboards: the document shortcuts are ⌘, never Ctrl. */
-const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
 const DELIVERY_VERB: Record<Delivery["kind"], string> = { download: "Download", save: "Save", "save-as": "Save", share: "Share" };
 import { onStrayBack, pushHistory, unwindHistory, type HistoryEntry } from "./hooks/useModal";
@@ -81,6 +79,7 @@ import {
 import { DEFAULT_STYLE, isFragmentModified, resolveFragmentStyle } from "./pdf/style";
 import { keepOnPage, onPage, placeAt, placedSize, rotatedExtent } from "./pdf/placement";
 import { lazyPart, staleBuildMessage } from "./staleBuild";
+import { readOutline, type OutlineEntry } from "./pdf/outline";
 
 // On-demand modals — each pulls in heavy code (pdf-lib, canvas rendering) that
 // isn't needed until the user opens it, so they're code-split out of the
@@ -109,6 +108,7 @@ import type {
   TextStyle,
   Tool,
 } from "./pdf/types";
+import { IS_MAC } from "./platform";
 
 type NavKey = Tool | "sign";
 
@@ -423,6 +423,21 @@ export const DocumentEditor = memo(function DocumentEditor({
   const plan = useMemo(() => (pdf ? resolvePlan(planned, pdf.pages.length) : []), [pdf, planned]);
   const shown = useMemo(() => (pdf ? shownPages(pdf.pages, plan) : []), [pdf, plan]);
   const shownBySource = useMemo(() => new Map(shown.map((p) => [p.pageIndex, p])), [shown]);
+  // Source page → its position as shown, for anything that names a page by
+  // where the reader finds it (a link to a page, a bookmark).
+  const posBySource = useMemo(() => new Map(plan.map((p, i) => [p.index, i])), [plan]);
+  // The document's own bookmarks, read once from the parse the pages use.
+  const pdfBytes = pdf?.bytes;
+  const [outline, setOutline] = useState<OutlineEntry[]>([]);
+  const [navView, setNavView] = useState<"pages" | "outline">("pages");
+  useEffect(() => {
+    if (!pdfBytes) return;
+    let live = true;
+    void readOutline(pdfBytes).then((o) => live && setOutline(o));
+    return () => {
+      live = false;
+    };
+  }, [pdfBytes]);
   // What the Inspector says about the document with nothing selected.
   const pageFacts = useMemo(
     () =>
@@ -1728,6 +1743,17 @@ export const DocumentEditor = memo(function DocumentEditor({
   const selectedLink =
     selection?.kind === "link" ? links.find((l) => l.id === selection.id) ?? null : null;
 
+  // A link to a page names its source page; the panel speaks positions.
+  const onChangeLinkPage = useCallback(
+    (pos: number | undefined) => {
+      if (selection?.kind !== "link") return;
+      const page = pos == null ? undefined : plan[pos]?.index;
+      if (pos != null && page == null) return;
+      onChangeLink(selection.id, { page }, `lpage-${selection.id}`);
+    },
+    [selection, onChangeLink, plan],
+  );
+
   const onChangeLinkUrl = useCallback(
     (url: string) => {
       if (selection?.kind !== "link") return;
@@ -2935,6 +2961,9 @@ export const DocumentEditor = memo(function DocumentEditor({
       annotation={selectedAnnotation}
       stampSelected={selection?.kind === "stamp"}
       linkUrl={selectedLink?.url ?? null}
+      linkPage={selectedLink?.page == null ? undefined : posBySource.get(selectedLink.page) ?? null}
+      pageCount={plan.length}
+      onChangeLinkPage={onChangeLinkPage}
       onChangeStyle={onChangeStyle}
       onChangeRedactionColor={onChangeRedactionColor}
       onChangeLinkUrl={onChangeLinkUrl}
@@ -3075,6 +3104,9 @@ export const DocumentEditor = memo(function DocumentEditor({
                 setOrganizeOpen("grid");
               }}
               onClose={compact ? () => setNavOpen(false) : undefined}
+              outline={outline}
+              view={navView}
+              onView={setNavView}
             />
           </>
         )}
@@ -3120,6 +3152,7 @@ export const DocumentEditor = memo(function DocumentEditor({
                 annotations={pageItems(annotationsByPage, page.pageIndex)}
                 stamps={pageItems(stampsByPage, page.pageIndex)}
                 links={pageItems(linksByPage, page.pageIndex)}
+                pagePos={posBySource}
                 formValues={formValues}
                 pageNumbers={pageNumbers}
                 watermark={watermark}

@@ -531,6 +531,76 @@ body {
   backdrop-filter: blur(2px);
 }
 .pagenav__item--on .pagenav__num { background: var(--primary); color: var(--on-primary); }
+/* Pages | Outline: a row of its own under the head, so the narrow rail keeps
+   its count and grid button. Shown only when the document has bookmarks. */
+.pagenav__views { flex: none; margin: 8px 8px 0; }
+/* The list's own `display: flex` would beat the attribute. */
+.pagenav__list[hidden], .pagenav__outline[hidden] { display: none; }
+.segmented--compact .segmented__btn { min-height: 32px; font-size: 0.8125rem; }
+@media (pointer: coarse) {
+  .segmented--compact .segmented__btn { min-height: 44px; }
+}
+.pagenav__outline { flex: 1; overflow-y: auto; padding: 8px 4px; overscroll-behavior: contain; }
+.outline { display: flex; flex-direction: column; gap: 1px; }
+.outline__row {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 36px;
+  padding-inline-end: 8px;
+  border-radius: var(--radius-sm);
+  color: var(--on-surface);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+@media (pointer: coarse) {
+  .outline__row { min-height: 44px; }
+}
+.outline__row:hover { background: var(--surface-container-high); }
+.outline__row:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+/* Shown, so the document's structure still reads, but nothing to follow. */
+.outline__row--dead { color: var(--on-surface-variant); cursor: default; }
+.outline__row--dead:hover { background: transparent; }
+.outline__twisty {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-full);
+  color: var(--on-surface-variant);
+  transition: transform var(--dur-short4) var(--ease-standard);
+}
+.outline__twisty--has { cursor: pointer; }
+.outline__twisty--has:hover { background: var(--surface-container-highest); }
+/* A disclosure caret, drawn rather than borrowed: the chevron icon already
+   means "go forward" here, and an icon name means one thing. */
+.outline__twisty--has::before {
+  content: "";
+  border-block: 4.5px solid transparent;
+  border-inline-start: 6px solid currentColor;
+}
+.outline__twisty--open { transform: rotate(90deg); }
+/* A finger needs room: a near miss beside a small caret went to the page and
+   closed the sidebar. */
+@media (pointer: coarse) {
+  .outline__twisty { width: 40px; height: 40px; }
+}
+.outline__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+.outline__page {
+  flex: none;
+  color: var(--on-surface-variant);
+  font-variant-numeric: tabular-nums;
+}
 .pagenav__scrim { display: none; }
 
 @media (max-width: 599px) {
@@ -2825,3 +2895,7 @@ body {
   .print-page { display: block; break-after: page; }
   .print-page:last-child { break-after: auto; }
 }
+
+/* A link's page: "[ 3 ] of 12". */
+.linkpage { display: flex; align-items: center; gap: 8px; color: var(--on-surface-variant); }
+.linkpage .numinput { width: 72px; }

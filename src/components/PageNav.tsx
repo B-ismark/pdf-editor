@@ -11,6 +11,9 @@ import {
 import { scrollToPage, useActivePage } from "../hooks/useActivePage";
 import { Thumbnail } from "./Thumbnail";
 import { Icon } from "./Icon";
+import { OutlineTree } from "./OutlineTree";
+import { segmentKey } from "../segmentKey";
+import type { OutlineEntry } from "../pdf/outline";
 import { plural } from "../plural";
 import type { PageRef } from "../pdf/types";
 import { dropPages, movePages, turnPages } from "../pdf/pagePlan";
@@ -26,6 +29,13 @@ interface Props {
   /** The phone overlay: a tap goes to the page and closes the sidebar, and
    * pages are picked by pressing and holding. Omitted on the desktop rail. */
   onClose?: () => void;
+  /** The document's own bookmarks. When there are any, the sidebar can show
+   * them instead of the pages. */
+  outline?: OutlineEntry[];
+  /** Which of the two the sidebar shows; kept by the editor so it survives
+   * closing and reopening the sidebar. */
+  view?: "pages" | "outline";
+  onView?: (view: "pages" | "outline") => void;
 }
 
 /** How long a finger has to rest on a page before it picks the page up. */
@@ -48,7 +58,9 @@ const HOLD_MS = 400;
  * Merging in other files and extracting pages stay in the grid view
  * (Organise): they make a different file rather than change this one.
  */
-export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
+export function PageNav({ bytes, pages, onArrange, onGrid, onClose, outline = [], view = "pages", onView }: Props) {
+  const hasOutline = outline.length > 0;
+  const showOutline = hasOutline && view === "outline";
   const pageCount = pages.length;
   // Keyed on the list itself: a reorder keeps the count but moves every position.
   const active = useActivePage(pageCount, pages);
@@ -417,8 +429,56 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
           )}
         </span>
       </div>
+      {hasOutline && (
+        <div
+          className="segmented segmented--compact pagenav__views"
+          role="tablist"
+          aria-label="Sidebar"
+          onKeyDown={(e) => {
+            const views = ["pages", "outline"] as const;
+            const to = segmentKey(e.key, views.indexOf(view), 2);
+            if (to == null) return;
+            // Not also a nudge of whatever is selected on the canvas.
+            e.preventDefault();
+            e.stopPropagation();
+            onView?.(views[to]);
+            const tabs = e.currentTarget.querySelectorAll<HTMLElement>("[role=tab]");
+            tabs[to]?.focus();
+          }}
+        >
+          {(["pages", "outline"] as const).map((v) => (
+            <button
+              key={v}
+              role="tab"
+              tabIndex={view === v ? 0 : -1}
+              id={`pagenav-tab-${v}`}
+              aria-selected={view === v}
+              aria-controls={v === "pages" ? "pagenav-pages" : "pagenav-outline"}
+              className={`segmented__btn${view === v ? " segmented__btn--on" : ""}`}
+              onClick={() => onView?.(v)}
+            >
+              {v === "pages" ? "Pages" : "Outline"}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* Kept mounted while the pages show, so the sections opened stay open. */}
+      {hasOutline && (
+        <div id="pagenav-outline" className="pagenav__outline" role="tabpanel" aria-labelledby="pagenav-tab-outline" hidden={!showOutline}>
+          <OutlineTree
+            entries={outline}
+            posOf={posOf}
+            onGo={(pos) => {
+              jump(pos);
+              onClose?.();
+            }}
+          />
+        </div>
+      )}
       <div
         ref={listRef}
+        id="pagenav-pages"
+        hidden={showOutline}
         className={`pagenav__list${drag ? " pagenav__list--dragging" : ""}${drag?.gap === pageCount ? " pagenav__list--drop-end" : ""}`}
         role="listbox"
         aria-label="Pages"
@@ -474,7 +534,7 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
       <span className="sr-only" aria-live="polite">
         {n > 0 ? `${plural(n, "page")} selected` : ""}
       </span>
-      {n > 0 && (
+      {n > 0 && !showOutline && (
         <div className="pagenav__bar" role="toolbar" aria-label="Selected pages">
           {/* The rail is narrow: a tick and the number, read out in full. */}
           <span className="pagenav__picked label-large" aria-hidden="true">

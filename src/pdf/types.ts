@@ -289,8 +289,12 @@ export interface LinkAnnot {
   y: number;
   width: number;
   height: number;
-  /** Target URL (http/https/mailto). */
+  /** Target URL (http/https/mailto). Kept while the link goes to a page, so
+   * switching back finds it again. */
   url: string;
+  /** When set, the link goes to this page of the document instead: its
+   * *source* index, so it follows the page through moves and turns. */
+  page?: number;
 }
 
 /** Where a page number sits on the page. */

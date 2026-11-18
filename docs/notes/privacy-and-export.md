@@ -18,7 +18,7 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   definition — don't reach for `'unsafe-*'`.
 - **Anything that reaches the output file is validated at the exporter**, not
   only in the UI: link URLs go through `safeLinkUrl` (`pdf/url.ts`, an
-  allow-list) and copied annotation actions through `sanitize.ts` (also an
+  allow-list; a link to a page writes a plain `/Dest` and no action at all) and copied annotation actions through `sanitize.ts` (also an
   allow-list, `/Next` chains included). The exporter is the single choke point,
   so a value from a restored session can't bypass a UI check.
 - **The redaction raster picks its own codec, and must never grow a page.**

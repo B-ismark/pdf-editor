@@ -1,8 +1,11 @@
-import type { ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
 import { isRejectedUrl } from "../pdf/url";
+import { segmentKey } from "../segmentKey";
 import type { Annotation, FontKey, Selection, TextStyle } from "../pdf/types";
+import { IS_MAC } from "../platform";
 
 interface Props {
   selection: Selection;
@@ -17,6 +20,15 @@ interface Props {
   stampSelected?: boolean;
   /** Current URL of the selected link (when selection.kind === "link"). */
   linkUrl?: string | null;
+  /** Where the selected link goes when it goes to a page: its position as
+   * shown (0-based), or null when that page was deleted. Undefined when the
+   * link goes to a web address. */
+  linkPage?: number | null;
+  /** Pages in the document as shown, for the link's page field. */
+  pageCount?: number;
+  /** Send the link to a page (its position as shown), or back to its web
+   * address (undefined). */
+  onChangeLinkPage?: (pos: number | undefined) => void;
   onChangeStyle: (patch: Partial<TextStyle>) => void;
   onChangeRedactionColor: (color: string) => void;
   onChangeLinkUrl?: (url: string) => void;
@@ -63,6 +75,9 @@ export function PropertiesPanel({
   annotation,
   stampSelected,
   linkUrl,
+  linkPage,
+  pageCount = 1,
+  onChangeLinkPage,
   onChangeStyle,
   onChangeRedactionColor,
   onChangeLinkUrl,
@@ -129,6 +144,51 @@ export function PropertiesPanel({
       {selection?.kind === "link" && (
         <div className="props__section">
           <div className="field">
+            <span className="field__label label-medium" id="link-target">
+              Goes to
+            </span>
+            <div
+              className="segmented segmented--compact"
+              role="radiogroup"
+              aria-labelledby="link-target"
+              // A radio group is one tab stop; the arrows move the choice.
+              onKeyDown={(e) => {
+                const at = linkPage !== undefined ? 1 : 0;
+                const to = segmentKey(e.key, at, 2);
+                if (to == null) return;
+                // Not also a nudge of the selected link on the canvas.
+                e.preventDefault();
+                e.stopPropagation();
+                // Home/End on the choice already made changes nothing — not
+                // even a deleted page's link, which stays flagged.
+                if (to === at) return;
+                onChangeLinkPage?.(to === 1 ? (linkPage ?? 0) : undefined);
+                const btns = e.currentTarget.querySelectorAll<HTMLElement>("[role=radio]");
+                requestAnimationFrame(() => btns[to]?.focus());
+              }}
+            >
+              {(["url", "page"] as const).map((k) => {
+                const on = (linkPage !== undefined) === (k === "page");
+                return (
+                  <button
+                    key={k}
+                    role="radio"
+                    aria-checked={on}
+                    tabIndex={on ? 0 : -1}
+                    className={`segmented__btn${on ? " segmented__btn--on" : ""}`}
+                    onClick={() => !on && onChangeLinkPage?.(k === "page" ? 0 : undefined)}
+                  >
+                    {k === "url" ? "Web address" : "Page"}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          {linkPage !== undefined ? (
+            <LinkPageField key={selection.id} pos={linkPage} count={pageCount} onChange={(p) => onChangeLinkPage?.(p)} />
+          ) : (
+          <>
+          <div className="field">
             <label className="field__label label-medium" htmlFor="link-url">
               Link URL
             </label>
@@ -157,6 +217,8 @@ export function PropertiesPanel({
               ? "That address can't be used in a PDF link. Use a web (https://), email (mailto:) or phone (tel:) address."
               : "Draw a box over anything to make it clickable in the exported PDF."}
           </p>
+          </>
+          )}
           <button className="btn btn--danger" onClick={onDelete}>
             <Icon name="delete" size={16} /> Delete
           </button>
@@ -323,5 +385,84 @@ export function PropertiesPanel({
         </div>
       )}
     </div>
+  );
+}
+
+/** The page a link goes to, by its number as the reader sees it. A draft while
+ * typing, taken on Enter or on leaving the field: "1" on the way to "12" (or
+ * to an out-of-range number) mustn't move the link anywhere. */
+function LinkPageField({ pos, count, onChange }: { pos: number | null; count: number; onChange: (pos: number) => void }) {
+  const shown = pos == null ? "" : String(pos + 1);
+  const [draft, setDraft] = useState(shown);
+  useEffect(() => setDraft(shown), [shown]);
+  const commit = (text: string) => {
+    const n = Number(text);
+    if (text !== shown && Number.isInteger(n) && n >= 1 && n <= count) onChange(n - 1);
+  };
+  // The field can go without a blur — a click on the page deselects the link
+  // before focus moves, and React sends no blur to an input it removes. What
+  // was typed is taken then too. (Keyed by the link, so it's that link's.)
+  const latest = useRef(() => {});
+  latest.current = () => commit(draft);
+  useEffect(() => () => latest.current(), []);
+  const out = draft !== "" && !(Number.isInteger(Number(draft)) && Number(draft) >= 1 && Number(draft) <= count);
+  const gone = pos == null;
+  return (
+    <>
+      <div className="field">
+        <label className="field__label label-medium" htmlFor="link-page">
+          Page
+        </label>
+        <span className="linkpage">
+          <input
+            id="link-page"
+            className="numinput"
+            inputMode="numeric"
+            value={draft}
+            aria-invalid={out || gone || undefined}
+            aria-describedby="link-page-note"
+            onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit(draft);
+              else if (e.key === "Escape") setDraft(shown);
+              else {
+                const key = e.key.toLowerCase();
+                const mod = e.ctrlKey || e.metaKey;
+                // Ctrl/⌘+S and +P (as the editor reads them) act on the file
+                // with what was typed: taken now, before they run. Not on
+                // Ctrl alone or the field's own shortcuts (select all,
+                // paste…) — "1" on the way to "12" mustn't move the link, and
+                // Escape must still go back.
+                if ((IS_MAC ? e.metaKey && !e.ctrlKey : mod) && (key === "s" || key === "p") && !e.shiftKey && !e.altKey)
+                  flushSync(() => commit(draft));
+                // Undo/redo step through what was taken; what wasn't is
+                // dropped first, so the field going away can't take it after.
+                else if (mod && (key === "z" || key === "y")) {
+                  latest.current = () => {};
+                  setDraft(shown);
+                }
+              }
+            }}
+            onBlur={() => {
+              commit(draft);
+              // A number that didn't take goes back to the link's page.
+              if (out || draft === "") setDraft(shown);
+            }}
+          />
+          <span className="body-medium">of {count}</span>
+        </span>
+      </div>
+      <p
+        id="link-page-note"
+        className={`props__empty body-small${out || gone ? " props__warn" : ""}`}
+        role={out || gone ? "alert" : undefined}
+      >
+        {gone
+          ? "The page this link went to was deleted, so the link is left out of the exported PDF. Pick another page."
+          : out
+            ? `Pick a page from 1 to ${count}.`
+            : `Clicking the box opens page ${pos + 1} in the exported PDF. It follows the page if you move it.`}
+      </p>
+    </>
   );
 }
