@@ -2724,3 +2724,12 @@ body {
   .picturehint { top: 12px; border-radius: var(--radius-lg); flex-wrap: wrap; padding: 10px 8px 8px 14px; }
   .picturehint__text { flex: 1 1 60%; }
 }
+
+/* ---- Split into files (Organise) ---- */
+.split { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.split__row { display: flex; align-items: center; gap: 8px; min-height: 44px; }
+.split__row--off { color: var(--on-surface-variant); opacity: 0.6; }
+.split__size { width: 5.5em; }
+.split__hint { color: var(--on-surface-variant); margin: -4px 0 0 28px; }
+.split__summary { color: var(--on-surface-variant); margin-top: 8px; }
+.organize__at { color: var(--on-surface); font-weight: 500; }

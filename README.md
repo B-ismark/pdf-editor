@@ -52,7 +52,17 @@ and is **mobile- and tablet-first**:
   redactable. Runs entirely on-device: the engine and the language model are
   served from this app's own origin, never a CDN.
 - **Organize pages** — a thumbnail view to reorder, rotate, and delete pages,
-  merge in another PDF, or extract selected pages to a new file.
+  merge in another PDF, or extract selected pages to a new file. New pages —
+  another PDF's, pictures, or a blank page sized like its neighbour — go in
+  after the page you've picked, or at the end.
+- **Split into files** — cut the document into several PDFs, every N pages or
+  before each page you pick, downloaded together as one ZIP (Export menu, or
+  Split in Organise). The parts are made from the document as you see it, so
+  redactions stay redacted.
+- **Pictures to PDF** — open or drop JPEG and PNG pictures and they become a
+  PDF, a page each, in the order picked. Photos stand the right way up, and
+  what the camera recorded (location, device, time, comments) is left out of
+  the file.
 - **Finishing touches** — add page numbers, stamp a diagonal watermark, or
   export every page as a PNG image.
 - **Several PDFs at once** — open more files (pick several, drop them on the
@@ -270,6 +280,10 @@ A pragmatic, client-side editor — worth knowing where the seams are:
 - **Scanned PDFs have no text layer** until you run **OCR — recognise text**
   from the overflow menu, which adds one on-device (see below). Recognition is
   good, not perfect: check anything you intend to redact.
+- **Pictures become pages at screen size** (96 per inch), never longer than an
+  A4 page's long side. A JPEG goes in as it is, with no loss; a PNG is
+  re-compressed without loss. Other picture types (HEIC, WebP, GIF) aren't read
+  yet.
 - **Page numbers / watermark / organize** rebuild the document, so they bake in
   (and reset) the current text edits — do them as a finishing step.
 - **Password-protected PDFs open, and download without a password unless you

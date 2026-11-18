@@ -116,6 +116,51 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
   `remapPageLabels` (`structure.ts`) rewrites `/PageLabels` one range per kept
   page, with the start number advanced to where that page sat in its range.
 
+## Inserting and splitting (Organise)
+
+- **New pages go after the last picked page, or at the end** (`insertAt` in
+  `Organize.tsx`). What was inserted is then picked, so a second insert
+  follows the first and the user sees where things landed. The hint line says
+  where the next insert goes.
+- **Everything inserted is a source of its own**: another PDF, a run of
+  pictures (one `imagesToPdf` document per run of consecutive pictures in the
+  pick), or a blank page (`blankPage`, sized by `shownPageSize` like the page
+  before the insert point, as shown — so beside a turned page it's the turned
+  shape, with no `/Rotate` of its own). So inserting makes the plan "not own
+  pages only" and Apply **rebuilds** the document, as a merge does (with the
+  same confirm when there are edits). A blank page doesn't yet join the live,
+  undoable plan: `PageRef` only names source pages.
+- **Split** (`SplitDialog`) cuts the plan as Organise shows it, unapplied
+  changes and inserts included, as Extract does: every N pages, or a new part
+  at each picked page. It bakes this document once (`mainAsShown(plan, true)`,
+  page numbers and watermark drawn in) and builds each part from the baked
+  entries — never from the original bytes, which would hand back redacted
+  text. The parts go out as one stored ZIP, named `<file>-pages-<a>-<b>.pdf`.
+- **Split from the Export menu** opens Organise with `startWithSplit`; leaving
+  the dialog (Cancel or after the download) closes Organise too, back to the
+  page. Opened from inside Organise, it returns to the grid.
+
+## Pictures to PDF
+
+- `openFiles` (App) sniffs each pick's first bytes (`sniffImage`): pictures
+  picked together become **one** PDF in pick order (`openImages`), PDFs open
+  in tabs of their own. The new document opens with `baked: 1` — it exists
+  nowhere else, so it is unsaved work (dot, close asks, autosave keeps it).
+- `cleanJpeg` drops every APPn segment but APP0 (JFIF) and APP14 (Adobe — a
+  CMYK JPEG reads inverted without it), plus comments, and copies the scan
+  data untouched: no re-encode, no loss. It reads the EXIF orientation on the
+  way through; the page then draws the picture upright with `orientMatrix`
+  (all eight orientations, mirrors included), and swaps the page's sides for
+  5–8. Stripping the tag is also what keeps a viewer that honours EXIF from
+  turning it twice.
+- PNGs are decoded and re-deflated by pdf-lib: pixels only, no text chunks.
+- Page size: 96 per inch, capped so the long side is at most 842 pt
+  (`pageSizeFor`). The document is created with `updateMetadata: false`: no
+  producer, no dates.
+- pdf-lib stays off the render path: `images.ts` (sniffing, the JPEG pass,
+  the maths) has no pdf-lib import; `imagesToPdf.ts` does and is imported
+  lazily by App, statically only by the already-lazy Organise.
+
 ## Editing on a turned page
 
 - Align, distribute, paste and duplicate work in the page *as shown*:

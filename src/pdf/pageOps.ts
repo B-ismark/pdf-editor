@@ -94,3 +94,17 @@ export async function pageCount(bytes: ArrayBuffer): Promise<number> {
   const doc = await loadSource(bytes);
   return doc.getPageCount();
 }
+
+/** A page's size as it shows — its crop box, turned by its own `/Rotate` plus
+ * `extra` — for a blank page inserted beside it to match. */
+export async function shownPageSize(
+  bytes: ArrayBuffer,
+  index: number,
+  extra: number,
+): Promise<{ width: number; height: number }> {
+  const doc = await loadSource(bytes);
+  const page = doc.getPage(Math.min(index, doc.getPageCount() - 1));
+  const { width, height } = page.getCropBox();
+  const turn = (((page.getRotation().angle + extra) % 360) + 360) % 360;
+  return turn % 180 === 0 ? { width, height } : { width: height, height: width };
+}

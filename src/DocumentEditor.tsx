@@ -461,7 +461,8 @@ export const DocumentEditor = memo(function DocumentEditor({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [autoFocusId, setAutoFocusId] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [organizeOpen, setOrganizeOpen] = useState(false);
+  // Organise opens as its grid, or straight into Split from the Export menu.
+  const [organizeOpen, setOrganizeOpen] = useState<false | "grid" | "split">(false);
   const [coverWarn, setCoverWarn] = useState<CoverWarning | null>(null);
   const [protectOpen, setProtectOpen] = useState(false);
   /** The password for the download being made, held only until it's made
@@ -2376,7 +2377,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     { id: "zoom-out", group: "view", label: "Zoom out", icon: "remove", keywords: "smaller", run: vp.zoomOut },
     { id: "zoom-fit", group: "view", label: "Fit to width", icon: "fit_width", keywords: "zoom reset 100", run: vp.resetZoom },
 
-    { id: "organize", group: "organise", label: "Organise pages", icon: "organize", keywords: "reorder rotate merge split extract", opens: "dialog", run: () => { setSelection(null); setOrganizeOpen(true); } },
+    { id: "organize", group: "organise", label: "Organise pages", icon: "organize", keywords: "reorder rotate merge split extract", opens: "dialog", run: () => { setSelection(null); setOrganizeOpen("grid"); } },
     { id: "image", group: "organise", label: "Add image", icon: "image", keywords: "picture photo stamp", opens: "dialog", run: () => imageInputRef.current?.click() },
     { id: "ocr", group: "text", label: "Recognise text (OCR)", icon: "scan_text", keywords: "scan searchable image ocr", run: () => void runOcr() },
     { id: "redact-patterns", group: "text", label: "Redact patterns", icon: "redact_patterns", keywords: "find search email phone card iban ssn date regex personal information pii privacy", opens: "dialog", run: openPatterns },
@@ -2388,6 +2389,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     // Making a file can't start while one is being made.
     { id: "download", group: "export", label: "Download PDF", icon: "download", keywords: "save export", disabled: busy, run: () => void download() },
     { id: "protect", group: "export", label: "Download with password", icon: "protect", keywords: "encrypt password protect lock secure aes", opens: "dialog", disabled: busy, run: () => { setSelection(null); setProtectOpen(true); } },
+    { id: "split", group: "export", label: "Split into files", icon: "split_pdf", keywords: "split cut separate divide parts pages zip", opens: "dialog", disabled: busy || shown.length < 2, run: () => { setSelection(null); setOrganizeOpen("split"); } },
     { id: "compress", group: "export", label: "Compress PDF", icon: "compress", keywords: "shrink reduce size optimise", opens: "dialog", disabled: busy, run: openCompress },
     { id: "sign-cert", group: "export", label: "Sign with certificate", icon: "certificate", keywords: "digital signature pades certificate p12 sign", opens: "dialog", disabled: busy, run: () => { setSelection(null); setSignCertOpen(true); } },
     { id: "eximg", group: "export", label: "Export as images", icon: "images", keywords: "png zip export", disabled: busy, run: () => void exportImages() },
@@ -2401,7 +2403,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     { id: "autosave", group: "settings", label: "Save session on this device", icon: "save_local", keywords: "autosave restore remember", checked: autosaveOn, run: onToggleAutosave },
     { id: "lossless", group: "settings", label: "Lossless redacted pages", icon: "lossless", keywords: "redaction quality bit-exact png export setting", checked: losslessRaster, detail: "Redacted pages export bit-exact, at several times the file size", run: () => setLosslessRaster((v) => !v) },
 
-    { id: "open", group: "file", label: "Open another PDF", icon: "note_add", shortcut: "Ctrl+O", keywords: "new tab file", run: onOpenAnother },
+    { id: "open", group: "file", label: "Open another PDF", icon: "note_add", shortcut: "Ctrl+O", keywords: "new tab file image picture photo jpg jpeg png", run: onOpenAnother },
     { id: "close", group: "file", label: "Close document", icon: "close", keywords: "home start exit leave", run: goHome },
     { id: "palette", group: "file", label: "Search commands", icon: "command", shortcut: "Ctrl+K", keywords: "palette", opens: "dialog", hidden: cmdOpen, run: () => setCmdOpen(true) },
 
@@ -2761,7 +2763,7 @@ export const DocumentEditor = memo(function DocumentEditor({
               onArrange={arrangePages}
               onGrid={() => {
                 setSelection(null);
-                setOrganizeOpen(true);
+                setOrganizeOpen("grid");
               }}
               onClose={compact ? () => setNavOpen(false) : undefined}
             />
@@ -3199,6 +3201,10 @@ export const DocumentEditor = memo(function DocumentEditor({
             onExtract={(bytes) =>
               downloadBytes(bytes, fileName.replace(/\.pdf$/i, "") + "-extract.pdf")
             }
+            onSplit={(zip) =>
+              downloadBytes(zip, fileName.replace(/\.pdf$/i, "") + "-split.zip", "application/zip")
+            }
+            startWithSplit={organizeOpen === "split"}
             onClose={() => {
               organizeTookLocked.current = false;
               setOrganizeOpen(false);

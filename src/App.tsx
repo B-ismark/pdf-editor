@@ -11,6 +11,7 @@ import { useTheme } from "./hooks/useTheme";
 import { downloadBytes } from "./download";
 import { plural } from "./plural";
 import { loadPdf, looksLikePdf, mayBeEncrypted, releaseDoc } from "./pdf/loader";
+import { IMAGE_ACCEPT, sniffImage } from "./pdf/images";
 import { clearEngineCache } from "./pdf/engineCache";
 import { findUnsafeCovers } from "./pdf/redactionSafety";
 import type { DocState, LoadedPdf } from "./pdf/types";
@@ -427,6 +428,34 @@ export function App() {
     [openBytes, unlock],
   );
 
+  /**
+   * Make one PDF of the pictures given, a page each, and open it in a new tab.
+   * It exists nowhere else yet, so it opens as unsaved work: closing the tab
+   * asks first, and autosave keeps it.
+   */
+  const openImages = useCallback(
+    async (files: File[]): Promise<boolean> => {
+      setStatus("loading");
+      setMessage(files.length === 1 ? `Making a PDF of ${files[0].name}…` : `Making a PDF of ${plural(files.length, "picture")}…`);
+      try {
+        const inputs = await Promise.all(files.map(async (f) => ({ name: f.name, bytes: await f.arrayBuffer() })));
+        const { imagesToPdf } = await import("./pdf/imagesToPdf");
+        const out = await imagesToPdf(inputs);
+        const ab = new ArrayBuffer(out.byteLength);
+        new Uint8Array(ab).set(out);
+        const name = files[0].name.replace(/\.[^./\\]+$/, "") + ".pdf";
+        const note = `Made a PDF of ${plural(files.length, "picture")} · not saved yet`;
+        return (await openBytes(ab, name, note, undefined, { baked: 1 })) != null;
+      } catch (e) {
+        setStatus("error");
+        const unreadable = (e as { fileName?: string })?.fileName != null;
+        setMessage(staleBuildMessage(e) ?? (unreadable ? (e as Error).message : "Couldn't make a PDF of those pictures."));
+        return false;
+      }
+    },
+    [openBytes],
+  );
+
   // One file picker for the whole workspace: the start screen's button, "Open
   // another PDF", the tab strip's +, and Ctrl+O. What's picked opens in new
   // tabs, so nothing open is put at risk.
@@ -445,29 +474,53 @@ export function App() {
         setMessage("Finish what's open first, then drop the file again.");
         return;
       }
-      const list = [...(files ?? [])];
+      const picked = [...(files ?? [])];
+      // Pictures picked together become one PDF, a page each in the order
+      // picked; PDFs open in tabs of their own. Told apart by their first
+      // bytes, as a PDF is, never by name.
+      const kinds = await Promise.all(
+        picked.map(async (f) => {
+          try {
+            return sniffImage(await f.slice(0, 8).arrayBuffer());
+          } catch {
+            return null;
+          }
+        }),
+      );
+      const images = picked.filter((_, i) => kinds[i]);
+      const list = picked.filter((_, i) => !kinds[i]);
       const failed: string[] = [];
-      for (const f of list) if (!(await openFile(f))) failed.push(f.name);
-      if (list.length > 1) {
+      let opened = 0;
+      if (images.length > 0) {
+        if (await openImages(images)) opened++;
+        else failed.push(...images.map((f) => f.name));
+      }
+      for (const f of list) {
+        if (await openFile(f)) opened++;
+        else failed.push(f.name);
+      }
+      if (list.length + (images.length > 0 ? 1 : 0) > 1) {
         // Each open writes its own status over the last, so a failure early in
         // the list was being covered by the next file's success — "Opened 2
         // documents" with one tab on screen. Report the whole batch instead.
-        const opened = list.length - failed.length;
+        const fromPictures = images.length > 0 && !failed.includes(images[0].name)
+          ? `, one made from ${plural(images.length, "picture")}`
+          : "";
         if (failed.length === 0) {
           setStatus("ready");
-          setMessage(`Opened ${plural(opened, "document")} in tabs.`);
+          setMessage(`Opened ${plural(opened, "document")} in tabs${fromPictures}.`);
         } else {
           setStatus("error");
           const names = failed.map((n) => `"${n}"`).join(", ");
           setMessage(
             opened > 0
-              ? `Opened ${plural(opened, "document")}; couldn't open ${names}.`
+              ? `Opened ${plural(opened, "document")}${fromPictures}; couldn't open ${names}.`
               : `Couldn't open ${names}.`,
           );
         }
       }
     },
-    [openFile],
+    [openFile, openImages],
   );
 
   // Restoring opens every document in turn, which leaves the *last* one in
@@ -786,7 +839,7 @@ export function App() {
     <input
       ref={openInputRef}
       type="file"
-      accept="application/pdf,.pdf"
+      accept={`application/pdf,.pdf,${IMAGE_ACCEPT}`}
       multiple
       hidden
       onChange={(e) => {
@@ -866,7 +919,7 @@ export function App() {
             <button className="btn btn--filled btn--lg" onClick={openAnother}>
               <Icon name="upload_file" size={18} /> Choose PDF
             </button>
-            <p className="body-small dropzone__hint">or drag &amp; drop files here · several open as tabs</p>
+            <p className="body-small dropzone__hint">or drag &amp; drop files here · several open as tabs · photos (JPEG, PNG) become a PDF</p>
             {status === "loading" && (
               <p className="body-small dropzone__note">
                 <span className="spinner spinner--sm" aria-hidden="true" /> {message}

@@ -164,6 +164,19 @@ type-checking can't see, and each exists because it broke once:
   still protected and closing the warning stays in the app; on a phone with
   something selected, the dialog opens (the deselect's removal no longer
   closes it) and Back closes it without leaving the app.
+- `pagetools.spec.ts` — Package 8a. Pictures: a phone JPEG (stored
+  landscape, EXIF orientation 6, with GPS text in EXIF, XMP, a comment and
+  IPTC) opens upright (portrait, its red corner top-right), 150 × 300 points
+  for 200 × 400 pixels, with none of that text or "Exif" in the file and no
+  producer; it opens as unsaved work (closing asks). Pictures picked with a PDF
+  make one document in pick order beside the PDF's own tab; a file that only
+  starts like a JPEG is refused by name. Organise: a blank page and a picture
+  go after the picked page (the inserted page is then picked, so the next one
+  follows it), the blank sized like the page before it — turned with it when
+  that page is turned. Split: from the Export menu it opens straight into the
+  dialog and Cancel lands back on the page; every 5 pages of 12 makes three
+  files named by range, the redacted page has no text in its part; in
+  Organise, picks start parts in the order Organise shows.
 - `patterns.spec.ts` — Redact patterns: every preset is found in the
   `personal` fixture, a phone number split across two runs too, and the
   decoys (a Luhn-failing "card", a bad-checksum IBAN, a span of years, a short
