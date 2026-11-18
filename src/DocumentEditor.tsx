@@ -30,7 +30,7 @@ import { CommandPalette, GROUP_LABEL, ariaKeys, type Command, type CommandGroup 
 import { Icon } from "./components/Icon";
 import { findMatches, findPatternMatches, joinPage, extractText, type FindMatch, type PatternHit } from "./pdf/find";
 import { PATTERN_PRESETS, customMatcher } from "./pdf/patterns";
-import { isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
+import { fitCrop, isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
 import { boxCX, boxCY } from "./pdf/bbox";
 import { findUnsafeCovers, type CoverWarning } from "./pdf/redactionSafety";
 import { downloadBytes, downloadText } from "./download";
@@ -74,6 +74,7 @@ const Organize = lazyPart(() => import("./components/Organize").then((m) => m.Or
 const SignatureDialog = lazyPart(() => import("./components/SignatureDialog").then((m) => m.SignatureDialog));
 const FinishDialog = lazyPart(() => import("./components/FinishDialog").then((m) => m.FinishDialog));
 const CompressDialog = lazyPart(() => import("./components/CompressDialog").then((m) => m.CompressDialog));
+const CropDialog = lazyPart(() => import("./components/CropDialog").then((m) => m.CropDialog));
 const HiddenInfoDialog = lazyPart(() => import("./components/HiddenInfoDialog").then((m) => m.HiddenInfoDialog));
 const ProtectDialog = lazyPart(() => import("./components/ProtectDialog").then((m) => m.ProtectDialog));
 const SignCertDialog = lazyPart(() => import("./components/SignCertDialog").then((m) => m.SignCertDialog));
@@ -417,12 +418,54 @@ export const DocumentEditor = memo(function DocumentEditor({
    * the document as loaded. The sidebar and the grid both come through here. */
   const applyPlan = (next: PageRef[]): boolean => {
     if (!pdf || next.length === 0 || samePlan(next, plan)) return false;
-    const pages = isIdentityPlan(next, pdf.pages.length) ? undefined : next.map((p) => ({ index: p.index, rotate: quarterTurn(p.rotate) }));
+    const pages = isIdentityPlan(next, pdf.pages.length)
+      ? undefined
+      : next.map((p) => {
+          const crop = fitCrop(p.crop, pdf.pages[p.index].viewBox);
+          return { index: p.index, rotate: quarterTurn(p.rotate), ...(crop ? { crop } : {}) };
+        });
     doc.set((d) => ({ ...d, pages }));
     return true;
   };
   const arrangePages = (next: PageRef[], note: string) => {
     if (applyPlan(next)) setMessage(note);
+  };
+  /** The shown position of the page most in view: what a command about "this
+   * page" means. */
+  const pageInView = (): number => {
+    const scroller = document.querySelector<HTMLElement>(".viewer__scroll");
+    const els = [...document.querySelectorAll<HTMLElement>(".page[data-page-pos]")];
+    if (!scroller || els.length === 0) return 0;
+    const view = scroller.getBoundingClientRect();
+    let best = 0;
+    let bestSeen = -1;
+    for (const el of els) {
+      const r = el.getBoundingClientRect();
+      const seen = Math.max(0, Math.min(r.bottom, view.bottom) - Math.max(r.top, view.top));
+      if (seen > bestSeen) {
+        bestSeen = seen;
+        best = Number(el.dataset.pagePos) || 0;
+      }
+    }
+    return best;
+  };
+  /** Crop one page, or every page by the same margins, as one undoable edit. */
+  const cropPages = (scope: "page" | "all", m: import("./components/CropDialog").Margins, cropFromMargins: typeof import("./components/CropDialog").cropFromMargins) => {
+    const at = cropAt;
+    setCropAt(null);
+    if (at == null) return;
+    const next = plan.map((p, pos) => {
+      if (scope === "page" && pos !== at) return p;
+      const crop = cropFromMargins(shown[pos], m);
+      return { index: p.index, rotate: p.rotate, ...(crop ? { crop } : {}) };
+    });
+    if (!applyPlan(next)) return;
+    const cropped = next.some((p) => p.crop);
+    setMessage(
+      scope === "all"
+        ? cropped ? `Cropped all ${plural(next.length, "page")}.` : "Every page shows in full again."
+        : next[at].crop ? `Cropped page ${at + 1}.` : `Page ${at + 1} shows in full again.`,
+    );
   };
   /** The turn the page holding object `id` is shown at (0 if not found). */
   const turnOfObject = useCallback(
@@ -489,6 +532,8 @@ export const DocumentEditor = memo(function DocumentEditor({
   const [compressOpen, setCompressOpen] = useState(false);
   const [signCertOpen, setSignCertOpen] = useState(false);
   const [hiddenOpen, setHiddenOpen] = useState(false);
+  /** The shown position of the page the Crop dialog is open on. */
+  const [cropAt, setCropAt] = useState<number | null>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuListRef = useRef<HTMLDivElement>(null);
   // The Export menu, from the caret beside Download.
@@ -2378,6 +2423,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     { id: "zoom-fit", group: "view", label: "Fit to width", icon: "fit_width", keywords: "zoom reset 100", run: vp.resetZoom },
 
     { id: "organize", group: "organise", label: "Organise pages", icon: "organize", keywords: "reorder rotate merge split extract", opens: "dialog", run: () => { setSelection(null); setOrganizeOpen("grid"); } },
+    { id: "crop", group: "organise", label: "Crop pages", icon: "crop", keywords: "crop trim margins edges cut box", opens: "dialog", run: () => { setSelection(null); setCropAt(pageInView()); } },
     { id: "image", group: "organise", label: "Add image", icon: "image", keywords: "picture photo stamp", opens: "dialog", run: () => imageInputRef.current?.click() },
     { id: "ocr", group: "text", label: "Recognise text (OCR)", icon: "scan_text", keywords: "scan searchable image ocr", run: () => void runOcr() },
     { id: "redact-patterns", group: "text", label: "Redact patterns", icon: "redact_patterns", keywords: "find search email phone card iban ssn date regex personal information pii privacy", opens: "dialog", run: openPatterns },
@@ -3126,6 +3172,19 @@ export const DocumentEditor = memo(function DocumentEditor({
       {compressOpen && (
         <Suspense fallback={null}>
           <CompressDialog onEstimate={estimateCompress} onDownload={downloadCompress} onClose={() => setCompressOpen(false)} />
+        </Suspense>
+      )}
+
+      {cropAt != null && shown[cropAt] && pdf && (
+        <Suspense fallback={null}>
+          <CropDialog
+            bytes={pdf.bytes}
+            page={shown[cropAt]}
+            position={cropAt}
+            count={shown.length}
+            onCrop={(scope, m, fromMargins) => cropPages(scope, m, fromMargins)}
+            onClose={() => setCropAt(null)}
+          />
         </Suspense>
       )}
 

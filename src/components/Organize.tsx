@@ -96,7 +96,7 @@ export function Organize({
   // Seed from the document's current plan: what Organise shows is what the
   // viewer shows, in the same order and turned the same way.
   const [plan, setPlan] = useState<PlanEntry[] | null>(() =>
-    pages.map((p) => ({ sourceKey: "main", index: p.index, rotation: p.rotate })),
+    pages.map((p) => ({ sourceKey: "main", index: p.index, rotation: p.rotate, ...(p.crop ? { crop: p.crop } : {}) })),
   );
 
   // Where the last pages added went: the next ones follow them, until a page
@@ -241,7 +241,7 @@ export function Organize({
     setBusy("Adding a page…");
     try {
       const like = plan[insertAt - 1] ?? plan[0];
-      const size = await shownPageSize(sources.get(like.sourceKey)!, like.index, like.rotation);
+      const size = await shownPageSize(sources.get(like.sourceKey)!, like.index, like.rotation, like.crop);
       insert([await prepare(await blankPage(size.width, size.height))], insertAt);
     } catch (e) {
       setErr(staleBuildMessage(e) ?? "Couldn't add a blank page. Please try again.");
@@ -270,7 +270,8 @@ export function Organize({
         if (e.sourceKey !== "main") return e;
         const was = at.get(e.index);
         if (!was) throw new Error("A page isn't in the document any more.");
-        return { ...e, index: was.pos, rotation: (((e.rotation - was.rotate) % 360) + 360) % 360 };
+        // The baked copy has the crop drawn in, as its CropBox.
+        return { sourceKey: e.sourceKey, index: was.pos, rotation: (((e.rotation - was.rotate) % 360) + 360) % 360 };
       }),
     };
   };
@@ -282,7 +283,7 @@ export function Organize({
     setConfirmApply(false);
     setErr(null);
     if (ownPagesOnly) {
-      onArrange(plan.map((e) => ({ index: e.index, rotate: e.rotation })));
+      onArrange(plan.map((e) => ({ index: e.index, rotate: e.rotation, ...(e.crop ? { crop: e.crop } : {}) })));
       return;
     }
     setBusy("Applying…");
@@ -470,7 +471,7 @@ export function Organize({
               className={`pcard${selected.has(i) ? " pcard--sel" : ""}`}
             >
               <button className="pcard__thumb" onClick={() => toggleSel(i)} aria-pressed={selected.has(i)}>
-                <Thumbnail bytes={sources.get(entry.sourceKey)!} index={entry.index} rotation={entry.rotation} />
+                <Thumbnail bytes={sources.get(entry.sourceKey)!} index={entry.index} rotation={entry.rotation} crop={entry.crop} />
                 {selected.has(i) && (
                   <span className="pcard__check"><Icon name="add" size={15} /></span>
                 )}

@@ -26,6 +26,7 @@ import {
   Command,
   Contrast,
   Copy,
+  Crop,
   CopyPlus,
   Download,
   Eraser,
@@ -183,6 +184,8 @@ const MAP: Record<string, LucideIcon> = {
 
   // ---- document actions ----
   organize: LayoutGrid,
+  /** Keep part of a page and hide its edges. */
+  crop: Crop,
   page_numbers: ListOrdered,
   watermark: Stamp,
   compress: Shrink,

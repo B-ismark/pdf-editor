@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { renderPageToCanvas } from "../pdf/loader";
+import { cutToCrop, renderPageToCanvas } from "../pdf/loader";
+import type { CropRect } from "../pdf/types";
 import { useRenderWindow } from "../hooks/useRenderWindow";
 
 interface Props {
@@ -7,6 +8,9 @@ interface Props {
   index: number;
   /** Added rotation preview (deg). */
   rotation: number;
+  /** The part of the page the plan keeps (view space); the thumbnail shows
+   * only that, as the page does. */
+  crop?: CropRect;
 }
 
 /** How long a thumbnail must stay in the window before it starts rendering. A
@@ -27,7 +31,9 @@ const SETTLE_MS = 120;
  * and its backing store zeroed, so a long scroll through the rail costs the
  * band on screen, not every page visited. Its slot has a fixed aspect ratio, so
  * emptying it doesn't move anything. */
-export function Thumbnail({ bytes, index, rotation }: Props) {
+export function Thumbnail({ bytes, index, rotation, crop }: Props) {
+  // A stable key for the effect: a crop arrives as a fresh object each render.
+  const cropKey = crop ? `${crop.x},${crop.y},${crop.width},${crop.height}` : "";
   const [failed, setFailed] = useState(false);
   // A modest margin: thumbnails are cheap and these rails scroll fast.
   const { ref, near } = useRenderWindow<HTMLDivElement>(600);
@@ -60,6 +66,7 @@ export function Thumbnail({ bytes, index, rotation }: Props) {
     const settle = performance.now() - mountedAt.current < 100 ? 0 : SETTLE_MS;
     const timer = window.setTimeout(() => {
       renderPageToCanvas(bytes, index, 0.4, ctrl.signal)
+        .then((c) => (crop ? cutToCrop(bytes, index, c, 0.4, crop) : c))
         .then((c) => {
           if (ctrl.signal.aborted || !host.current) {
             c.width = c.height = 0;
@@ -81,7 +88,8 @@ export function Thumbnail({ bytes, index, rotation }: Props) {
       window.clearTimeout(timer);
       ctrl.abort();
     };
-  }, [bytes, index, near]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `crop` is read through `cropKey`
+  }, [bytes, index, near, cropKey]);
 
   // Leaving the window (or unmounting) gives the backing store back.
   useEffect(() => {

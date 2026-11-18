@@ -196,6 +196,46 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
 - An object on a deleted page can't stay selected, be pasted back, or be
   counted as a change: `shownBySource` gates selection, paste and the counts.
 
+## View space and the view origin
+
+- A page's visible box (pdf.js `page.view`, CropBox ∩ MediaBox) need not start
+  at the user-space origin. `loadPdf` moves every fragment transform and form
+  widget rect by minus its corner, once, and records it as `PageData.origin`;
+  so the whole app — overlays, pointer maths, clamps, colour sampling, OCR —
+  works in *view space*, origin 0,0, and none of it needs to know.
+- The exporter adds the origin back on vector pages: one `q 1 0 0 1 ox oy cm`
+  around everything it draws, and explicitly for link `/Rect`s and the page
+  number / watermark frame. A raster page *is* the view at 0,0, so it adds
+  nothing. Anything new that reads coordinates out of pdf.js (a new
+  `getTextContent` / `getAnnotations` consumer) must shift the same way.
+- Guarded by `crop.spec` (heading overlay on its glyphs; an edit and a link
+  land at the same user-space place in the download).
+
+## Crop
+
+- A crop is `PageRef.crop` — a rect in the page's *view space*, unturned — so
+  it's an ordinary undoable plan edit, counted as a change, carried by reorder
+  and turn (`turnPages` spreads the ref; `applyPlan` and Organise's own-pages
+  apply keep it). `fitCrop` holds it inside the view and at least `MIN_CROP`
+  a side, and returns `undefined` for "the whole page", so an uncropped page
+  stores nothing. `samePlan` compares crops.
+- Shown pages carry `crop` (`turnPage`, cached per turn+crop). `shownSize` is
+  the crop turned; `sheetSize` is the whole page turned; `cropOffset` is where
+  the crop's top-left sits on the turned sheet. `PageView` makes the slot the
+  crop window (`.page[data-cropped]` clips) and moves `.page__sheet` — canvas
+  and overlay — by `-cropOffset`, so every overlay coordinate, `toLocal` and
+  the turn are unchanged. `FinishPreview` is laid against the crop, as the
+  exporter places page numbers and the watermark.
+- Export sets the page's CropBox (view + origin on vector pages, as-is on a
+  raster) — the edges stay in the file; README says to Redact to remove. A
+  cropped document always has changes, so Organise's rebuild, Split and
+  Extract go through the baked copy, which has the CropBox; `mainAsShown`
+  drops the crop from main entries for that reason.
+- Thumbnails (rail and Organise) render the page as the file turns it and cut
+  the crop out (`cutToCrop`). The Crop dialog works in margins from the sides
+  *as shown* (`marginsOf` / `cropFromMargins`), which is what lets "All pages"
+  apply one set of margins to pages of any size or turn.
+
 ## Known limits
 
 - OCR renders in user space. On a page whose own `/Rotate` turns sideways-scanned
@@ -203,5 +243,10 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
 - Resize cursors on a turned page point the unturned way.
 - Marquee hit-testing and the selection bbox of a *rotated text box* are
   approximate.
+- New objects are placed and clamped against the whole page, not the crop, so
+  one can land partly in the hidden edge, its resize handle with it (move it
+  in by its move grip, or undo; whatever stays outside ships hidden).
+- A session saved before the view-origin fix, with overlays on a page whose view
+  doesn't start at 0,0, restores them shifted by that corner.
 - A session saved before this change, with overlays on a `/Rotate` page, restores
   them in the old (shown-space) coordinates, so they shift.

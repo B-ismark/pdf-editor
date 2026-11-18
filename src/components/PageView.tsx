@@ -6,7 +6,7 @@ import { roomAfter } from "../pdf/lineFit";
 import { usePageFonts } from "../hooks/usePageFonts";
 import { usePageColors } from "../hooks/usePageColors";
 import { offerPageCanvas, readPageColors } from "../pdf/fragmentColors";
-import { shownSize, uprightFor } from "../pdf/pagePlan";
+import { cropOffset, sheetSize, shownSize, uprightFor } from "../pdf/pagePlan";
 import { isBoxAnnotation } from "../pdf/types";
 import { DEFAULT_MARK_SIZE, MARK_PATHS } from "../pdf/marks";
 import type {
@@ -219,9 +219,17 @@ function PageViewInner(props: Props) {
   // The slot is the page as shown; the overlay inside it is the page's own
   // unturned user space, turned with the canvas. Everything on the overlay is
   // therefore laid out exactly as on an unturned page, and turns with it.
+  //
+  // A cropped page is shown through a window the size of its crop: the slot is
+  // the window, and the whole page (the "sheet") sits inside it, moved so the
+  // crop shows. Everything on the sheet keeps its whole-page coordinates.
   const shown = shownSize(page);
   const W = shown.width * scale;
   const Hpx = shown.height * scale;
+  const sheet = sheetSize(page);
+  const SW = sheet.width * scale;
+  const SH = sheet.height * scale;
+  const cropAt = cropOffset(page);
   const H = page.viewBox.height;
   const Wpdf = page.viewBox.width;
   const turn = page.rotation;
@@ -440,9 +448,14 @@ function PageViewInner(props: Props) {
       data-page-index={page.pageIndex}
       data-page-pos={position}
       data-turn={turn || undefined}
+      data-cropped={page.crop ? "" : undefined}
       style={{ width: W, height: Hpx }}
       aria-busy={!painted && !error}
     >
+      <div
+        className="page__sheet"
+        style={page.crop ? { width: SW, height: SH, left: -cropAt.x * scale, top: -cropAt.y * scale, right: "auto", bottom: "auto" } : undefined}
+      >
       <canvas ref={canvasRef} className="page__canvas" />
       {!painted && !error && <div className="page__skeleton" aria-hidden="true" />}
       {error ? (
@@ -460,8 +473,8 @@ function PageViewInner(props: Props) {
                   inset: "auto",
                   width: Wpdf * scale,
                   height: H * scale,
-                  left: (W - Wpdf * scale) / 2,
-                  top: (Hpx - H * scale) / 2,
+                  left: (SW - Wpdf * scale) / 2,
+                  top: (SH - H * scale) / 2,
                   transform: `rotate(${turn}deg)`,
                 }
               : null),
@@ -506,6 +519,16 @@ function PageViewInner(props: Props) {
             watermark={watermark}
             pageNumber={(pageNumbers?.start ?? 1) + position}
             scale={scale}
+            box={
+              page.crop
+                ? {
+                    left: page.crop.x * scale,
+                    top: (H - (page.crop.y + page.crop.height)) * scale,
+                    width: page.crop.width * scale,
+                    height: page.crop.height * scale,
+                  }
+                : undefined
+            }
           />
 
           <AnnotationLayer
@@ -742,6 +765,7 @@ function PageViewInner(props: Props) {
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }
@@ -754,11 +778,16 @@ function FinishPreview({
   watermark,
   pageNumber,
   scale,
+  box,
 }: {
   pageNumbers: PageNumberOptions | null;
   watermark: WatermarkOptions | null;
   pageNumber: number;
   scale: number;
+  /** The crop window on the page, in overlay pixels: the exporter places page
+   * numbers and the watermark against what the reader sees. Whole page if
+   * absent. */
+  box?: { left: number; top: number; width: number; height: number };
 }) {
   if (!pageNumbers && !(watermark && watermark.text.trim())) return null;
   const m = 28 * scale;
@@ -775,7 +804,7 @@ function FinishPreview({
     }
   }
   return (
-    <div className="finishlayer" aria-hidden="true">
+    <div className="finishlayer" aria-hidden="true" style={box ? { inset: "auto", ...box } : undefined}>
       {watermark && watermark.text.trim() && (
         <span
           className="finishlayer__wm"
