@@ -43,8 +43,10 @@ export const canOpenInPlace = () => typeof pickers().showOpenFilePicker === "fun
 /** Can the user pick where a file is saved (rather than the downloads folder)? */
 export const canSaveAs = () => typeof pickers().showSaveFilePicker === "function";
 
-/** Pick files to open, each with its handle. `null` if the picker was closed. */
-export async function pickFiles(): Promise<{ file: File; handle: FileHandle }[] | null> {
+/** Pick files to open, each with its handle, and the names of any picked
+ * that couldn't then be read (moved, deleted, locked by another app). `null`
+ * if the picker was closed. */
+export async function pickFiles(): Promise<{ picked: { file: File; handle: FileHandle }[]; unreadable: string[] } | null> {
   const show = pickers().showOpenFilePicker;
   if (!show) return null;
   let handles: FileHandle[];
@@ -54,25 +56,13 @@ export async function pickFiles(): Promise<{ file: File; handle: FileHandle }[] 
     if (isAbort(e)) return null;
     throw e;
   }
-  // Picked, but unreadable (moved, deleted, locked by another app): said as
-  // such, not taken for a picker that didn't work.
-  return Promise.all(
-    handles.map(async (handle) => {
-      try {
-        return { file: await handle.getFile(), handle };
-      } catch {
-        throw new UnreadableFile(handle.name);
-      }
-    }),
-  );
-}
-
-/** A file the user picked that couldn't then be read. */
-export class UnreadableFile extends Error {
-  constructor(readonly fileName: string) {
-    super(`Couldn't read ${fileName}`);
-    this.name = "UnreadableFile";
-  }
+  // One unreadable file doesn't cost the others, and isn't taken for a picker
+  // that didn't work.
+  const read = await Promise.allSettled(handles.map(async (handle) => ({ file: await handle.getFile(), handle })));
+  return {
+    picked: read.flatMap((r) => (r.status === "fulfilled" ? [r.value] : [])),
+    unreadable: handles.filter((_, i) => read[i].status === "rejected").map((h) => h.name),
+  };
 }
 
 /** Are these the same file on disk? */

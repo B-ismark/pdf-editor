@@ -2809,8 +2809,9 @@ body {
 @media print {
   html, body { background: #fff !important; }
   /* Only while the app is printing a document: a print the browser starts
-     itself (its menu, Ctrl+P over a dialog) prints the screen, not blank paper. */
-  body:has(> #print-root) > :not(#print-root) { display: none !important; }
+     itself (its menu, Ctrl+P over a dialog) prints the screen, not blank paper.
+     A class, not :has(), which older Firefox and Safari don't know. */
+  body.printing-doc > :not(#print-root) { display: none !important; }
   #print-root { display: block; }
   .print-page { display: block; break-after: page; }
   .print-page:last-child { break-after: auto; }

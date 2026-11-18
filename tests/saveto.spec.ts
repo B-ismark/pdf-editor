@@ -33,6 +33,8 @@ interface StubOpts {
   share?: "ok" | "tap";
   /** Make every write fail, as a full disk or a file locked elsewhere does. */
   failWrite?: boolean;
+  /** A picked file that can't then be read (moved, deleted). */
+  unreadable?: string;
 }
 
 const asStub = (path: string): StubFile => ({ name: basename(path), b64: readFileSync(path).toString("base64") });
@@ -56,7 +58,10 @@ async function installStubs(page: Page, opts: StubOpts): Promise<void> {
     const handle = (name: string, b64?: string) => ({
       kind: "file",
       name,
-      getFile: async () => new File([fromB64(b64 ?? "")], name, { type: "application/pdf" }),
+      getFile: async () => {
+        if (o.unreadable === name) throw new DOMException("Gone", "NotFoundError");
+        return new File([fromB64(b64 ?? "")], name, { type: "application/pdf" });
+      },
       createWritable: async () => {
         const parts: BlobPart[] = [];
         return {
@@ -280,6 +285,8 @@ test.describe("share", () => {
     await page.getByRole("button", { name: "Export options" }).click();
     await exportMenu(page).getByRole("menuitem", { name: "Share" }).click();
     await expect.poll(async () => (await calls(page)).share).toBe(1);
+    // The stub reads the file after counting the call.
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __shared: unknown[] }).__shared.length)).toBe(1);
     const shared = await page.evaluate(() => (window as unknown as { __shared: { name: string; type: string; b64: string }[] }).__shared);
     // Named as a download is, so it isn't mistaken for the original.
     expect(shared.map((s) => [s.name, s.type])).toEqual([["sample-edited.pdf", "application/pdf"]]);
@@ -293,6 +300,7 @@ test.describe("share", () => {
     const f = await fixtures();
     await installStubs(page, { share: "tap" });
     await open(page, f.sample);
+    await addText(page, "Shared later");
     await page.getByRole("button", { name: "Export options" }).click();
     await exportMenu(page).getByRole("menuitem", { name: "Share" }).click();
     const ready = page.getByRole("alertdialog", { name: "Ready to share" });
@@ -303,6 +311,8 @@ test.describe("share", () => {
     const shared = await page.evaluate(() => (window as unknown as { __shared: { b64: string }[] }).__shared);
     expect(shared).toHaveLength(1);
     expect(Buffer.from(shared[0].b64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
+    // Shared through the second tap is no more a save than through the first.
+    await expect(counter(page)).toHaveText("1 change");
   });
 
   test("without a share sheet that takes files, there's no Share", async ({ page }) => {
@@ -522,5 +532,30 @@ test.describe("save in place, with more open", () => {
     await expect(counter(page)).toHaveText("Saved");
     await expect(page.getByRole("alertdialog", { name: "Save without its password?" })).toHaveCount(0);
     expect((await writes(page)).map((x) => x.name)).toEqual(["copy.pdf", "copy.pdf"]);
+  });
+});
+
+test.describe("second review fixes", () => {
+  test("Save as onto a file another tab has open is refused", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.sample), asStub(f.typeset)], saveAs: "sample.pdf" });
+    await openPicked(page);
+    await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+    await page.locator(".doctab", { hasText: "typeset.pdf" }).click();
+    await page.waitForSelector(".page canvas");
+    await page.getByRole("button", { name: "Export options" }).click();
+    await exportMenu(page).getByRole("menuitem", { name: /^Save as…/ }).click();
+    await expect(page.locator(".snackbar__msg").filter({ hasText: "sample.pdf is open in another tab" }).first()).toBeVisible();
+    expect(await writes(page)).toEqual([]);
+    await expect(activeTab(page)).toContainText("typeset.pdf");
+  });
+
+  test("one unreadable file among several doesn't cost the others", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.sample), asStub(f.typeset)], unreadable: "typeset.pdf" });
+    await openPicked(page);
+    await expect(page.locator(".doctab")).toHaveCount(1);
+    await expect(page.locator(".doctab")).toContainText("sample.pdf");
+    await expect(page.locator(".snackbar__msg").filter({ hasText: 'Couldn\'t read "typeset.pdf"' }).first()).toBeVisible();
   });
 });

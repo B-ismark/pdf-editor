@@ -44,6 +44,7 @@ export async function printPdf(
   };
   current = () => {
     root.remove();
+    document.body.classList.remove("printing-doc");
     for (const u of urls) URL.revokeObjectURL(u);
     document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== sheet);
     window.removeEventListener("afterprint", cleanUp);
@@ -89,6 +90,7 @@ export async function printPdf(
     sheet.replaceSync(rules.join("\n"));
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
     document.body.append(root);
+    document.body.classList.add("printing-doc");
   } catch (e) {
     cleanUp();
     throw e;

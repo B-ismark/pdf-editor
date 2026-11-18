@@ -315,6 +315,8 @@ export interface DocumentEditorProps {
   onSwitch: (id: string) => void;
   onCloseTab: (id: string) => void;
   onOpenAnother: () => void;
+  /** The name of another open tab that is this file on disk, if any. */
+  openElsewhere: (handle: FileHandle, except: string) => Promise<string | undefined>;
   onDownloadAll: () => void;
   // App-wide chrome and preferences: kept by the workspace, so they survive
   // switching documents.
@@ -356,6 +358,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   onSwitch,
   onCloseTab,
   onOpenAnother,
+  openElsewhere,
   onDownloadAll,
   navOpen,
   setNavOpen,
@@ -2437,13 +2440,20 @@ export const DocumentEditor = memo(function DocumentEditor({
       setMessage("Couldn't open the save dialog. Use Download instead.");
       return;
     }
-    if (target) await deliver({ kind: "save-as", target });
-  }), [pdf, fileName, deliver, exclusive]);
+    if (!target) return;
+    // Over a file another tab has open, the two would save over each other.
+    const other = await openElsewhere(target, activeId);
+    if (other) {
+      setMessage(`${target.name} is open in another tab. Save it from there, or choose another name.`);
+      return;
+    }
+    await deliver({ kind: "save-as", target });
+  }), [pdf, fileName, deliver, exclusive, openElsewhere, activeId]);
 
   /** Ctrl+S: back to its own file where there is one; else wherever the user
    * picks; else a download — never the browser's "save this web page". */
   const save = useCallback(() => {
-    if (!pdf || busyRef.current) return;
+    if (!pdf || busyRef.current || fileOp.current) return;
     if (handle) {
       // Over a file that opened with a password, the copy written wouldn't
       // have one: say so first.
@@ -3318,8 +3328,8 @@ export const DocumentEditor = memo(function DocumentEditor({
             setShareReady(null);
             // This tap is the one the share sheet needs.
             void shareFile(file).then((r) => {
+              // Not a save, as on the direct path: the target may keep nothing.
               if (r === "shared") {
-                onSaved(activeId, markNow.current);
                 setMessage(`Shared ${file.name}.`);
               } else setMessage(r === "cancelled" ? "Not shared." : "Sharing isn't available right now. Use Download instead.");
             }).catch(() => setMessage("Couldn't share the file. Use Download instead."));

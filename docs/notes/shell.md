@@ -255,6 +255,10 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     Pictures never get one — saving a PDF over a JPEG. A rebuild that replaces
     the tab (Organise) keeps it. Picking a file that's already open
     (`isSameEntry`) goes to its tab: two tabs on one file save over each other.
+    For the same reason Save as refuses a file another tab has open
+    (`openElsewhere`). Files are read with `allSettled`: one that's gone
+    doesn't cost the rest, and is named *after* they open (or the load
+    message talks over it).
   - `handleLocked`, not `locked`, decides the "Save without its password?"
     warning: it's about the file on disk, and clears once that's written
     (in place or Save as). `locked` stays — it keeps the unlocked copy out of
@@ -274,7 +278,9 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     closing doesn't ask (the write finished; a download might not have).
   - Print draws its own raster pages into `#print-root` and hides the app under
     `@media print` — no iframe (needs a CSP change, and a built-in viewer
-    phones lack). The hiding is `body:has(> #print-root)`, so a print the
+    phones lack). The hiding keys on a `printing-doc` class on `body`, set
+    only while the pages are there (not `:has`, which older engines drop
+    whole — the app then prints itself), so a print the
     browser starts itself still prints the screen, not blank paper. Each page
     size gets a named `@page` (`page:` on its image) in a constructed sheet, so
     a landscape page gets a landscape sheet. Pages go on `afterprint` or when

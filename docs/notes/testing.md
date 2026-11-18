@@ -177,7 +177,9 @@ type-checking can't see, and each exists because it broke once:
   or via Save as) isn't warned about again; a browser-started print shows the
   app; a landscape page gets a landscape `@page`; on a Mac Ctrl+S is left
   alone; with two tabs each saves to its own file; a failed write stays
-  unsaved.
+  unsaved. Second review: Save as onto a file another tab has open is
+  refused; one unreadable file among several opens the rest and is named;
+  sharing through "Ready to share" isn't a save either.
 - `crop.spec.ts` — Package 8b. A page whose CropBox starts at 100,200: the
   heading's overlay sits on its glyphs (not off the page), an edit is redrawn
   at the run's own user-space position, and a link drawn 20 points in from

@@ -17,7 +17,7 @@ import { findUnsafeCovers } from "./pdf/redactionSafety";
 import type { DocState, LoadedPdf } from "./pdf/types";
 import { lazyPart, staleBuildMessage, useStaleBuild } from "./staleBuild";
 import { UpdateBanner } from "./components/UpdateBanner";
-import { canOpenInPlace, pickFiles, sameFile, UnreadableFile, type FileHandle } from "./fileAccess";
+import { canOpenInPlace, pickFiles, sameFile, type FileHandle } from "./fileAccess";
 import {
   EMPTY_DOC,
   aModalIsOpen,
@@ -476,14 +476,21 @@ export function App() {
     }
     return undefined;
   };
+  const openElsewhere = useStable(async (handle: FileHandle, except: string) => {
+    for (const t of liveTabs.current.tabs) {
+      if (t.id !== except && t.handle && (await sameFile(t.handle, handle))) return t.fileName;
+    }
+    return undefined;
+  });
   const openAnother = useStable(async () => {
     if (!canOpenInPlace()) {
       openInputRef.current?.click();
       return;
     }
     try {
-      const picked = await pickFiles();
-      if (!picked) return;
+      const result = await pickFiles();
+      if (!result) return;
+      const { picked, unreadable } = result;
       // A file that's already open goes to its tab, not a second one: two tabs
       // writing to one file would each save over the other's work.
       const fresh: typeof picked = [];
@@ -493,16 +500,20 @@ export function App() {
         if (open) already = open;
         else fresh.push(p);
       }
-      if (fresh.length > 0) void openFiles(fresh.map((p) => p.file), new Map(fresh.map((p) => [p.file, p.handle])));
-      else if (already) {
+      // (Its own failures it reports itself; they aren't the picker's.)
+      if (fresh.length > 0) await openFiles(fresh.map((p) => p.file), new Map(fresh.map((p) => [p.file, p.handle]))).catch(() => {});
+      else if (already && !busyRef.current) {
         switchTo(already.id);
         setMessage(`${already.fileName} is already open.`);
       }
-    } catch (e) {
-      if (e instanceof UnreadableFile) {
-        setMessage(`Couldn't read "${e.fileName}". It may have been moved or be open in another app.`);
-        return;
+      // Said last, so the others opening doesn't talk over it.
+      if (unreadable.length > 0) {
+        setStatus(liveTabs.current.activeId ? "error" : "idle");
+        setMessage(
+          `Couldn't read ${unreadable.map((n) => `"${n}"`).join(", ")}. ${unreadable.length > 1 ? "They" : "It"} may have been moved or be open in another app.`,
+        );
       }
+    } catch {
       // A picker the browser refused (a policy, a sandboxed frame): the input
       // still works.
       openInputRef.current?.click();
@@ -1047,6 +1058,7 @@ export function App() {
         onSwitch={onSwitch}
         onCloseTab={onCloseTab}
         onOpenAnother={openAnother}
+        openElsewhere={openElsewhere}
         onDownloadAll={onDownloadAll}
         navOpen={navOpen}
         setNavOpen={setNavOpen}
