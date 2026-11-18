@@ -751,11 +751,13 @@ export function App() {
       // documents it was left out of.
       const leftOut = new Set<string>();
       const leftOutOf: string[] = [];
-      // Fields chosen to be flattened that stayed a form, and where.
+      // Fields chosen to be flattened that stayed a form, each with the ZIP
+      // entry it's in (two tabs can share a file name; the entries can't).
       const kept: string[] = [];
       const keptIn: string[] = [];
       for (const [n, t] of tabs.entries()) {
         setMessage(`Building ${n + 1} of ${tabs.length} · ${t.fileName}`);
+        let keptHere: string[] = [];
         const out = await exportPdf(t.pdf, {
           ...EMPTY_DOC,
           ...marks.get(t.id)!.doc,
@@ -764,10 +766,7 @@ export function App() {
             chars.forEach((c) => leftOut.add(c));
             if (!leftOutOf.includes(t.fileName)) leftOutOf.push(t.fileName);
           },
-          onFormKept: (names) => {
-            kept.push(...names);
-            if (names.length > 0 && !keptIn.includes(t.fileName)) keptIn.push(t.fileName);
-          },
+          onFormKept: (names) => (keptHere = names),
         });
         // Two tabs can share a file name (the same file opened twice); a ZIP
         // with duplicate entries silently loses one on extraction.
@@ -777,6 +776,10 @@ export function App() {
         for (let k = 2; used.has(entry.toLowerCase()); k++) entry = `${base}-${k}.pdf`;
         used.add(entry.toLowerCase());
         entries.push({ name: entry, data: out });
+        for (const name of keptHere) {
+          kept.push(name);
+          keptIn.push(entry);
+        }
       }
       downloadBytes(makeZip(entries), "documents-edited.zip", "application/zip");
       setTabs((list) =>

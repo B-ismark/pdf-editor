@@ -448,21 +448,25 @@ test.describe("the kept-fillable note on every export that is a PDF", () => {
     expectClean(w);
   });
 
-  test("Download all, naming the document", async ({ page }) => {
+  test("Download all, naming the file in the ZIP each field is in", async ({ page }) => {
     const w = watch(page);
     const f = await fixtures();
     await open(page, f.form);
     await greekFlattened(page);
-    // A second tab in front: the form's tab is parked, its choice with it.
-    await page.setInputFiles("input[data-open-input]", f.sample);
+    // The same form again, in a second tab: two tabs, one file name, and two
+    // entries in the ZIP. The first tab is parked, its choice with it.
+    await page.setInputFiles("input[data-open-input]", f.form);
     await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
-    await page.waitForSelector(".page canvas");
+    await page.waitForSelector(".formlayer");
+    await greekFlattened(page);
     await page.locator('[aria-label="Export options"]').click();
     await Promise.all([
       page.waitForEvent("download"),
       page.locator(".menu__item", { hasText: "Download all (2) as ZIP" }).click(),
     ]);
-    await expect(page.locator(".snackbar__msg")).toContainText(`“${FORM.text.name}” in form.pdf stays fillable`);
+    await expect(page.locator(".snackbar__msg")).toContainText(
+      `“${FORM.text.name}” in form-edited.pdf and “${FORM.text.name}” in form-edited-2.pdf stay fillable`,
+    );
     expectClean(w);
   });
 
