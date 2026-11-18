@@ -285,6 +285,15 @@ type-checking can't see, and each exists because it broke once:
   across a tab switch; Recognise text makes the words editable. Both came from
   one user report (a blank screen after Compress; a printed-to-PDF file whose
   words did nothing);
+- `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
+  never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
+  character WinAnsi can't encode instead of throwing, so `sanitize`
+  (`standardText.ts`) detects it by its encoding. A letter with a plain form
+  is folded to it (Ł→L, ź→z, ﬁ→fi; ó is WinAnsi already and stays); Greek and
+  Chinese are left out, and the status line after Download, Download all
+  (naming the documents) and Print names each left-out character once (and
+  says nothing when none were). Read through pdf.js,
+  since content streams are compressed;
 - `saved.spec.ts` — a download is a save: it clears the counter, the tab's
   dot and the leave prompt, and turns the close prompt into a plain "Close";
   a download the browser didn't finish still can't lose the work (close asks,

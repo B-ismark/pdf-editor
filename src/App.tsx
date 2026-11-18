@@ -10,6 +10,7 @@ import { usePersistentFlag } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
 import { downloadBytes } from "./download";
 import { plural } from "./plural";
+import { leftOutNote } from "./pdf/standardText";
 import { loadPdf, looksLikePdf, mayBeEncrypted, releaseDoc } from "./pdf/loader";
 import { IMAGE_ACCEPT, sniffImage } from "./pdf/images";
 import { clearEngineCache } from "./pdf/engineCache";
@@ -745,9 +746,21 @@ export function App() {
       const { makeZip } = await import("./pdf/zip");
       const entries: { name: string; data: Uint8Array }[] = [];
       const used = new Set<string>();
+      // What a standard font couldn't write, across the documents, and which
+      // documents it was left out of.
+      const leftOut = new Set<string>();
+      const leftOutOf: string[] = [];
       for (const [n, t] of tabs.entries()) {
         setMessage(`Building ${n + 1} of ${tabs.length} · ${t.fileName}`);
-        const out = await exportPdf(t.pdf, { ...EMPTY_DOC, ...marks.get(t.id)!.doc, losslessRaster });
+        const out = await exportPdf(t.pdf, {
+          ...EMPTY_DOC,
+          ...marks.get(t.id)!.doc,
+          losslessRaster,
+          onDropped: (chars) => {
+            chars.forEach((c) => leftOut.add(c));
+            if (!leftOutOf.includes(t.fileName)) leftOutOf.push(t.fileName);
+          },
+        });
         // Two tabs can share a file name (the same file opened twice); a ZIP
         // with duplicate entries silently loses one on extraction.
         const base = t.fileName.replace(/\.pdf$/i, "") + "-edited";
@@ -771,7 +784,7 @@ export function App() {
         }),
       );
       setStatus("ready");
-      setMessage(`Downloaded ${plural(entries.length, "document")} as a ZIP.`);
+      setMessage(`Downloaded ${plural(entries.length, "document")} as a ZIP.${leftOutNote(leftOut, leftOutOf)}`);
     } catch (err) {
       setStatus("error");
       setMessage(staleBuildMessage(err) ?? "Couldn't build every document. Please try again.");

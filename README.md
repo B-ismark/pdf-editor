@@ -285,7 +285,10 @@ A pragmatic, client-side editor — worth knowing where the seams are:
   subset to the glyphs used). It falls back to the closest standard font —
   Helvetica / Times / Courier, with bold & italic — when you pick a different
   font yourself, or when the original has no glyph for something you typed.
-  Text drawn with a standard font supports only WinAnsi-encodable characters.
+  Text drawn with a standard font supports only WinAnsi-encodable characters:
+  a letter with a plain form is written as that (Ł as L, ź as z), and
+  anything else — Greek, Cyrillic, Chinese, emoji — is left out of the file,
+  and the message after downloading or printing names what was left out.
 - **Background and text colour are sampled, not assumed.** Editing text on a
   coloured pill, table cell, or banner keeps that colour behind it and draws the
   replacement in the colour the original used. Both are read from the rendered

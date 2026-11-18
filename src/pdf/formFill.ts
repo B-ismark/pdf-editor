@@ -18,6 +18,7 @@ import {
   type PDFForm,
 } from "@cantoo/pdf-lib";
 import type { FormValue } from "./types";
+import { drawable as drawableChar } from "./standardText";
 
 export interface FormResult {
   /** Fields that were to be flattened but kept fillable, by name. */
@@ -247,18 +248,13 @@ function keepLooks(field: PDFField): () => void {
     });
 }
 
-/** Whether the font can draw every character of `text`. The standard fonts
- * don't throw on a character they lack — they quietly draw "?" — so each one
- * is checked for coming back as a "?" it wasn't. */
+/** Whether the font can draw every character of `text` — the exporter's own
+ * test for a standard font's stand-in "?" (standardText.ts), so a field is
+ * kept fillable by the same rule that leaves characters out elsewhere. */
 function drawable(text: string, font: PDFFont): boolean {
-  const question = font.encodeText("?").toString();
   for (const ch of text) {
-    if (ch === "?" || ch === "\n" || ch === "\r") continue;
-    try {
-      if (font.encodeText(ch).toString() === question) return false;
-    } catch {
-      return false;
-    }
+    if (ch === "\n" || ch === "\r") continue;
+    if (!drawableChar(ch, font)) return false;
   }
   return true;
 }
