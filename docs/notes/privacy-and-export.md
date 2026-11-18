@@ -249,8 +249,10 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     field editable, so it's drawn as the preview shows it and the editable
     flag put back. `/V` is written from the same kept values the look drew. A list's look draws *every* option, so all of them
     are checked, not just the chosen one. Signatures and push buttons are
-    never touched, reported or flattened. (The exporter's own `sanitize` relies on the same
-    throw, so it writes "?" where it means to drop a character.)
+    never touched, reported or flattened. The test for "can the standard
+    font draw this?" is `standardText.drawable`, shared with the exporter's
+    `sanitize`: other text has such characters folded or left out, while a
+    form answer with one stays fillable, whole.
   - **Flattening per field.** `PDFForm.flatten` does every field or none; a
     field that must stay is skipped by copying its per-widget step
     (`flattenField`, which calls pdf-lib's private `findWidgetPage` /
