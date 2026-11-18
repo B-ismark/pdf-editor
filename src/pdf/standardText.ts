@@ -49,11 +49,14 @@ const PLAIN: Record<string, string> = {
  * (ő → o, Ł → L, ﬁ → fi, full-width Ａ → A, a thin space → a space); else
  * nothing. Only a plain form drawn entirely in the font is used.
  */
-function fold(ch: string, font: PDFFont): string {
+function fold(ch: string, font: PDFFont, dropped?: Set<string>): string {
   if (drawable(ch, font)) return ch;
   if (ch === "\t") return "    ";
   const plain = PLAIN[ch] ?? ch.normalize("NFKD").replace(/\p{M}/gu, "");
   if (plain && plain !== ch && [...plain].every((c) => drawable(c, font))) return plain;
+  // Only what a reader would miss: not a lone accent, a variation selector, a
+  // joiner or a control character.
+  if (dropped && !/^[\p{M}\p{C}]$/u.test(ch)) dropped.add(ch);
   return "";
 }
 
@@ -61,12 +64,13 @@ function fold(ch: string, font: PDFFont): string {
  * `text` as `font` can draw it. Characters with no WinAnsi form (Greek,
  * Cyrillic, CJK, emoji…) are left out rather than written as "?": a missing
  * letter is a gap, a "?" is a different word. README "Limitations" says
- * standard-font text supports only WinAnsi characters.
+ * standard-font text supports only WinAnsi characters. What's left out is
+ * added to `dropped`, so the user can be told.
  */
-export function sanitize(text: string, font: PDFFont): string {
+export function sanitize(text: string, font: PDFFont, dropped?: Set<string>): string {
   let out = "";
   // Composed first: "e" + U+0301 is "é", which WinAnsi has; taken a code
   // point at a time, the lone accent would be dropped and the "é" lost.
-  for (const ch of text.normalize("NFC")) out += fold(ch, font);
+  for (const ch of text.normalize("NFC")) out += fold(ch, font, dropped);
   return out;
 }

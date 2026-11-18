@@ -289,6 +289,13 @@ function placeHint(what: string): string {
   return touch ? `Tap where ${what} goes.` : `Click where ${what} goes. Esc cancels.`;
 }
 
+/** The sentence an export adds when a standard font left characters out: the
+ * page showed them, the file doesn't, and the user should hear it from us. */
+function leftOutNote(chars: string[]): string {
+  const shown = chars.slice(0, 8).join(" ") + (chars.length > 8 ? " …" : "");
+  return ` Left out ${shown} — the built-in fonts can't write ${chars.length === 1 ? "it" : "them"}.`;
+}
+
 export interface DocumentEditorProps {
   /** The document in front. Its `history` and `view` seed this editor once, on
    * mount; `pdf`, `fileName`, `baked`, `saved` and `locked` stay live. */
@@ -2331,9 +2338,16 @@ export const DocumentEditor = memo(function DocumentEditor({
     const flattened = redactions.length > 0 ? " Redacted pages were flattened to images." : "";
     // A copy made without the password the file opened with says so.
     const noPassword = locked && !password ? " This copy has no password. To add one, use Download with password." : "";
+    // What a standard font couldn't write and the file leaves out, though the
+    // page on screen shows it (see standardText.ts).
+    let leftOut = "";
     try {
       const { exportPdf } = await import("./pdf/exporter");
-      const out = await exportPdf(pdf, exportInput(password), (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`));
+      const out = await exportPdf(
+        pdf,
+        { ...exportInput(password), onDropped: (chars) => (leftOut = leftOutNote(chars)) },
+        (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`),
+      );
       const editedName = fileName.replace(/\.pdf$/i, "") + "-edited.pdf";
       if (to.kind === "save" || to.kind === "save-as") {
         const target = to.target;
@@ -2342,7 +2356,7 @@ export const DocumentEditor = memo(function DocumentEditor({
         onSaved(activeId, { ...mark, inPlace: true }, to.kind === "save-as" ? { handle: target, fileName: target.name } : undefined);
         setStatus("ready");
         // Over a locked file, the user agreed to this before it was built.
-        setMessage(`Saved to ${target.name}.${flattened}${to.kind === "save-as" ? noPassword : ""}`);
+        setMessage(`Saved to ${target.name}.${flattened}${leftOut}${to.kind === "save-as" ? noPassword : ""}`);
         return;
       }
       if (to.kind === "share") {
@@ -2355,7 +2369,7 @@ export const DocumentEditor = memo(function DocumentEditor({
         } else if (shared === "shared") {
           // Not marked saved: a share target ("Copy", a message draft) may
           // keep nothing, so the work still needs saving somewhere.
-          setMessage(`Shared ${editedName}.${flattened}${noPassword}`);
+          setMessage(`Shared ${editedName}.${flattened}${leftOut}${noPassword}`);
         } else setMessage("Not shared.");
         return;
       }
@@ -2364,6 +2378,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       setStatus("ready");
       setMessage(
         (redactions.length > 0 ? "Downloaded — redacted pages were flattened to images." : "Downloaded edited PDF.") +
+          leftOut +
           (password ? " It opens only with the password you set." : noPassword),
       );
     } catch (err) {
