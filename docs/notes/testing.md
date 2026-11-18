@@ -155,10 +155,15 @@ type-checking can't see, and each exists because it broke once:
   the wrong password and reads the body with the right one; decrypted, it
   keeps none of the hidden information export strips. The app's own password
   prompt opens it. The password is in no storage, and the next plain download
-  isn't encrypted. Through the whiteout warning the copy made is still the
-  protected one, and closing that warning stays in the app: the password form
-  closing as the warning opens used to lose the warning's history step (see
-  `useModal`), so its close stepped the browser back to `about:blank`.
+  isn't encrypted. The dialog: Enter always answers; "don't match" waits
+  until the second field is finished; nothing invites the browser to save
+  the password. Strings on the catalog/pages (a `/Lang`, a page-label prefix)
+  aren't readable in the raw bytes and read back right with the password. A
+  full-width / no-break-space password opens in pdf.js as its prepared form
+  and in the app as typed. History: through the whiteout warning the copy is
+  still protected and closing the warning stays in the app; on a phone with
+  something selected, the dialog opens (the deselect's removal no longer
+  closes it) and Back closes it without leaving the app.
 - `patterns.spec.ts` — Redact patterns: every preset is found in the
   `personal` fixture, a phone number split across two runs too, and the
   decoys (a Luhn-failing "card", a bad-checksum IBAN, a span of years, a short

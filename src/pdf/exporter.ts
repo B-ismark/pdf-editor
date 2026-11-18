@@ -1,7 +1,8 @@
-import { LineCapStyle, PDFCheckBox, PDFDocument, PDFPage, PDFRef, PDFString, PDFTextField, StandardFonts, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb, type PDFFont } from "@cantoo/pdf-lib";
+import { LineCapStyle, PDFArray, PDFCatalog, PDFCheckBox, PDFDict, PDFDocument, PDFHexString, PDFInvalidObject, PDFName, PDFPage, PDFPageLeaf, PDFPageTree, PDFRef, PDFStream, PDFString, PDFTextField, StandardFonts, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb, type PDFFont } from "@cantoo/pdf-lib";
 import { fitScale, roomAfter } from "./lineFit";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
+import { preparePassword } from "./password";
 import {
   assertNoStructureTree,
   collectGarbage,
@@ -721,7 +722,7 @@ export async function exportPdf(
   // removed the original's), which the cipher needs.
   if (input.password) {
     out.encrypt({
-      userPassword: input.password,
+      userPassword: preparePassword(input.password),
       ownerPassword: randomSecret(),
       permissions: {
         printing: "highResolution",
@@ -733,6 +734,7 @@ export async function exportPdf(
         documentAssembly: true,
       },
     });
+    encryptLooseStrings(out);
   }
   // Appearances were generated when (and if) the form was flattened; asking
   // pdf-lib to regenerate every field's on save would rewrite the untouched
@@ -900,6 +902,68 @@ async function rasterisePage(
 export { DEFAULT_STYLE };
 
 /** 32 random bytes as hex. */
+/**
+ * `@cantoo/pdf-lib` encrypts streams only. Everything packed into an object
+ * stream is covered by that stream's encryption, but the writer keeps some
+ * objects outside one — the catalog, the page tree and pages, signature
+ * dictionaries, non-zero generations and every stream's own dictionary — and
+ * their strings went out in the clear: readable without the password, and
+ * scrambled for the person who has it (a reader decrypts them anyway). So the
+ * strings in exactly those objects are encrypted here, with the file key, as
+ * the writer would have. The predicate mirrors `PDFStreamWriter`'s; a spec
+ * holds it to the bytes.
+ */
+function encryptLooseStrings(doc: PDFDocument) {
+  const ctx = doc.context;
+  const security = ctx.security;
+  if (!security) return;
+  const encryptRef = ctx.trailerInfo.Encrypt;
+  const Sig = PDFName.of("Sig");
+  for (const [ref, obj] of ctx.enumerateIndirectObjects()) {
+    if (ref === encryptRef || obj instanceof PDFInvalidObject) continue;
+    const isSig = obj instanceof PDFDict && obj.lookup(PDFName.of("Type")) === Sig;
+    const loose =
+      obj instanceof PDFStream ||
+      obj instanceof PDFCatalog ||
+      obj instanceof PDFPageTree ||
+      obj instanceof PDFPageLeaf ||
+      ref.generationNumber !== 0 ||
+      isSig;
+    if (!loose) continue;
+    const encrypt = security.getEncryptFn(ref.objectNumber, ref.generationNumber);
+    const seal = (v: unknown): unknown =>
+      v instanceof PDFString || v instanceof PDFHexString ? PDFHexString.of(toHex(encrypt(v.asBytes()))) : undefined;
+    const walk = (node: PDFDict | PDFArray, skipContents: boolean) => {
+      if (node instanceof PDFArray) {
+        for (let i = 0; i < node.size(); i++) {
+          const v = node.get(i);
+          const sealed = seal(v);
+          if (sealed) node.set(i, sealed as PDFHexString);
+          else if (v instanceof PDFDict || v instanceof PDFArray) walk(v, false);
+        }
+        return;
+      }
+      for (const [key, v] of node.entries()) {
+        // A signature's /Contents is never encrypted (ISO 32000-2, 7.6.2).
+        if (skipContents && key.asString() === "/Contents") continue;
+        const sealed = seal(v);
+        if (sealed) node.set(key, sealed as PDFHexString);
+        else if (v instanceof PDFDict || v instanceof PDFArray) walk(v, false);
+      }
+    };
+    const top = obj instanceof PDFStream ? obj.dict : obj;
+    const sealedTop = seal(top);
+    if (sealedTop) ctx.assign(ref, sealedTop as PDFHexString);
+    else if (top instanceof PDFDict || top instanceof PDFArray) walk(top, isSig);
+  }
+}
+
+function toHex(bytes: Uint8Array): string {
+  let s = "";
+  for (const b of bytes) s += b.toString(16).padStart(2, "0");
+  return s;
+}
+
 function randomSecret(): string {
   const b = crypto.getRandomValues(new Uint8Array(32));
   return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");

@@ -11,33 +11,65 @@ const FOCUSABLE = [
 ].join(",");
 
 /**
- * Module-level modal stack so that with nested modals (e.g. a confirm dialog
- * opened from the full-screen organizer) only the TOP-most modal reacts to
- * Escape, the Back gesture, and the focus trap. A single shared `popstate`
- * listener keeps history handling correct regardless of nesting depth.
+ * The app's own history entries, in one place. Dialogs push one so Back
+ * closes them, and so does the editor's phone "Back puts the selection
+ * away" layer; each removes its entry with `history.back()` when closed from
+ * the UI. One `popstate` listener tells those removals apart from a real Back:
+ *
+ * - **Removals are counted**, not flagged: two closing in one render are two
+ *   pops, and a flag would take the second for the person pressing Back.
+ * - **A push waits while a removal is on its way.** One dialog handing over
+ *   to another in the same render (a form closing as the warning it triggers
+ *   opens) runs `back()` and `pushState` back to back, and Chrome finishes the
+ *   queued back *after* the push, discarding the new entry; the new dialog
+ *   then steps the browser out of the app when it closes.
+ * - **A real Back goes to the top dialog**, and only with none open to the
+ *   editor's layer — never to both.
  */
+export interface HistoryEntry {
+  pushed: boolean;
+  state: unknown;
+}
+let pendingPops = 0;
+let waiting: HistoryEntry[] = [];
+const strayBack = new Set<() => void>();
+
+function push(entry: HistoryEntry) {
+  entry.pushed = true;
+  window.history.pushState(entry.state, "");
+}
+
+/** Add an entry of the app's own (now, or once a pending removal lands). */
+export function pushHistory(state: unknown): HistoryEntry {
+  const entry: HistoryEntry = { pushed: false, state };
+  if (pendingPops > 0) waiting.push(entry);
+  else push(entry);
+  return entry;
+}
+
+/** Remove an entry added with `pushHistory`, closed from the UI. */
+export function unwindHistory(entry: HistoryEntry) {
+  if (!entry.pushed) {
+    waiting = waiting.filter((w) => w !== entry);
+    return;
+  }
+  entry.pushed = false;
+  pendingPops++;
+  window.history.back();
+}
+
+/** A real Back with no dialog open. Returns the unsubscribe. */
+export function onStrayBack(fn: () => void): () => void {
+  strayBack.add(fn);
+  return () => strayBack.delete(fn);
+}
+
 interface ModalEntry {
   token: symbol;
   onClose: () => void;
-  popClosed: boolean;
-  /** Its history entry exists (it may wait for an earlier unwind, below). */
-  pushed: boolean;
+  history: HistoryEntry;
 }
 const stack: ModalEntry[] = [];
-let selfPop = false; // true while we programmatically unwind our own entry
-// Entries waiting for that unwind to land. One dialog handing over to another
-// in the same render (a form closing as the warning it triggers opens) runs
-// the old one's `back()` and the new one's `pushState` back to back — and
-// Chrome finishes the queued back *after* the push, discarding the new entry.
-// The new dialog then believes it owns an entry it doesn't, and closing it
-// steps the browser out of the app. So a push waits for the pop to arrive.
-let waiting: ModalEntry[] = [];
-
-function push(entry: ModalEntry) {
-  entry.pushed = true;
-  window.history.pushState({ __modal: true }, "");
-}
-let listenerInstalled = false;
 
 // Transient popovers (e.g. the colour picker) that own Escape while open.
 // A modal defers its own Escape handling while any are active, so Escape
@@ -52,36 +84,27 @@ export function acquireEscapeLayer() {
 }
 
 function handlePop() {
-  // A back() we issued ourselves to clean up an entry — consume it silently.
-  if (selfPop) {
-    selfPop = false;
-    const next = waiting;
-    waiting = [];
-    next.forEach(push);
-    removeListenerIfEmpty();
+  // One of our own removals landing — consume it silently.
+  if (pendingPops > 0) {
+    pendingPops--;
+    if (pendingPops === 0) {
+      const next = waiting;
+      waiting = [];
+      next.forEach(push);
+    }
     return;
   }
   const top = stack[stack.length - 1];
   if (top) {
-    top.popClosed = true;
+    // The browser already removed its entry.
+    top.history.pushed = false;
     top.onClose();
+    return;
   }
+  strayBack.forEach((fn) => fn());
 }
 
-function ensureListener() {
-  if (listenerInstalled) return;
-  window.addEventListener("popstate", handlePop);
-  listenerInstalled = true;
-}
-
-function removeListenerIfEmpty() {
-  // Not while our own unwind is still on its way: its pop must be consumed
-  // here, or `selfPop` stays set and swallows the next real Back.
-  if (stack.length === 0 && listenerInstalled && !selfPop) {
-    window.removeEventListener("popstate", handlePop);
-    listenerInstalled = false;
-  }
-}
+if (typeof window !== "undefined") window.addEventListener("popstate", handlePop);
 
 /**
  * Shared modal behaviour for dialogs and full-screen surfaces:
@@ -105,11 +128,8 @@ export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => voi
     const container = containerRef.current;
     const prevActive = document.activeElement as HTMLElement | null;
     const token = Symbol("modal");
-    const entry: ModalEntry = { token, onClose: () => onCloseRef.current(), popClosed: false, pushed: false };
+    const entry: ModalEntry = { token, onClose: () => onCloseRef.current(), history: pushHistory({ __modal: true }) };
     stack.push(entry);
-    ensureListener();
-    if (selfPop) waiting.push(entry);
-    else push(entry);
 
     const isTop = () => stack[stack.length - 1]?.token === token;
 
@@ -158,17 +178,9 @@ export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => voi
       document.removeEventListener("keydown", onKeyDown, true);
       const i = stack.indexOf(entry);
       if (i !== -1) stack.splice(i, 1);
-      // Closed via the UI (not the Back gesture) — unwind the history entry we
-      // added. `selfPop` makes the resulting popstate a no-op so we never
-      // cascade-close a parent modal.
-      if (!entry.pushed) {
-        // Closed before its entry was made: there's nothing to unwind.
-        waiting = waiting.filter((w) => w !== entry);
-      } else if (!entry.popClosed) {
-        selfPop = true;
-        window.history.back();
-      }
-      removeListenerIfEmpty();
+      // Closed via the UI (not the Back gesture): remove the entry it added,
+      // without that pop closing anything else.
+      unwindHistory(entry.history);
       prevActive?.focus?.();
     };
     // Run once for the modal's lifetime.

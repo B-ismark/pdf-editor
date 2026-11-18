@@ -34,6 +34,7 @@ import { isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUserDelta, s
 import { boxCX, boxCY } from "./pdf/bbox";
 import { findUnsafeCovers, type CoverWarning } from "./pdf/redactionSafety";
 import { downloadBytes, downloadText } from "./download";
+import { onStrayBack, pushHistory, unwindHistory, type HistoryEntry } from "./hooks/useModal";
 import { plural } from "./plural";
 import type { PageNumberOptions, PageRef, WatermarkOptions } from "./pdf/types";
 import { useHistory } from "./hooks/useHistory";
@@ -1470,8 +1471,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   // there's a layer to dismiss, and pop it to close one layer at a time.
   // Phones only — desktop keeps the browser's normal Back semantics (and its
   // text elements are always editable, so there's no "edit mode" to leave).
-  const backGuard = useRef(false);
-  const consumingGuard = useRef(false);
+  const backGuard = useRef<HistoryEntry | null>(null);
   const dismissable = compact && (editingId != null || sheetOpen || selection != null || patternOpen);
   // On a phone the zoom pill yields to the top-centre contextual bar (find,
   // multi-select, a selection). The page field lives in it, so a hidden pill
@@ -1496,43 +1496,36 @@ export const DocumentEditor = memo(function DocumentEditor({
     }
     setPageJumpOpen(true);
   }, [compact, closeFind]);
+  // Through `useModal`'s history owner, so a dialog's own unwind is never
+  // taken for Back here, and a push never races a pending unwind.
   useEffect(() => {
     if (dismissable && !backGuard.current) {
-      backGuard.current = true;
-      try {
-        history.pushState({ pdfEditorLayer: true }, "");
-      } catch {
-        backGuard.current = false;
-      }
+      backGuard.current = pushHistory({ pdfEditorLayer: true });
     } else if (!dismissable && backGuard.current) {
-      // The layer was dismissed via the UI — remove our sentinel without
-      // leaving the app. The resulting popstate is swallowed below.
-      backGuard.current = false;
-      consumingGuard.current = true;
-      history.back();
+      // The layer was dismissed via the UI — remove our entry without
+      // leaving the app.
+      unwindHistory(backGuard.current);
+      backGuard.current = null;
     }
   }, [dismissable]);
-  useEffect(() => {
-    const onPopState = () => {
-      if (consumingGuard.current) {
-        consumingGuard.current = false;
-        return;
-      }
-      backGuard.current = false;
-      if (editingId != null) {
-        setEditingId(null);
-        setAutoFocusId(null);
-      } else if (sheetOpen) {
-        setSheetOpen(false);
-      } else if (selection != null) {
-        setSelection(null);
-      } else if (patternOpen) {
-        closeFind();
-      }
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, [editingId, sheetOpen, selection, patternOpen, closeFind]);
+  useEffect(
+    () =>
+      onStrayBack(() => {
+        if (!backGuard.current) return;
+        backGuard.current = null;
+        if (editingId != null) {
+          setEditingId(null);
+          setAutoFocusId(null);
+        } else if (sheetOpen) {
+          setSheetOpen(false);
+        } else if (selection != null) {
+          setSelection(null);
+        } else if (patternOpen) {
+          closeFind();
+        }
+      }),
+    [editingId, sheetOpen, selection, patternOpen, closeFind],
+  );
 
   // When the properties sheet opens on a phone, the fixed bottom sheet can
   // cover the selected object — so you can't see your style/colour edits land.
@@ -2394,7 +2387,7 @@ export const DocumentEditor = memo(function DocumentEditor({
 
     // Making a file can't start while one is being made.
     { id: "download", group: "export", label: "Download PDF", icon: "download", keywords: "save export", disabled: busy, run: () => void download() },
-    { id: "protect", group: "export", label: "Download with password", icon: "protect", keywords: "encrypt password protect lock secure aes", opens: "dialog", disabled: busy, run: () => setProtectOpen(true) },
+    { id: "protect", group: "export", label: "Download with password", icon: "protect", keywords: "encrypt password protect lock secure aes", opens: "dialog", disabled: busy, run: () => { setSelection(null); setProtectOpen(true); } },
     { id: "compress", group: "export", label: "Compress PDF", icon: "compress", keywords: "shrink reduce size optimise", opens: "dialog", disabled: busy, run: openCompress },
     { id: "sign-cert", group: "export", label: "Sign with certificate", icon: "certificate", keywords: "digital signature pades certificate p12 sign", opens: "dialog", disabled: busy, run: () => { setSelection(null); setSignCertOpen(true); } },
     { id: "eximg", group: "export", label: "Export as images", icon: "images", keywords: "png zip export", disabled: busy, run: () => void exportImages() },

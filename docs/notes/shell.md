@@ -233,10 +233,15 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   page area is wide enough, below it when not, centred on phones where the
   pill steps aside.
 
-- **Modal history handoff (`useModal`).** Each modal pushes a history entry so
-  Back closes it, and unwinds it with `history.back()` when closed from the UI.
-  When one modal closes and another opens in the same render, Chrome finishes
-  the queued `back()` *after* the new `pushState`, dropping the new entry — and
-  the new modal's own close then steps out of the app. So a push made while an
-  unwind is pending waits for that pop (`waiting`), and the `popstate` listener
-  stays installed until the pending pop is consumed. `protect.spec` guards it.
+- **One owner for the app's history entries (`useModal`).** Dialogs push an
+  entry so Back closes them, and the editor's phone layer (Back puts the
+  selection / sheet / edit away) pushes one too — both through `pushHistory`
+  / `unwindHistory` / `onStrayBack`, never `history.*` directly. One
+  `popstate` listener: our own removals are *counted* (two closing in one
+  render are two pops); a push made while a removal is in flight waits for it
+  (Chrome lands a queued `back()` *after* a following `pushState`, dropping
+  the new entry — the dialog that opened then steps out of the app when it
+  closes); a real Back goes to the top dialog, and only with none open to the
+  editor's layer. Before, the editor's own listener took a dialog's removal
+  for Back, and a deselect in the same render as a dialog opening closed the
+  dialog at once. `protect.spec` guards both.

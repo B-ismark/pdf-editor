@@ -26,6 +26,16 @@ export type Unlock =
   | { kind: "failed" };
 
 export async function unlockPdf(bytes: ArrayBuffer, password: string): Promise<Unlock> {
+  const first = await unlockWith(bytes, password);
+  // A file from a tool that follows the standard hashed the prepared form of
+  // its password (see `preparePassword`); one from a tool that doesn't, the
+  // raw one. Try the raw one first, then the prepared one if it differs.
+  if (first.kind !== "needs-password") return first;
+  const prepared = (await import("./password")).preparePassword(password);
+  return prepared === password ? first : unlockWith(bytes, prepared);
+}
+
+async function unlockWith(bytes: ArrayBuffer, password: string): Promise<Unlock> {
   const lib = await import("@cantoo/pdf-lib");
   let doc: import("@cantoo/pdf-lib").PDFDocument;
   try {

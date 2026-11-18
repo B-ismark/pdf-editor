@@ -2,7 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PDFDict, PDFDocument, PDFName, PDFNumber } from "pdf-lib";
+import { PDFDict, PDFDocument, PDFName, PDFNumber, PDFString } from "pdf-lib";
 import { fixtures, HIDDEN } from "./fixtures";
 import { dragOnPage, open, pickTool, watch } from "./helpers";
 
@@ -53,11 +53,31 @@ test("the copy needs the password to open, is AES-256, and still has everything 
   await open(page, (await fixtures()).hidden);
   const d = await openProtect(page);
 
-  // Typed twice; a mismatch says so and can't download.
+  // Nothing typed: Enter answers, rather than doing nothing.
+  await d.getByLabel("Password", { exact: true }).press("Enter");
+  await expect(d.getByRole("alert")).toHaveText("Type a password first.");
+  await expect(d.getByLabel("Password", { exact: true })).toHaveAttribute("aria-invalid", "true");
+  // Typed twice. Halfway through the second, nothing is called wrong yet…
   await d.getByLabel("Password", { exact: true }).fill(PASSWORD);
+  await d.getByLabel("Type it again").pressSequentially("corr");
+  await expect(d.getByRole("alert")).toBeHidden();
+  await expect(d.getByLabel("Type it again")).not.toHaveAttribute("aria-invalid", "true");
+  // …finished and different, it says so, and Download makes nothing.
   await d.getByLabel("Type it again").fill(PASSWORD + "x");
-  await expect(d.getByRole("alert")).toContainText("don't match");
-  await expect(d.getByRole("button", { name: "Download" })).toBeDisabled();
+  let downloads = 0;
+  page.on("download", () => downloads++);
+  await d.getByRole("button", { name: "Download" }).click();
+  await expect(d.getByRole("alert")).toHaveText("The two passwords don't match.");
+  await expect(d.getByLabel("Type it again")).toHaveAttribute("aria-invalid", "true");
+  await d.getByLabel("Type it again").press("Enter");
+  await expect(d).toBeVisible();
+  expect(downloads).toBe(0);
+  // Nothing invites the browser to save the password: no form is submitted,
+  // and no field asks to be remembered as a new password.
+  await expect(d.locator("form")).toHaveCount(0);
+  for (const input of await d.locator('input:not([type="checkbox"])').all()) {
+    await expect(input).toHaveAttribute("autocomplete", "off");
+  }
   // Show password turns both fields to text.
   await d.getByLabel("Show password").check();
   await expect(d.getByLabel("Type it again")).toHaveAttribute("type", "text");
@@ -189,4 +209,90 @@ test("closing the whiteout warning after the password form stays in the app", as
   await expect(page.getByRole("dialog", { name: "Download with password" })).toBeHidden();
   expect(page.url()).toBe(url);
   await expect(page.locator(".page").first()).toBeVisible();
+});
+
+// pdf-lib encrypts streams only; strings in the objects it keeps out of
+// object streams (the catalog, pages, stream dictionaries) went out in the
+// clear — readable without the password, scrambled with it.
+test("text on the document's own dictionaries is encrypted too, and reads back right", async ({ page }) => {
+  const src = await PDFDocument.create();
+  const p = src.addPage([300, 300]);
+  p.drawText("Body", { x: 40, y: 200, size: 20 });
+  const cat = src.catalog;
+  cat.set(PDFName.of("Lang"), PDFString.of("xx-SECRETLANG"));
+  cat.set(
+    PDFName.of("PageLabels"),
+    src.context.obj({ Nums: [0, src.context.obj({ S: "D", P: PDFString.of("SECRETLABEL-") })] }),
+  );
+  const file = join(mkdtempSync(join(tmpdir(), "protect-")), "labels.pdf");
+  writeFileSync(file, await src.save({ useObjectStreams: false }));
+
+  await open(page, file);
+  const bytes = await protectedDownload(page, await openProtect(page));
+  const raw = bytes.toString("latin1");
+  expect(raw, "the language tag isn't readable without the password").not.toContain("SECRETLANG");
+  expect(raw, "the page label isn't readable without the password").not.toContain("SECRETLABEL");
+
+  const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(bytes), password: PASSWORD, useWorkerFetch: false, isEvalSupported: false }).promise;
+  expect(await doc.getPageLabels(), "the label reads back with the password").toEqual(["SECRETLABEL-1"]);
+  await doc.destroy();
+});
+
+// On a phone, something selected holds a history entry of the editor's own
+// (Back puts it away). Opening the dialog clears the selection — removing
+// that entry — in the same moment the dialog adds its own; and a dialog's
+// own removal used to be taken by the editor for Back.
+test("phone: with something selected, the dialog still closes on Back and the app stays", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const page = await ctx.newPage();
+  await open(page, (await fixtures()).sample);
+  const url = page.url();
+  const dialog = page.getByRole("dialog", { name: "Download with password" });
+  const openIt = async () => {
+    await page.getByRole("button", { name: "More actions" }).click();
+    await page.getByRole("menuitem", { name: /Download with password/ }).click();
+    await expect(dialog).toBeVisible();
+  };
+  // Once with nothing selected, so the dialog's code is loaded and the next
+  // open lands in the same render as the deselect.
+  await openIt();
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+
+  await page.locator(".fragment").nth(2).tap();
+  await expect(page.locator(".zoombar"), "something is selected").toHaveCount(0);
+  await openIt();
+  await page.waitForTimeout(300);
+  await page.goBack();
+  await expect(dialog, "Back closed the dialog").toBeHidden();
+  await page.waitForTimeout(300);
+  expect(page.url()).toBe(url);
+  await expect(page.locator(".page").first(), "and not the app").toBeVisible();
+
+  await ctx.close();
+});
+
+// AES-256 hashes the password after SASLprep, as Acrobat does with what's
+// typed. A full-width password from an IME, or one with a no-break space,
+// would otherwise make a copy that opens here and not there.
+test("a password typed with full-width letters or a no-break space opens the copy everywhere", async ({ page }) => {
+  await open(page, (await fixtures()).hidden);
+  const typed = "ｐａｓｓ ｗｏｒｄ";
+  const d = await openProtect(page);
+  await d.getByLabel("Password", { exact: true }).fill(typed);
+  await d.getByLabel("Type it again").fill(typed);
+  const [dl] = await Promise.all([page.waitForEvent("download", { timeout: 120_000 }), d.getByRole("button", { name: "Download" }).click()]);
+  const bytes = readFileSync((await dl.path())!);
+  // What a standard reader hashes: the prepared form.
+  expect(await readWith(bytes, "pass word")).toContain(HIDDEN.body);
+  // And typed as it was into this app's own prompt, it still opens.
+  const file = join(mkdtempSync(join(tmpdir(), "protect-")), "fullwidth.pdf");
+  writeFileSync(file, bytes);
+  await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', file);
+  const prompt = page.getByRole("dialog", { name: /password/i }).last();
+  await prompt.getByLabel(/password/i).first().fill(typed);
+  await prompt.getByRole("button", { name: /Open|Unlock/ }).click();
+  await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+  await expect(page.locator('.page [role="textbox"]').first()).toHaveText(HIDDEN.body, { timeout: 30_000 });
 });
