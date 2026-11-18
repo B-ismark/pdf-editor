@@ -69,7 +69,7 @@ Read only the section a package points at, not the whole folder.
   - [x] The command palette is generated from one command registry, which the ⋯ and Export menus render from too. Guarded by `shell.spec` ("command registry"); notes in `docs/notes/shell.md`.
 - [ ] **7. Privacy features** (M). (PRODUCT §2.1)
   - [x] Pattern redaction with a review list. Guarded by the `patterns` spec; notes in `docs/notes/privacy-and-export.md`.
-  - [ ] A "Remove hidden information" report.
+  - [x] A "Remove hidden information" report. Guarded by the `hidden` spec; notes in `docs/notes/privacy-and-export.md`.
   - [ ] Encrypt and decrypt on export (`@cantoo/pdf-lib` or qpdf-wasm, lazy-loaded and self-hosted).
 - [ ] **8. Page tools** (M ×2). (PRODUCT §2.1)
   - Split, Images → PDF, Crop, insert a page at a position.

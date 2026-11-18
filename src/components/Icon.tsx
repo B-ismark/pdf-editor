@@ -15,6 +15,7 @@ import {
   BadgeCheck,
   BringToFront,
   Check,
+  CircleMinus,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -27,6 +28,8 @@ import {
   CopyPlus,
   Download,
   Eraser,
+  EyeOff,
+  FileScan,
   FileDown,
   FilePlus,
   FileText,
@@ -211,6 +214,12 @@ const MAP: Record<string, LucideIcon> = {
   /** Look through the text for kinds of information (emails, card numbers)
    * to redact: a search over lines of text, not for one word. */
   redact_patterns: TextSearch,
+  /** "Hidden information": look at what the file carries off the page. */
+  hidden_info: FileScan,
+  /** A row of that report the export takes out of the file. */
+  hidden_removed: CircleMinus,
+  /** A row of that report that stays in the file, out of sight. */
+  hidden_kept: EyeOff,
   /** Jump to a page by number (the zoom pill's page chip, "Go to page…"). */
   go_to_page: ArrowDownToLine,
   command: Command,

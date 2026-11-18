@@ -134,6 +134,13 @@ type-checking can't see, and each exists because it broke once:
   undo mid-drag isn't redone by the drop; a blocked Delete doesn't steal focus
   later; picks don't survive their page's removal; with Find open the view and
   the active hit stay put through page work and text loading;
+- `hidden.spec.ts` — the "Hidden information" report, on the `hidden` fixture
+  (properties, XMP, file ID, scripts, attachments, launch/submit links, private
+  data, a signed comment, a switched-off layer). Every kind is listed under the
+  right heading; the download, read structurally (it's compressed, so byte
+  searches prove nothing), has none of what was listed as removed and all of
+  what was listed as kept; and the download, reopened, has nothing left to
+  remove. Edits and whiteouts count as covered text until the page is redacted.
 - `patterns.spec.ts` — Redact patterns: every preset is found in the
   `personal` fixture, a phone number split across two runs too, and the
   decoys (a Luhn-failing "card", a bad-checksum IBAN, a span of years, a short

@@ -71,6 +71,17 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   every overlay does. Case folding keeps a
   map back to the original indices (Turkish "İ" lower-cases to two code
   points). Don't tighten any of this without `export.spec`'s hostile-text test.
+- **The "Hidden information" report is the sanitiser's own record.**
+  `sanitizeDocument` returns a `ScrubReport`, filled in at each place it
+  removes something; `inspectHidden` (`pdf/hiddenInfo.ts`) runs it on a
+  throwaway copy of the loaded bytes and words the result. Don't compute the
+  "removed" list any other way (a second walk of the catalog, a list of keys
+  to look for): it would drift from what the export really does, which is the
+  one thing the report must never do. When you add a removal to the sanitiser,
+  record it in the report in the same place. The "still in the file" list is
+  what the export deliberately keeps: comment authors (`/T`), layers that are
+  switched off, and text covered by an edit or a whiteout on a page that isn't
+  flattened (counted in `DocumentEditor`, where the edits are).
 - **Redact patterns searches a page's *joined* text** (`joinPage` and
   `findPatternMatches` in `pdf/find.ts`; matching in `pdf/patternScan.ts`;
   presets in `pdf/patterns.ts`). Runs on one line, judged in the text's own
