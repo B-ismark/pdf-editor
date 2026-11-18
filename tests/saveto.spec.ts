@@ -192,7 +192,7 @@ test.describe("save in place", () => {
     await addText(page, "Unlocked");
 
     await page.keyboard.press("Control+s");
-    const warn = page.getByRole("dialog", { name: "Save without its password?" });
+    const warn = page.getByRole("alertdialog", { name: "Save without its password?" });
     await expect(warn).toBeVisible();
     await warn.getByRole("button", { name: "Go back" }).click();
     expect(await writes(page)).toEqual([]);
@@ -238,8 +238,12 @@ test.describe("save as", () => {
     // Every message shown from here on, as it's shown.
     await page.evaluate(() => {
       const seen: string[] = ((window as unknown as { __said: string[] }).__said = []);
+      // What's already up (the load's "12 pages · …") isn't something Save said.
+      const before = new Set([...document.querySelectorAll(".snackbar__msg")].map((m) => m.textContent));
       new MutationObserver(() => {
-        for (const m of document.querySelectorAll(".snackbar__msg")) seen.push(m.textContent ?? "");
+        for (const m of document.querySelectorAll(".snackbar__msg")) {
+          if (!before.has(m.textContent)) seen.push(m.textContent ?? "");
+        }
       }).observe(document.body, { subtree: true, childList: true, characterData: true });
     });
     await page.keyboard.press("Control+s");
@@ -291,7 +295,7 @@ test.describe("share", () => {
     await open(page, f.sample);
     await page.getByRole("button", { name: "Export options" }).click();
     await exportMenu(page).getByRole("menuitem", { name: "Share" }).click();
-    const ready = page.getByRole("dialog", { name: "Ready to share" });
+    const ready = page.getByRole("alertdialog", { name: "Ready to share" });
     await expect(ready).toBeVisible();
     await ready.getByRole("button", { name: "Share" }).click();
     await expect(ready).toHaveCount(0);
@@ -415,12 +419,12 @@ test.describe("review fixes", () => {
     await page.waitForSelector(".page canvas", { timeout: 30_000 });
     await addText(page, "One");
     await page.keyboard.press("Control+s");
-    await page.getByRole("dialog", { name: "Save without its password?" }).getByRole("button", { name: "Save without password" }).click();
+    await page.getByRole("alertdialog", { name: "Save without its password?" }).getByRole("button", { name: "Save without password" }).click();
     await expect(counter(page)).toHaveText("Saved");
     await addText(page, "Two");
     await page.keyboard.press("Control+s");
     await expect(counter(page)).toHaveText("Saved");
-    await expect(page.getByRole("dialog", { name: "Save without its password?" })).toHaveCount(0);
+    await expect(page.getByRole("alertdialog", { name: "Save without its password?" })).toHaveCount(0);
     expect((await writes(page)).length).toBe(2);
   });
 
@@ -494,7 +498,8 @@ test.describe("save in place, with more open", () => {
     await openPicked(page);
     await addText(page, "Not written");
     await page.keyboard.press("Control+s");
-    await expect(page.getByRole("status").filter({ hasText: "it's unchanged" }).first()).toBeVisible();
+    // An error, so announced as an alert rather than a status.
+    await expect(page.locator(".snackbar__msg").filter({ hasText: "it's unchanged" }).first()).toBeVisible();
     await expect(counter(page)).toHaveText("1 change");
     await expect(activeTab(page).locator(".doctab__dirty")).toHaveCount(1);
   });
@@ -515,7 +520,7 @@ test.describe("save in place, with more open", () => {
     await addText(page, "Two");
     await page.keyboard.press("Control+s");
     await expect(counter(page)).toHaveText("Saved");
-    await expect(page.getByRole("dialog", { name: "Save without its password?" })).toHaveCount(0);
+    await expect(page.getByRole("alertdialog", { name: "Save without its password?" })).toHaveCount(0);
     expect((await writes(page)).map((x) => x.name)).toEqual(["copy.pdf", "copy.pdf"]);
   });
 });
