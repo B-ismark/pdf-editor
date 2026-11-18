@@ -782,7 +782,7 @@ async function rasterisePage(
   const H = pageData.viewBox.height;
   // In user space (no turn): every overlay object is stored there, and the
   // page's turn is put back on the replacement as `/Rotate` below.
-  const canvas = await renderPageToCanvas(loaded.bytes, pageIndex, REDACT_SCALE, undefined, 0);
+  const canvas = await renderPageToCanvas(loaded.bytes, pageIndex, REDACT_SCALE, undefined, 0, true);
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not get 2D canvas context");
   const S = REDACT_SCALE;

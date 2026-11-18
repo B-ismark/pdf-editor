@@ -65,6 +65,8 @@ export interface Fixtures {
   hidden: string;
   /** One page with one form field of every kind — see {@link FORM}. */
   form: string;
+  /** One page of form fields the write path gets wrong easily — see {@link FORM_EDGE}. */
+  formEdge: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
@@ -273,6 +275,7 @@ async function build(): Promise<Fixtures> {
     tricky: write("tricky.pdf", await trickyPdf()),
     hidden: write("hidden.pdf", await hiddenPdf()),
     form: write("form.pdf", await formPdf()),
+    formEdge: write("form-edge.pdf", await formEdgePdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -1244,6 +1247,81 @@ async function formPdf(): Promise<Uint8Array> {
   langs.addOptions(FORM.list.options);
   langs.enableMultiselect();
   langs.addToPage(page, at(FORM.list.rect));
+
+  return doc.save();
+}
+
+/**
+ * The form fields that are easy to get wrong, one page:
+ * - `city`: an editable dropdown holding a value that isn't one of its options,
+ *   with a tooltip (`/TU`) that names it, and a look that shows the value;
+ * - `answer`: radio buttons where two stand for the same value (`/Opt [Yes Yes No]`);
+ * - `secret`: a hidden text field with a value — never to be printed;
+ * - `script`: a list one of whose options the standard font can't draw;
+ * - `level`: a single-choice list with nothing chosen;
+ * - `signature`: an unsigned signature field.
+ */
+export const FORM_EDGE = {
+  page: { width: 500, height: 560 },
+  label: "EDGE CASES",
+  city: { name: "city", tip: "Home city", rect: [40, 460, 160, 22], options: ["Accra", "Kumasi"], value: "Tamale" },
+  answer: { name: "answer", options: ["Yes", "Yes", "No"], y: 400 },
+  secret: { name: "secret", rect: [40, 340, 200, 22], value: "HIDDENVALUE" },
+  script: { name: "script", rect: [40, 250, 140, 50], options: ["English", "Ελληνικά"] },
+  level: { name: "level", rect: [240, 250, 140, 50], options: ["Beginner", "Intermediate", "Expert"] },
+  signature: { name: "signature", rect: [300, 40, 160, 40] },
+};
+
+async function formEdgePdf(): Promise<Uint8Array> {
+  const E = FORM_EDGE;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([E.page.width, E.page.height]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText(E.label, { x: 40, y: 520, size: 16, font });
+  const form = doc.getForm();
+  const at = (r: number[]) => ({ x: r[0], y: r[1], width: r[2], height: r[3] });
+
+  const city = form.createDropdown(E.city.name);
+  city.addOptions(E.city.options);
+  city.enableEditing();
+  city.select(E.city.value);
+  city.addToPage(page, at(E.city.rect));
+  // On the field and its one widget, as a field drawn once usually is (merged):
+  // pdf.js reads a tooltip from the widget only.
+  city.acroField.dict.set(PDFName.of("TU"), PDFString.of(E.city.tip));
+  city.acroField.getWidgets()[0].dict.set(PDFName.of("TU"), PDFString.of(E.city.tip));
+
+  const answer = form.createRadioGroup(E.answer.name);
+  E.answer.options.forEach((o, i) => answer.addOptionToPage(o, page, { x: 40 + i * 60, y: E.answer.y, width: 16, height: 16 }));
+
+  const secret = form.createTextField(E.secret.name);
+  secret.setText(E.secret.value);
+  secret.addToPage(page, { ...at(E.secret.rect), hidden: true });
+
+  // Options set after the look is drawn: this pdf-lib can't draw the Greek.
+  const script = form.createOptionList(E.script.name);
+  script.addOptions(["English", "French"]);
+  script.addToPage(page, at(E.script.rect));
+  script.acroField.dict.set(PDFName.of("Opt"), doc.context.obj(E.script.options.map((o) => PDFHexString.fromText(o))));
+  form.markFieldAsClean(script.ref);
+
+  const level = form.createOptionList(E.level.name);
+  level.addOptions(E.level.options);
+  level.addToPage(page, at(E.level.rect));
+
+  const sig = doc.context.register(
+    doc.context.obj({
+      Type: "Annot",
+      Subtype: "Widget",
+      FT: "Sig",
+      T: PDFString.of(E.signature.name),
+      Rect: [E.signature.rect[0], E.signature.rect[1], E.signature.rect[0] + E.signature.rect[2], E.signature.rect[1] + E.signature.rect[3]],
+      F: 4,
+      P: page.ref,
+    }),
+  );
+  page.node.addAnnot(sig);
+  form.acroForm.addField(sig);
 
   return doc.save();
 }

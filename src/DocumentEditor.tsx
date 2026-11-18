@@ -19,7 +19,7 @@ import { PageView, type AnnotSpec } from "./components/PageView";
 import { translateAnnotation } from "./components/AnnotationLayer";
 import { PropertiesPanel } from "./components/PropertiesPanel";
 import { DocumentPanel } from "./components/DocumentPanel";
-import { fieldValue, hasValue } from "./components/FormFieldLayer";
+import { fieldValue, hasValue, sameValue } from "./components/FormFieldLayer";
 import { DrawToolbar, SUBTOOLS } from "./components/DrawToolbar";
 import { SelectionBar } from "./components/SelectionBar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -210,13 +210,15 @@ const TOOL_SHORTCUT: Record<NavKey, string> = {
   link: "L",
 };
 
-/** True when focus is in a text-entry context, so single-key shortcuts and
- * arrow-nudge must not hijack the keystroke. */
+/** True when focus is in a text-entry context — or on any form field, whose
+ * keys (arrows between radio buttons, Space to tick) are its own — so
+ * single-key shortcuts, Delete and arrow-nudge must not hijack the keystroke. */
 function isTypingTarget(): boolean {
   const el = document.activeElement as HTMLElement | null;
   if (!el) return false;
   return (
     el.isContentEditable ||
+    !!el.closest(".formlayer") ||
     el.tagName === "INPUT" ||
     el.tagName === "TEXTAREA" ||
     el.tagName === "SELECT"
@@ -438,6 +440,13 @@ export const DocumentEditor = memo(function DocumentEditor({
       }),
     [shown],
   );
+  // Every field in the file, by name — the first widget of each, which holds
+  // the value the file came with.
+  const formFieldsByName = useMemo(() => {
+    const byName = new Map<string, FormField>();
+    if (pdf) for (const p of pdf.pages) for (const f of p.fields) if (!byName.has(f.name)) byName.set(f.name, f);
+    return byName;
+  }, [pdf]);
   // The form, as the Inspector describes it: fields by name (a radio group is
   // one field however many buttons it has), and how many hold a value.
   const formFacts = useMemo(() => {
@@ -1366,14 +1375,26 @@ export const DocumentEditor = memo(function DocumentEditor({
     [doc],
   );
 
+  // Typing in a field is one undo step per field, like typing anywhere; a
+  // click (a box ticked, a button or option chosen) is a step of its own. A
+  // value put back to how the file came is no longer a change.
   const onChangeFormValue = useCallback(
-    (name: string, value: FormValue) => {
+    (name: string, value: FormValue, typing = false) => {
+      const field = formFieldsByName.get(name);
       doc.set(
-        (d) => ({ ...d, formValues: { ...(d.formValues ?? {}), [name]: value } }),
-        `form-${name}`,
+        (d) => {
+          const values = d.formValues ?? {};
+          const now = name in values ? values[name] : field?.defaultValue;
+          if (field && sameValue(now, value)) return d;
+          const next = { ...values };
+          if (field && sameValue(field.defaultValue, value)) delete next[name];
+          else next[name] = value;
+          return { ...d, formValues: Object.keys(next).length > 0 ? next : undefined };
+        },
+        typing ? `form-${name}` : undefined,
       );
     },
-    [doc],
+    [doc, formFieldsByName],
   );
 
   const setFormFlatten = useCallback(
@@ -2186,7 +2207,8 @@ export const DocumentEditor = memo(function DocumentEditor({
       }
       if (
         (selection?.kind === "redaction" || selection?.kind === "stamp" || selection?.kind === "link") &&
-        (e.key === "Delete" || e.key === "Backspace")
+        (e.key === "Delete" || e.key === "Backspace") &&
+        !isTypingTarget()
       ) {
         e.preventDefault();
         onDelete();
@@ -2196,7 +2218,8 @@ export const DocumentEditor = memo(function DocumentEditor({
       if (
         selection?.kind === "annotation" &&
         e.key === "Delete" &&
-        selectedAnnotation?.kind !== "note"
+        selectedAnnotation?.kind !== "note" &&
+        !isTypingTarget()
       ) {
         e.preventDefault();
         onDelete();

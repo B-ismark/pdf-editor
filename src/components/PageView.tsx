@@ -97,7 +97,7 @@ interface Props {
   onAddTextBox: (pageIndex: number, x: number, y: number, rotation: number) => void;
   onAddRedaction: (pageIndex: number, x: number, y: number, width: number, height: number, cover?: boolean) => void;
   onAddLink: (pageIndex: number, x: number, y: number, width: number, height: number) => void;
-  onChangeFormValue: (name: string, value: FormValue) => void;
+  onChangeFormValue: (name: string, value: FormValue, typing?: boolean) => void;
   /** Report the ids enclosed by a marquee drag on this page. */
   onMarquee: (ids: string[], additive: boolean) => void;
   /** Shift every object in the multi-selection by (dx, dy) in PDF units. The

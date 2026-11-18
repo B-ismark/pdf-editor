@@ -1436,7 +1436,7 @@ body {
 .whiteout--preview { position: absolute; background: rgba(255, 255, 255, 0.85); border: 1px dashed var(--primary); pointer-events: none; }
 
 /* ============ Form fields ============ */
-.formlayer { position: absolute; inset: 0; z-index: 3; }
+.formlayer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 .formfield {
   position: absolute;
   box-sizing: border-box;

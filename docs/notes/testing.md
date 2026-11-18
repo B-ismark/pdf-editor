@@ -191,7 +191,16 @@ type-checking can't see, and each exists because it broke once:
   default. Flatten prints the answers onto the page (pdf.js text) and leaves no
   fields. Greek can't be drawn by the standard font: that field stays fillable
   with `/NeedAppearances`, the user is told, and no "?????" reaches the page.
-  The choice undoes.
+  The choice undoes. The review's findings each have a test: the fields
+  don't block text or boxes around them, Backspace in a field never deletes the
+  selected box, radios are named "size: option 2 of 3" and arrow keys move the
+  choice, each click is its own undo step and a field put back is no change,
+  a box or radio keeps the file's own look and `/DA`. On `formEdge`: an
+  editable dropdown shows its own value and is named by its `/TU`, a single
+  list starts empty, of two buttons with one export value the clicked one is
+  chosen, flattening skips a hidden field and a signature and keeps a list
+  with Greek options fillable, a redacted page's picture has no field answers
+  in it, and Organise keeps the form.
 - `crop.spec.ts` — Package 8b. A page whose CropBox starts at 100,200: the
   heading's overlay sits on its glyphs (not off the page), an edit is redrawn
   at the run's own user-space position, and a link drawn 20 points in from

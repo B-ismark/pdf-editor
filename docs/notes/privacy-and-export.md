@@ -220,19 +220,27 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
 - **Forms (`formFill.ts`).** Every field kind is filled in the preview
   (`FormFieldLayer`) and written by `applyForm`, called from the exporter.
   The default is **keep fillable**; `DocState.formFlatten` (set from the
-  Document panel's Form section, undoable) flattens. Three traps, each with a
+  Document panel's Form section, undoable) flattens. The traps, each with a
   spec in `forms.spec`:
   - **Stored value vs shown text.** pdf.js reports a choice by its export value
     and a radio button by its on-state; pdf-lib's `select` takes a dropdown's
     *shown* text and writes it as `/V`, and picks a radio by its `/Opt` export
-    value. `applyForm` translates both ways (`shownText`, `radioOption`) and,
-    once the look is drawn, puts the export value back in `/V`
-    (`storeChoiceValues`).
+    value (the last match, when two buttons share one). `applyForm` translates
+    choices both ways (`optionText`) and, once the look is drawn, puts the
+    export value back in `/V` (`storeChoiceValues`); a radio is set by the
+    button's own on-state name (`acroField.setValue`), never by `select`.
+  - **pdf-lib replaces looks it needn't.** `defaultUpdateAppearances` redraws a
+    checkbox's tick and a radio's dot in its own style and rewrites every
+    field's `/DA` to name a font the form's `/DR` lacks (`/dummy__noop` for
+    buttons). A box or radio is redrawn only when a widget has no look at all;
+    `/DA` on the field and its widgets is saved and put back (`keepLooks`).
   - **The standard font doesn't throw on a missing glyph** — the fork draws
     "?" instead. `drawable` checks each character first; a field it can't draw
     keeps its value, gets `/NeedAppearances`, and when flattening is *kept
     fillable* and reported (`onFormKept` → "“name” stays fillable"), never
-    flattened as "?????". (The exporter's own `sanitize` relies on the same
+    flattened as "?????". A list's look draws *every* option, so all of them
+    are checked, not just the chosen one. Signatures and push buttons are
+    never touched, reported or flattened. (The exporter's own `sanitize` relies on the same
     throw, so it writes "?" where it means to drop a character.)
   - **Flattening per field.** `PDFForm.flatten` does every field or none; a
     field that must stay is skipped by copying its per-widget step
@@ -240,8 +248,21 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     `findWidgetAppearanceRef` / `flattenWidgetOntoPage`). If the library
     renames them, `forms.spec`'s flatten tests fail. An untouched field without
     a normal appearance is drawn before flattening, or it would flatten to
-    nothing.
+    nothing (a choice from its stored values, so it shows option text). A
+    hidden widget (`/F` Hidden or NoView) is not painted; its field still goes.
+  - **Organise drops the form.** `copyPages` copies the widgets and fields but
+    not `/AcroForm`; `pageOps.rebuildForm` gives the rebuilt file one from the
+    kept pages' widgets (with the first source's `/DA`, `/DR`), dropping
+    widgets on pages left out. Two merged files with same-named fields stay
+    two fields of one name.
+  - **Known limits, not handled:** a checkbox with several on-states (only
+    "on" or "off" is offered); a widget whose appearance `/BBox` isn't at the
+    origin flattens offset (pdf-lib's placement); a field name in
+    PDFDocEncoding that pdf.js and pdf-lib decode differently won't match.
   The preview controls are opaque: the canvas beneath shows the field as the
-  file came, and a changed value mustn't sit over the old one. Fields on a
-  redacted (rasterised) page are removed with the page's content, values and
-  all — the raster is drawn from the original bytes.
+  file came, and a changed value mustn't sit over the old one. They take the
+  pointer only themselves (the layer doesn't), so text and boxes around them
+  stay reachable. Fields on a redacted (rasterised) page are removed with the
+  page's content, answers and all — and the raster is drawn *without* the
+  form (`renderPageToCanvas(…, withoutForms)`), so the file's original
+  answers aren't baked into the picture either.

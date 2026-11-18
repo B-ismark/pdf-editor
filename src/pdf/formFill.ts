@@ -7,6 +7,7 @@ import {
   PDFTextField,
   PDFBool,
   PDFHexString,
+  PDFNumber,
   type PDFDocument,
   type PDFField,
   type PDFFont,
@@ -55,9 +56,21 @@ export function applyForm(
   }
   if (fields.length === 0) return result;
 
-  // Fields whose look couldn't be drawn: the viewer has to.
+  // Fields whose look couldn't be drawn: the viewer has to. `unreadable` are
+  // the ones that couldn't because of their text — the user is told.
   const undrawn = new Set<PDFField>();
-  for (const field of fields) {
+  const unreadable = new Set<PDFField>();
+  // Only the kinds the editor fills. A signature or push button is left as it
+  // came, flattening or not: it has no value to draw.
+  const fillable = fields.filter(
+    (f) =>
+      f instanceof PDFTextField ||
+      f instanceof PDFCheckBox ||
+      f instanceof PDFRadioGroup ||
+      f instanceof PDFDropdown ||
+      f instanceof PDFOptionList,
+  );
+  for (const field of fillable) {
     let name: string;
     try {
       name = field.getName();
@@ -65,6 +78,9 @@ export function applyForm(
       continue;
     }
     const touched = name in values;
+    // An untouched dropdown or list still holds what the file stored; drawn
+    // again, it should show its options' text, not their stored values.
+    const value: FormValue | undefined = touched ? values[name] : choiceValues(field);
     if (touched) {
       try {
         setValue(field, values[name]);
@@ -77,17 +93,37 @@ export function applyForm(
     // Draw the field's new look. When flattening, every field needs one — an
     // untouched field whose look the file left to the viewer would otherwise
     // flatten to nothing. Kept fillable, an untouched field is left alone.
-    if (!touched && !(flatten && needsLook(field))) continue;
-    try {
-      if (!drawable(shownValue(field), font)) throw new Error("no glyphs");
-      field.defaultUpdateAppearances(font);
-    } catch {
-      undrawn.add(field);
+    // A box or button keeps the file's own looks (its tick, its dot) when it
+    // has them for every state: choosing one only switches between them.
+    const toggle = field instanceof PDFCheckBox || field instanceof PDFRadioGroup;
+    const redraw = toggle ? needsLook(field) : touched || (flatten && needsLook(field));
+    if (redraw) {
+      if (!touched && value !== undefined) {
+        try {
+          setValue(field, value);
+        } catch {
+          /* drawn as it is */
+        }
+      }
+      const looks = keepLooks(field);
+      try {
+        if (!drawable(shownText(field), font)) {
+          unreadable.add(field);
+          throw new Error("no glyphs");
+        }
+        field.defaultUpdateAppearances(font);
+      } catch {
+        undrawn.add(field);
+      }
+      // pdf-lib rewrites the field's default appearance (`/DA`) to name its own
+      // font, which the form's resources don't have; a viewer that redraws the
+      // field from it would find nothing. The look just drawn carries its own.
+      looks();
     }
     // pdf-lib stores a chosen option by its shown text; the file format says
     // by its value. Put the value back once the look (which shows the text)
     // is drawn.
-    if (touched) storeChoiceValues(field, values[name]);
+    if (value !== undefined) storeChoiceValues(field, value);
     try {
       form.markFieldAsClean(field.ref);
     } catch {
@@ -96,12 +132,14 @@ export function applyForm(
   }
 
   if (flatten) {
-    for (const field of fields) {
+    for (const field of fillable) {
       if (undrawn.has(field)) {
-        try {
-          result.keptFillable.push(field.getName());
-        } catch {
-          /* unnamed */
+        if (unreadable.has(field)) {
+          try {
+            result.keptFillable.push(field.getName());
+          } catch {
+            /* unnamed */
+          }
         }
         continue;
       }
@@ -124,25 +162,23 @@ function setValue(field: PDFField, v: FormValue): void {
     else field.uncheck();
   } else if (field instanceof PDFRadioGroup) {
     if (typeof v !== "string" || v === "" || v === "Off") field.clear();
-    else field.select(radioOption(field, v));
+    else {
+      // By the button's own on-state, not pdf-lib's `select`, which goes by
+      // export value — and when two buttons share one (`/Opt [(Yes) (Yes)
+      // (No)]`), picks the last.
+      const on = field.acroField.getOnValues().find((n) => n.decodeText() === v);
+      if (!on) throw new Error(`No button "${v}"`);
+      field.acroField.setValue(on);
+    }
   } else if (field instanceof PDFDropdown || field instanceof PDFOptionList) {
-    const chosen = (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : []).map((x) => shownText(field, x));
+    const chosen = (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : []).map((x) => optionText(field, x));
     if (chosen.length === 0) field.clear();
     else field.select(chosen.length === 1 ? chosen[0] : chosen);
   }
 }
 
-/** pdf.js names a radio button by its on-state; pdf-lib by its export value
- * when the group lists them (`/Opt`), which can differ. */
-function radioOption(field: PDFRadioGroup, onState: string): string {
-  const ons = field.acroField.getOnValues().map((n) => n.decodeText());
-  const exports = field.acroField.getExportValues()?.map((s) => s.decodeText());
-  const i = ons.indexOf(onState);
-  return exports && i >= 0 && i < exports.length ? exports[i] : onState;
-}
-
 /** The text pdf-lib selects an option by, for the value the file stores. */
-function shownText(field: PDFDropdown | PDFOptionList, value: string): string {
+function optionText(field: PDFDropdown | PDFOptionList, value: string): string {
   for (const { value: v, display } of field.acroField.getOptions()) {
     if (v.decodeText() === value) return (display ?? v).decodeText();
   }
@@ -159,11 +195,37 @@ function storeChoiceValues(field: PDFField, v: FormValue): void {
   field.acroField.dict.set(PDFName.of("V"), stored.length === 1 ? stored[0] : field.acroField.dict.context.obj(stored));
 }
 
-/** The text a field's look would show. */
-function shownValue(field: PDFField): string {
+/** All the text a field's look draws: a text field's value, a dropdown's
+ * chosen option, and every option of a list (its look lists them all). */
+function shownText(field: PDFField): string {
   if (field instanceof PDFTextField) return field.getText() ?? "";
-  if (field instanceof PDFDropdown || field instanceof PDFOptionList) return field.getSelected().join("");
+  if (field instanceof PDFDropdown) return field.getSelected().join("");
+  if (field instanceof PDFOptionList) return field.getOptions().join("");
   return "";
+}
+
+/** A dropdown's or list's chosen options as the file stores them. */
+function choiceValues(field: PDFField): FormValue | undefined {
+  if (!(field instanceof PDFDropdown || field instanceof PDFOptionList)) return undefined;
+  try {
+    return field.acroField.getValues().map((v) => v.decodeText());
+  } catch {
+    return undefined;
+  }
+}
+
+/** Remember a field's `/DA` (on the field and each widget); the returned
+ * function puts them back as they were. */
+function keepLooks(field: PDFField): () => void {
+  const DA = PDFName.of("DA");
+  const dicts = [field.acroField.dict, ...field.acroField.getWidgets().map((w) => w.dict)];
+  const saved = dicts.map((d) => d.get(DA));
+  return () =>
+    dicts.forEach((d, i) => {
+      const was = saved[i];
+      if (was === undefined) d.delete(DA);
+      else d.set(DA, was);
+    });
 }
 
 /** Whether the font can draw every character of `text`. The standard fonts
@@ -201,6 +263,10 @@ function flattenField(form: PDFForm, field: PDFField): void {
     flattenWidgetOntoPage(page: unknown, w: unknown, ap: unknown): void;
   };
   for (const widget of field.acroField.getWidgets()) {
+    // A widget the file hides (Hidden, NoView) never shows, so it isn't
+    // printed into the page either — its field still goes.
+    const flags = widget.dict.get(PDFName.of("F"));
+    if (flags instanceof PDFNumber && (flags.asNumber() & (2 | 32)) !== 0) continue;
     try {
       const page = f.findWidgetPage(widget);
       f.flattenWidgetOntoPage(page, widget, f.findWidgetAppearanceRef(field, widget));

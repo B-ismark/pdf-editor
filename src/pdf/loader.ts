@@ -86,7 +86,15 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
         const width = Math.abs(rect[2] - rect[0]);
         const height = Math.abs(rect[3] - rect[1]);
         const name = (a.fieldName as string) || `field-${p}-${k}`;
-        const base = { id: `${p}:field:${k}`, name, pageIndex: p, rect: { x, y, width, height }, readOnly: !!a.readOnly };
+        const label = typeof a.alternativeText === "string" ? a.alternativeText.trim() : "";
+        const base = {
+          id: `${p}:field:${k}`,
+          name,
+          pageIndex: p,
+          rect: { x, y, width, height },
+          readOnly: !!a.readOnly,
+          ...(label ? { label } : {}),
+        };
         if (ft === "Tx") {
           const maxLen = typeof a.maxLen === "number" && a.maxLen > 0 ? a.maxLen : undefined;
           fields.push({
@@ -260,6 +268,10 @@ export async function renderPageToCanvas(
    * own `/Rotate`). Pass 0 for the page's unturned user space — what anything
    * drawing overlay objects onto the raster needs. */
   rotation?: number,
+  /** Leave form fields out. A redacted page's raster is drawn from the file as
+   * it came, so its fields would show the values the file came with — a value
+   * the user cleared would be baked into the image. */
+  withoutForms = false,
 ): Promise<HTMLCanvasElement> {
   const aborted = () => new DOMException("Render abandoned", "AbortError");
   if (signal?.aborted) throw aborted();
@@ -278,7 +290,12 @@ export async function renderPageToCanvas(
   canvas.height = Math.ceil(viewport.height);
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not get 2D canvas context");
-  const task = page.render({ canvasContext: ctx, viewport });
+  const task = page.render({
+    canvasContext: ctx,
+    viewport,
+    // ENABLE_FORMS: fields are left to an HTML layer — here, to nothing.
+    ...(withoutForms ? { annotationMode: pdfjsLib.AnnotationMode.ENABLE_FORMS } : {}),
+  });
   const stop = () => task.cancel();
   signal?.addEventListener("abort", stop, { once: true });
   try {
