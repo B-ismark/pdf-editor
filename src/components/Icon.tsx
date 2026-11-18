@@ -10,6 +10,7 @@ import {
   AlignVerticalJustifyStart,
   ArrowDownToLine,
   ArrowUpRight,
+  MoveHorizontal,
   BadgeCheck,
   BringToFront,
   Check,
@@ -208,6 +209,8 @@ const MAP: Record<string, LucideIcon> = {
   /** Jump to a page by number (the zoom pill's page chip, "Go to page…"). */
   go_to_page: ArrowDownToLine,
   command: Command,
+  /** Zoom back to the page's width (the zoom pill's percentage, "Fit to width"). */
+  fit_width: MoveHorizontal,
   /** The properties/inspector panel. */
   sliders: SlidersHorizontal,
   /** Stateful pair for the page rail toggle, so the icon reports the outcome. */

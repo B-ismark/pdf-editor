@@ -1,19 +1,76 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./Icon";
 
+/** Where a command belongs. The palette says it beside each row (when the
+ * row has no shortcut to show), and the ⋯ and Export menus file their rows by
+ * it — one taxonomy, so a command can't be "Text" in one place and "Finish" in
+ * another. */
+export type CommandGroup =
+  | "tools"
+  | "draw"
+  | "selection"
+  | "edit"
+  | "navigate"
+  | "view"
+  | "organise"
+  | "text"
+  | "finish"
+  | "export"
+  | "settings"
+  | "file"
+  | "documents";
+
+export const GROUP_LABEL: Record<CommandGroup, string> = {
+  tools: "Tool",
+  draw: "Draw",
+  selection: "Selection",
+  edit: "Edit",
+  navigate: "Go",
+  view: "View",
+  organise: "Organise",
+  text: "Text",
+  finish: "Finish",
+  export: "Export",
+  settings: "Settings",
+  file: "File",
+  documents: "Documents",
+};
+
+/**
+ * One entry of the command registry (`commands` in `DocumentEditor.tsx`).
+ *
+ * Every command the app has is declared once, here-shaped, and every surface
+ * that lists commands renders from that one list: the palette shows all of it,
+ * the ⋯ menu and the Export menu pick their groups out of it. A label, icon,
+ * shortcut or "this opens something" mark set here is the same everywhere, and
+ * a command added here is in the palette without anyone remembering to add it.
+ */
 export interface Command {
   id: string;
+  group: CommandGroup;
   label: string;
-  /** Right-aligned hint (shortcut or group). */
-  hint?: string;
   icon?: string;
+  /** Keyboard shortcut, as shown (e.g. "Ctrl+Z"). */
+  shortcut?: string;
   /** Extra words to match against. */
   keywords?: string;
-  /** Set when running this opens something rather than doing it, so the palette
-   * marks it the way the Inspector and the ⋯ menu do. */
-  opens?: "dialog";
-  run: () => void;
+  /** Set when running this opens something rather than doing it, so every
+   * surface marks it the same way. */
+  opens?: "dialog" | "toolbar";
+  /** A setting that is on or off: shown with a check, announced as checked. */
+  checked?: boolean;
+  /** A setting with a current value (Theme: Dark), shown beside the label. */
+  value?: string;
+  /** What it does, where the label alone doesn't say (a tooltip in the menus). */
+  detail?: string;
+  /** Exists but can't run right now (a file is being made). Not listed. */
   disabled?: boolean;
+  /** Doesn't apply in this state (no selection to align). Not listed. */
+  hidden?: boolean;
+  /** In a menu, running it leaves the menu open so the change can be seen
+   * (cycling the theme). */
+  stays?: boolean;
+  run: () => void;
 }
 
 interface Props {
@@ -24,7 +81,7 @@ interface Props {
 /** Fuzzy-ish (substring, all-terms) filter over label + keywords. */
 function match(cmd: Command, q: string): boolean {
   if (!q) return true;
-  const hay = `${cmd.label} ${cmd.hint ?? ""} ${cmd.keywords ?? ""}`.toLowerCase();
+  const hay = `${cmd.label} ${cmd.value ?? ""} ${GROUP_LABEL[cmd.group]} ${cmd.shortcut ?? ""} ${cmd.keywords ?? ""}`.toLowerCase();
   return q
     .toLowerCase()
     .split(/\s+/)
@@ -39,7 +96,7 @@ export function CommandPalette({ commands, onClose }: Props) {
   const listRef = useRef<HTMLDivElement>(null);
 
   const results = useMemo(
-    () => commands.filter((c) => !c.disabled && match(c, q)),
+    () => commands.filter((c) => !c.disabled && !c.hidden && match(c, q)),
     [commands, q],
   );
 
@@ -99,14 +156,19 @@ export function CommandPalette({ commands, onClose }: Props) {
               key={c.id}
               className={`cmdk__item${i === active ? " cmdk__item--on" : ""}`}
               data-active={i === active}
+              data-cmd={c.id}
               role="option"
               aria-selected={i === active}
+              aria-checked={c.checked}
+              aria-haspopup={c.opens === "dialog" ? "dialog" : undefined}
               onPointerEnter={() => setActive(i)}
               onClick={() => runAt(i)}
             >
               {c.icon && <Icon name={c.icon} size={18} />}
               <span className="cmdk__label">{c.label}</span>
-              {c.hint && <span className="cmdk__hint label-medium">{c.hint}</span>}
+              {c.value && <span className="cmdk__value label-medium">{c.value}</span>}
+              {c.checked && <Icon name="check" size={16} className="cmdk__check" />}
+              <span className="cmdk__hint label-medium">{c.shortcut ?? GROUP_LABEL[c.group]}</span>
               {c.opens && <Icon name="opens_dialog" size={16} className="opens-mark" />}
             </button>
           ))}

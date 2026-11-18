@@ -19,13 +19,13 @@ import { PageView, type AnnotSpec } from "./components/PageView";
 import { translateAnnotation } from "./components/AnnotationLayer";
 import { PropertiesPanel } from "./components/PropertiesPanel";
 import { DocumentPanel } from "./components/DocumentPanel";
-import { DrawToolbar } from "./components/DrawToolbar";
+import { DrawToolbar, SUBTOOLS } from "./components/DrawToolbar";
 import { SelectionBar } from "./components/SelectionBar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { FindBar } from "./components/FindBar";
 import { PageNav } from "./components/PageNav";
 import { PageJump } from "./components/PageJump";
-import { CommandPalette, type Command } from "./components/CommandPalette";
+import { CommandPalette, GROUP_LABEL, type Command, type CommandGroup } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
 import { findMatches, extractText, type FindMatch } from "./pdf/find";
 import { isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
@@ -105,31 +105,10 @@ const NO_IDS: Set<string> = new Set();
 const pageItems = <T,>(map: Map<number, T[]>, pageIndex: number): T[] =>
   map.get(pageIndex) ?? NO_ITEMS;
 
-/** A document/finishing action rendered identically across the overflow menu,
- * the Export menu, and the command palette — one definition, so
- * the three surfaces can't drift apart. */
-interface DocAction {
-  id: string;
-  /** `export` makes a file and leaves the document alone: those live in the
-   * Export menu (the Download caret), not with the actions that change it. */
-  group: "organise" | "text" | "finish" | "export";
-  label: string;
-  icon: string;
-  keywords?: string;
-  /** Set when running this opens something rather than doing it. Declared on
-   * the action so every surface that lists it — the Inspector, the ⋯ menu, the
-   * command palette — marks it the same way; the alternative is three call
-   * sites deciding independently, which is how the menu and the panel drifted
-   * apart the first time. */
-  opens?: "dialog";
-  run: () => void;
-}
-
-const DOC_GROUPS: { key: DocAction["group"]; label: string }[] = [
-  { key: "organise", label: "Organise" },
-  { key: "text", label: "Text" },
-  { key: "finish", label: "Finish" },
-];
+/** The ⋯ menu's groups, in order. Its rows come out of the command registry
+ * by group (see `commands` below), so the menu can't list a command the
+ * palette doesn't, or label it differently. */
+const MENU_GROUPS: CommandGroup[] = ["organise", "text", "finish"];
 /** Keyboard for a `role="menu"` list (ARIA menu pattern): arrows, Home/End
  * walk the items, Escape closes and returns focus to the button that opened
  * it, Tab closes and lets focus move on. Shared by the ⋯ and Export menus. */
@@ -172,8 +151,6 @@ function menuKeys(
     }
   };
 }
-
-const EXPORT_GROUP: { key: DocAction["group"]; label: string } = { key: "export", label: "Export" };
 
 const TOOLS: { key: NavKey; label: string; icon: string; opens?: "toolbar" | "dialog" }[] = [
   { key: "select", label: "Select", icon: "select_tool" },
@@ -514,7 +491,6 @@ export const DocumentEditor = memo(function DocumentEditor({
     theme.mode === "light" ? "light_mode" : theme.mode === "dark" ? "dark_mode" : "system_mode";
   const themeName =
     theme.mode === "light" ? "Light" : theme.mode === "dark" ? "Dark" : "System";
-  const themeLabel = `${themeName} theme`;
 
 
   // Per-page buckets. Each page keeps the same bucket object until something on
@@ -1055,26 +1031,6 @@ export const DocumentEditor = memo(function DocumentEditor({
       setMessage(staleBuildMessage(err) ?? "Couldn't export images. Please try again.");
     }
   }, [pdf, bakeCurrent, fileName, downloadBytes]);
-
-  // Single source of truth for the document/finishing actions. The overflow
-  // menu, the Export menu and the command palette all render from this —
-  // add an action once and every surface picks it up.
-  const docActions = useMemo<DocAction[]>(
-    () => [
-      { id: "organize", group: "organise", label: "Organise pages", icon: "organize", keywords: "reorder rotate merge split extract", opens: "dialog", run: () => { setSelection(null); setOrganizeOpen(true); } },
-      { id: "image", group: "organise", label: "Add image", icon: "image", keywords: "picture photo stamp", opens: "dialog", run: () => imageInputRef.current?.click() },
-      { id: "ocr", group: "text", label: "Recognise text (OCR)", icon: "scan_text", keywords: "scan searchable image ocr", run: runOcr },
-      { id: "copytext", group: "text", label: "Copy all text", icon: "content_copy", keywords: "clipboard", run: copyAllText },
-      { id: "numbers", group: "finish", label: "Page numbers", icon: "page_numbers", keywords: "pagination folio", opens: "dialog", run: () => { setSelection(null); setFinishTab("numbers"); } },
-      { id: "watermark", group: "finish", label: "Watermark", icon: "watermark", keywords: "draft stamp", opens: "dialog", run: () => { setSelection(null); setFinishTab("watermark"); } },
-      { id: "compress", group: "export", label: "Compress PDF", icon: "compress", keywords: "shrink reduce size optimise", opens: "dialog", run: openCompress },
-      { id: "sign-cert", group: "export", label: "Sign with certificate", icon: "certificate", keywords: "digital signature pades certificate p12 sign", opens: "dialog", run: () => { setSelection(null); setSignCertOpen(true); } },
-      { id: "eximg", group: "export", label: "Export as images", icon: "images", keywords: "png zip export", run: exportImages },
-      { id: "exporttext", group: "export", label: "Export text (.txt)", icon: "text_download", keywords: "save txt plain", run: exportTextFile },
-    ],
-    [runOcr, copyAllText, exportTextFile, exportImages, openCompress],
-  );
-  const exportActions = useMemo(() => docActions.filter((a) => a.group === "export"), [docActions]);
 
   const onChangeFragmentText = useCallback(
     (id: string, text: string) => {
@@ -2164,6 +2120,140 @@ export const DocumentEditor = memo(function DocumentEditor({
     if (t !== "select") setSelection(null);
   };
 
+  // ---- The command registry ----
+  // Every command the app has, declared once. The command palette lists all of
+  // it; the ⋯ menu and the Export menu render their rows from it by group. So a
+  // label, icon, shortcut or "opens something" mark is set in one place, and a
+  // command can't exist in a menu and be missing from the palette (zoom, the
+  // panel, align and the device settings all were, before this list).
+  // Commands that don't apply right now are `hidden` rather than left out, so
+  // the list reads as the full inventory.
+  const single = selection && selection.kind !== "fragment" ? selection : null;
+  const multiOn = multi.length >= 2;
+  const commands: Command[] = [
+    ...TOOLS.map((t): Command => ({
+      id: `tool-${t.key}`,
+      group: "tools",
+      label: t.label,
+      icon: t.icon,
+      shortcut: TOOL_SHORTCUT[t.key],
+      opens: t.opens,
+      run: () => pickTool(t.key),
+    })),
+    ...SUBTOOLS.map((t): Command => ({
+      id: `draw-${t.key}`,
+      group: "draw",
+      label: t.label,
+      icon: t.icon,
+      keywords: "draw annotate markup",
+      run: () => {
+        setDrawTool(t.key);
+        if (tool !== "draw") pickTool("draw");
+        else setDrawbarOpen(true);
+      },
+    })),
+
+    { id: "duplicate", group: "selection", label: "Duplicate", icon: "duplicate", shortcut: "Ctrl+D", keywords: "copy clone", hidden: !single && !multiOn, run: () => (multiOn ? duplicateMulti() : duplicateSelection()) },
+    { id: "delete", group: "selection", label: "Delete", icon: "delete", shortcut: "Del", keywords: "remove", hidden: !single && !multiOn, run: () => (multiOn ? deleteMulti() : onDelete()) },
+    { id: "front", group: "selection", label: "Bring to front", icon: "bring_front", shortcut: "]", keywords: "arrange order stack raise", hidden: !canArrange, run: () => arrangeSelection("front") },
+    { id: "back", group: "selection", label: "Send to back", icon: "send_back", shortcut: "[", keywords: "arrange order stack lower", hidden: !canArrange, run: () => arrangeSelection("back") },
+    ...([
+      ["left", "Align left", "align_left"],
+      ["center-h", "Align centre", "align_center_h"],
+      ["right", "Align right", "align_right"],
+      ["top", "Align top", "align_top"],
+      ["middle", "Align middle", "align_center_v"],
+      ["bottom", "Align bottom", "align_bottom"],
+    ] as const).map(([op, label, icon]): Command => ({
+      id: `align-${op}`, group: "selection", label, icon, keywords: "line up", hidden: !multiOn, run: () => alignMulti(op),
+    })),
+    { id: "distribute-h", group: "selection", label: "Distribute horizontally", icon: "distribute_h", keywords: "space evenly", hidden: multi.length < 3, run: () => distributeMulti("h") },
+    { id: "distribute-v", group: "selection", label: "Distribute vertically", icon: "distribute_v", keywords: "space evenly", hidden: multi.length < 3, run: () => distributeMulti("v") },
+    { id: "deselect", group: "selection", label: "Clear selection", icon: "close", shortcut: "Esc", keywords: "deselect none", hidden: !selection && !multiOn, run: () => { setMulti([]); setSelection(null); } },
+
+    { id: "undo", group: "edit", label: "Undo", icon: "undo", shortcut: "Ctrl+Z", hidden: !docHistory.canUndo, run: undo },
+    { id: "redo", group: "edit", label: "Redo", icon: "redo", shortcut: "Ctrl+Shift+Z", hidden: !docHistory.canRedo, run: redo },
+
+    { id: "find", group: "navigate", label: "Find in document", icon: "search", shortcut: "Ctrl+F", keywords: "search", run: openFind },
+    { id: "find-next", group: "navigate", label: "Next match", icon: "chevron_down", shortcut: "Enter", keywords: "find search", hidden: matches.length === 0, run: nextMatch },
+    { id: "find-prev", group: "navigate", label: "Previous match", icon: "chevron_up", shortcut: "Shift+Enter", keywords: "find search", hidden: matches.length === 0, run: prevMatch },
+    { id: "goto", group: "navigate", label: "Go to page…", icon: "go_to_page", keywords: "jump page number", opens: "dialog", hidden: !pdf || shown.length < 2, run: openPageJump },
+
+    { id: "pages", group: "view", label: navOpen ? "Hide pages" : "Show pages", icon: navOpen ? "panel_close" : "panel_open", keywords: "thumbnails sidebar", run: () => setNavOpen((v) => !v) },
+    { id: "panel", group: "view", label: inspectorOpen ? "Hide panel" : "Show panel", icon: "sliders", keywords: "inspector properties", hidden: !isWide, run: () => setInspectorOpen(!inspectorOpen) },
+    { id: "zoom-in", group: "view", label: "Zoom in", icon: "add", keywords: "bigger magnify", run: vp.zoomIn },
+    { id: "zoom-out", group: "view", label: "Zoom out", icon: "remove", keywords: "smaller", run: vp.zoomOut },
+    { id: "zoom-fit", group: "view", label: "Fit to width", icon: "fit_width", keywords: "zoom reset 100", run: vp.resetZoom },
+
+    { id: "organize", group: "organise", label: "Organise pages", icon: "organize", keywords: "reorder rotate merge split extract", opens: "dialog", run: () => { setSelection(null); setOrganizeOpen(true); } },
+    { id: "image", group: "organise", label: "Add image", icon: "image", keywords: "picture photo stamp", opens: "dialog", run: () => imageInputRef.current?.click() },
+    { id: "ocr", group: "text", label: "Recognise text (OCR)", icon: "scan_text", keywords: "scan searchable image ocr", run: () => void runOcr() },
+    { id: "copytext", group: "text", label: "Copy all text", icon: "content_copy", keywords: "clipboard", run: () => void copyAllText() },
+    { id: "numbers", group: "finish", label: "Page numbers", icon: "page_numbers", keywords: "pagination folio", opens: "dialog", run: () => { setSelection(null); setFinishTab("numbers"); } },
+    { id: "watermark", group: "finish", label: "Watermark", icon: "watermark", keywords: "draft stamp", opens: "dialog", run: () => { setSelection(null); setFinishTab("watermark"); } },
+
+    // Making a file can't start while one is being made.
+    { id: "download", group: "export", label: "Download PDF", icon: "download", keywords: "save export", disabled: busy, run: () => void download() },
+    { id: "compress", group: "export", label: "Compress PDF", icon: "compress", keywords: "shrink reduce size optimise", opens: "dialog", disabled: busy, run: openCompress },
+    { id: "sign-cert", group: "export", label: "Sign with certificate", icon: "certificate", keywords: "digital signature pades certificate p12 sign", opens: "dialog", disabled: busy, run: () => { setSelection(null); setSignCertOpen(true); } },
+    { id: "eximg", group: "export", label: "Export as images", icon: "images", keywords: "png zip export", disabled: busy, run: () => void exportImages() },
+    { id: "exporttext", group: "export", label: "Export text (.txt)", icon: "text_download", keywords: "save txt plain", disabled: busy, run: exportTextFile },
+    { id: "download-all", group: "export", label: `Download all (${tabs.length}) as ZIP`, icon: "download_all", keywords: "zip every all tabs documents", disabled: busy, hidden: tabs.length < 2, run: () => onDownloadAll() },
+
+    // Device settings. Theme and Dim leave the menu open, so the change can be
+    // seen happening; the other two close it, as they always did.
+    { id: "theme", group: "settings", label: "Theme", value: themeName, icon: themeIcon, keywords: "dark light system appearance", stays: true, run: theme.cycle },
+    { id: "dim", group: "settings", label: "Dim pages", icon: "contrast", keywords: "dark night contrast", checked: dimPages, stays: true, run: () => setDimPages((v) => !v) },
+    { id: "autosave", group: "settings", label: "Save session on this device", icon: "save_local", keywords: "autosave restore remember", checked: autosaveOn, run: onToggleAutosave },
+    { id: "lossless", group: "settings", label: "Lossless redacted pages", icon: "lossless", keywords: "redaction quality bit-exact png export setting", checked: losslessRaster, detail: "Redacted pages export bit-exact, at several times the file size", run: () => setLosslessRaster((v) => !v) },
+
+    { id: "open", group: "file", label: "Open another PDF", icon: "note_add", shortcut: "Ctrl+O", keywords: "new tab file", run: onOpenAnother },
+    { id: "close", group: "file", label: "Close document", icon: "close", keywords: "home start exit leave", run: goHome },
+    { id: "palette", group: "file", label: "Search commands", icon: "command", shortcut: "Ctrl+K", keywords: "palette", hidden: cmdOpen, run: () => setCmdOpen(true) },
+
+    ...tabs
+      .filter((t) => t.id !== activeId)
+      .map((t): Command => ({
+        id: `tab-${t.id}`,
+        group: "documents",
+        label: `Switch to ${t.fileName}`,
+        icon: "picture_as_pdf",
+        keywords: "tab document file switch",
+        run: () => onSwitch(t.id),
+      })),
+  ];
+  const inGroup = (g: CommandGroup) => commands.filter((c) => c.group === g && !c.hidden);
+
+  /** One row of the ⋯ or Export menu, drawn from its registry entry. */
+  const menuRow = (c: Command, close: () => void) => (
+    <button
+      key={c.id}
+      className="menu__item"
+      data-cmd={c.id}
+      role={c.checked !== undefined ? "menuitemcheckbox" : "menuitem"}
+      aria-checked={c.checked}
+      aria-haspopup={c.opens === "dialog" ? "dialog" : undefined}
+      // A row that shows a value ("Theme … Dark") reads as a setting, not a
+      // control: the name says it can be operated, and still contains the
+      // visible words (WCAG 2.5.3).
+      aria-label={c.value ? `${c.label}: ${c.value}. Activate to change.` : undefined}
+      disabled={c.disabled}
+      data-tip={c.detail}
+      onClick={() => {
+        if (!c.stays) close();
+        c.run();
+      }}
+    >
+      {c.icon && <Icon name={c.icon} size={18} />}
+      <span className="menu__itemlabel">{c.label}</span>
+      {c.value && <span className="menu__value label-medium">{c.value}</span>}
+      {c.checked && <Icon name="check" size={16} className="menu__check" />}
+      {/* No keys to press on a phone, so no shortcuts to show there. */}
+      {c.shortcut && !compact && !c.value && !c.checked && <span className="menu__value label-medium">{c.shortcut}</span>}
+      {c.opens === "dialog" && <Icon name="opens_dialog" size={16} className="opens-mark" />}
+    </button>
+  );
+
   const appBar = (
     <header className={`appbar${menuOpen || exportOpen ? " appbar--menu" : ""}`}>
       {/* With a document open the brand is the way back to the start screen —
@@ -2266,38 +2356,17 @@ export const DocumentEditor = memo(function DocumentEditor({
                   <>
                     <div className="menu__scrim" onClick={() => setExportOpen(false)} />
                     <div className="menu__list" role="menu" aria-label="Export" ref={exportListRef} onKeyDown={onExportKeyDown}>
-                      <button
-                        className="menu__item"
-                        role="menuitem"
-                        disabled={busy}
-                        onClick={() => { closeExport(); void download(); }}
-                      >
-                        <Icon name="download" size={18} />
-                        <span className="menu__itemlabel">Download PDF</span>
-                      </button>
-                      {exportActions.map((a) => (
-                        <button
-                          key={a.id}
-                          className="menu__item"
-                          role="menuitem"
-                          disabled={busy}
-                          aria-haspopup={a.opens ? "dialog" : undefined}
-                          onClick={() => { closeExport(); a.run(); }}
-                        >
-                          <Icon name={a.icon} size={18} />
-                          <span className="menu__itemlabel">{a.label}</span>
-                          {a.opens && <Icon name="opens_dialog" size={16} className="opens-mark" />}
-                        </button>
-                      ))}
-                      {tabs.length > 1 && (
-                        <>
-                          <div className="menu__divider" role="separator" />
-                          <button className="menu__item" role="menuitem" disabled={busy} onClick={() => { closeExport(); onDownloadAll(); }}>
-                            <Icon name="download_all" size={18} />
-                            <span className="menu__itemlabel">Download all ({tabs.length}) as ZIP</span>
-                          </button>
-                        </>
-                      )}
+                      {inGroup("export")
+                        .filter((c) => c.id !== "download-all")
+                        .map((c) => menuRow(c, closeExport))}
+                      {inGroup("export")
+                        .filter((c) => c.id === "download-all")
+                        .map((c) => (
+                          <Fragment key={c.id}>
+                            <div className="menu__divider" role="separator" />
+                            {menuRow(c, closeExport)}
+                          </Fragment>
+                        ))}
                     </div>
                   </>
                 )}
@@ -2312,111 +2381,29 @@ export const DocumentEditor = memo(function DocumentEditor({
               <>
                 <div className="menu__scrim" onClick={() => setMenuOpen(false)} />
                 <div className="menu__list" role="menu" ref={menuListRef} onKeyDown={onMenuKeyDown}>
-                  {/* Labelled groups, in the order the command palette files
-                      them. They were only separated by hairlines here, so the
-                      menu read as one 13-item wall. */}
-                  {(compact ? [EXPORT_GROUP, ...DOC_GROUPS] : DOC_GROUPS).map((grp, gi) => (
-                    <Fragment key={grp.key}>
-                      {gi > 0 && <div className="menu__divider" />}
-                      {/* `role="group"` with a labelled heading, not a bare span:
-                          a `role="menu"` may only contain menuitems, groups and
-                          separators, so a loose label is either ignored or
-                          reported as a stray item. This way the grouping reaches
-                          assistive tech too, instead of being purely visual. */}
-                      <div role="group" aria-labelledby={`menu-grp-${grp.key}`}>
-                        <span className="menu__label label-small" id={`menu-grp-${grp.key}`}>
-                          {grp.label}
-                        </span>
-                        {docActions
-                          .filter((a) => a.group === grp.key)
-                          .map((a) => (
-                            <button
-                              key={a.id}
-                              className="menu__item"
-                              role="menuitem"
-                              aria-haspopup={a.opens ? "dialog" : undefined}
-                              disabled={a.group === "export" && busy}
-                              onClick={() => { closeMenu(); a.run(); }}
-                            >
-                              <Icon name={a.icon} size={18} />
-                              <span className="menu__itemlabel">{a.label}</span>
-                              {a.opens && <Icon name="opens_dialog" size={16} className="opens-mark" />}
-                            </button>
-                          ))}
-                        {grp.key === "export" && tabs.length > 1 && (
-                          <button className="menu__item" role="menuitem" disabled={busy} onClick={() => { closeMenu(); onDownloadAll(); }}>
-                            <Icon name="download_all" size={18} />
-                            <span className="menu__itemlabel">Download all ({tabs.length}) as ZIP</span>
-                          </button>
-                        )}
-                      </div>
-                    </Fragment>
-                  ))}
-                  <div className="menu__divider" />
-                  <div role="group" aria-labelledby="menu-grp-view">
-                    <span className="menu__label label-small" id="menu-grp-view">
-                      View
-                    </span>
-                    {/* Cycles system → light → dark in place, and deliberately
-                        leaves the menu open so the value can be seen changing.
-                        The visible row is "Theme … Dark", which reads as a
-                        setting rather than a control, so the accessible name has
-                        to say it can be operated — and it has to still contain
-                        the visible words (WCAG 2.5.3). */}
-                    <button
-                      className="menu__item"
-                      onClick={theme.cycle}
-                      role="menuitem"
-                      aria-label={`Theme: ${themeName}. Activate to change.`}
-                    >
-                      <Icon name={themeIcon} size={18} /> Theme
-                      <span className="menu__value label-medium">{themeName}</span>
-                    </button>
-                  <button
-                    className="menu__item"
-                    onClick={() => setDimPages((v) => !v)}
-                    role="menuitemcheckbox"
-                    aria-checked={dimPages}
-                  >
-                    <Icon name="contrast" size={18} /> Dim pages
-                    {dimPages && <Icon name="check" size={16} className="menu__check" />}
-                  </button>
-                  <button
-                    className="menu__item"
-                    onClick={() => { setMenuOpen(false); onToggleAutosave(); }}
-                    role="menuitemcheckbox"
-                    aria-checked={autosaveOn}
-                  >
-                    <Icon name="save_local" size={18} /> Save session on this device
-                    {autosaveOn && <Icon name="check" size={16} className="menu__check" />}
-                  </button>
-                  {/* An app setting, like the three above: it applies to every
-                      document exported on this device, so it lives here on
-                      every screen size. The Inspector repeats it beside the
-                      document facts, labelled as a device setting. */}
-                  <button
-                    className="menu__item"
-                    onClick={() => { setMenuOpen(false); setLosslessRaster((v) => !v); }}
-                    role="menuitemcheckbox"
-                    aria-checked={losslessRaster}
-                    data-tip="Redacted pages export bit-exact, at several times the file size"
-                  >
-                    <Icon name="lossless" size={18} /> Lossless redacted pages
-                    {losslessRaster && <Icon name="check" size={16} className="menu__check" />}
-                  </button>
-                  </div>
-                  <div className="menu__divider" />
-                  <div role="group" aria-labelledby="menu-grp-file">
-                    <span className="menu__label label-small" id="menu-grp-file">
-                      File
-                    </span>
-                    <button className="menu__item" onClick={() => { setMenuOpen(false); onOpenAnother(); }} role="menuitem">
-                      <Icon name="note_add" size={18} /> Open another PDF
-                    </button>
-                    <button className="menu__item" onClick={goHome} role="menuitem">
-                      <Icon name="close" size={18} /> Close document
-                    </button>
-                  </div>
+                  {/* Labelled groups, each the registry's rows for that group.
+                      They were only separated by hairlines once, so the menu
+                      read as one 13-item wall. On a phone there's no Export
+                      caret, so its group heads this menu — less Download PDF,
+                      which is the bar's own button on every screen. */}
+                  {[...(compact ? (["export"] as const) : []), ...MENU_GROUPS, "settings" as const, "file" as const].map((g, gi) => {
+                    const rows = inGroup(g).filter((c) => c.id !== "download");
+                    return (
+                      <Fragment key={g}>
+                        {gi > 0 && <div className="menu__divider" />}
+                        {/* `role="group"` with a labelled heading, not a bare
+                            span: a `role="menu"` may only contain menuitems,
+                            groups and separators, so a loose label is either
+                            ignored or reported as a stray item. */}
+                        <div role="group" aria-labelledby={`menu-grp-${g}`}>
+                          <span className="menu__label label-small" id={`menu-grp-${g}`}>
+                            {GROUP_LABEL[g]}
+                          </span>
+                          {rows.map((c) => menuRow(c, closeMenu))}
+                        </div>
+                      </Fragment>
+                    );
+                  })}
                 </div>
               </>
             )}
@@ -2884,54 +2871,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       {cmdOpen && (
         <CommandPalette
           onClose={() => setCmdOpen(false)}
-          commands={
-            [
-              // Tools come from `TOOLS`, not a second hand-written copy of it: the
-              // palette's duplicate list had drifted to icon names the dock no
-              // longer used, so half the tools drew a blank square here.
-              ...TOOLS.map((t) => ({
-                id: t.key,
-                label: t.label,
-                hint: TOOL_SHORTCUT[t.key],
-                icon: t.icon,
-                run: () => pickTool(t.key),
-              })),
-              { id: "duplicate", label: "Duplicate selection", hint: "Ctrl+D", icon: "duplicate", disabled: !selection || selection.kind === "fragment", run: duplicateSelection },
-              { id: "find", label: "Find in document", hint: "Ctrl+F", icon: "search", run: openFind },
-              ...(pdf && shown.length > 1
-                ? [{ id: "goto", label: "Go to page…", icon: "go_to_page", keywords: "jump page number", run: openPageJump }]
-                : []),
-              { id: "pages", label: navOpen ? "Hide page thumbnails" : "Show page thumbnails", icon: navOpen ? "panel_close" : "panel_open", run: () => setNavOpen((v) => !v) },
-              { id: "undo", label: "Undo", hint: "Ctrl+Z", icon: "undo", disabled: !docHistory.canUndo, run: undo },
-              { id: "redo", label: "Redo", hint: "Ctrl+Shift+Z", icon: "redo", disabled: !docHistory.canRedo, run: redo },
-              // Document/finishing actions come from the shared source of truth.
-              ...docActions.map((a) => ({ id: a.id, label: a.label, icon: a.icon, keywords: a.keywords, opens: a.opens, run: a.run })),
-              {
-                id: "lossless",
-                label: losslessRaster ? "Turn off lossless redacted pages" : "Turn on lossless redacted pages",
-                icon: "lossless",
-                keywords: "redaction quality bit-exact png export setting",
-                run: () => setLosslessRaster((v) => !v),
-              },
-              { id: "dim", label: dimPages ? "Undim pages" : "Dim pages", icon: "contrast", run: () => setDimPages((v) => !v) },
-              { id: "theme", label: `Theme: ${themeLabel}`, icon: themeIcon, keywords: "dark light system", run: theme.cycle },
-              { id: "download", label: "Download PDF", hint: "", icon: "download", run: download },
-              { id: "open", label: "Open another PDF", hint: "Ctrl+O", icon: "note_add", run: onOpenAnother },
-              ...tabs
-                .filter((t) => t.id !== activeId)
-                .map((t) => ({
-                  id: `tab-${t.id}`,
-                  label: `Switch to ${t.fileName}`,
-                  icon: "picture_as_pdf",
-                  keywords: "tab document file switch",
-                  run: () => onSwitch(t.id),
-                })),
-              ...(tabs.length > 1
-                ? [{ id: "download-all", label: `Download all (${tabs.length}) as ZIP`, icon: "download_all", keywords: "zip every all tabs documents", run: () => onDownloadAll() }]
-                : []),
-              { id: "close", label: "Close document", icon: "close", keywords: "home start exit leave", run: goHome },
-            ] as Command[]
-          }
+          commands={commands}
         />
       )}
 

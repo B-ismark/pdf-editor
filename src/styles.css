@@ -1106,7 +1106,7 @@ body {
    A trailing chevron on list rows, a corner notch on the icon-only tool
    buttons. Both are decorative: the same fact reaches assistive tech through
    `aria-haspopup` / `aria-expanded` on the control itself, so neither marker
-   is ever the only signal. Which rows get one is declared on `docActions`
+   is ever the only signal. Which rows get one is declared on the command registry (`commands`)
    and `TOOLS`, not decided per call site — the Inspector and the ⋯ menu show
    the same commands and had already drifted apart once. */
 .opens-mark { margin-left: auto; opacity: 0.5; flex: none; }
@@ -1611,6 +1611,12 @@ body {
 .cmdk__item--on { background: var(--secondary-container); color: var(--on-secondary-container); }
 .cmdk__label { flex: 1; }
 .cmdk__hint { color: var(--on-surface-variant); font-variant-numeric: tabular-nums; }
+/* A setting's current value (Theme … Dark) and an on switch's check, the same
+   way the ⋯ menu shows them: the palette row and the menu row are one command. */
+.cmdk__value { color: var(--on-surface-variant); }
+.cmdk__check { color: var(--primary); }
+.cmdk__item--on .cmdk__value,
+.cmdk__item--on .cmdk__check { color: var(--on-secondary-container); }
 .cmdk__item--on .cmdk__hint { color: var(--on-secondary-container); }
 
 /* ============ Drag/resize handles ============ */

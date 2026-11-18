@@ -269,7 +269,9 @@ test.describe("inspector", () => {
     // And from the command palette.
     await desk.keyboard.press("Control+k");
     await desk.keyboard.type("lossless");
-    await desk.getByRole("option", { name: /Turn on lossless redacted pages/ }).click();
+    const option = desk.getByRole("option", { name: /Lossless redacted pages/ });
+    await expect(option).not.toHaveAttribute("aria-checked", "true");
+    await option.click();
     await expect(box).toBeChecked();
     await desk.close();
 
@@ -756,5 +758,163 @@ test.describe("Export split button", () => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await expect(caret).toHaveAttribute("aria-expanded", "false");
     await expect(menu).toHaveCount(0);
+  });
+});
+
+/**
+ * The command palette, the ⋯ menu and the Export menu all render from one
+ * command registry (`commands` in `DocumentEditor.tsx`). Before that the palette
+ * was a hand-kept second list: zoom, the panel toggle, align/distribute and the
+ * "Save session" setting existed in the app and not in it, and labels drifted
+ * ("Show page thumbnails" there, "Show pages" on the button it mirrors).
+ */
+test.describe("command registry", () => {
+  /** Every row of an open menu, as [command id, visible label]. */
+  const rowsOf = (page: Page, menu: string) =>
+    page.locator(`${menu} .menu__item`).evaluateAll((els) =>
+      els.map((el) => [
+        el.getAttribute("data-cmd") ?? "",
+        el.querySelector(".menu__itemlabel")?.textContent?.trim() ?? "",
+        el.querySelector("svg")?.getAttribute("class") ?? "",
+        el.querySelector(".opens-mark") ? "opens" : "",
+      ]),
+    );
+
+  /** Search the palette for `label` and return the row for command `id`. */
+  async function paletteRow(page: Page, id: string, label: string) {
+    await page.fill(".cmdk input", label);
+    return page.locator(`.cmdk__item[data-cmd="${id}"]`);
+  }
+
+  test("every menu row is a palette command, with the same name, icon and mark", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    const w = watch(page);
+    const f = await fixtures();
+    await open(page, f.sample);
+    await page.setInputFiles('input[accept="application/pdf,.pdf"][multiple]', f.typeset);
+    await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+
+    await page.getByRole("button", { name: "More actions" }).click();
+    const more = await rowsOf(page, '[role="menu"]');
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Export options" }).click();
+    const exporting = await rowsOf(page, '[role="menu"][aria-label="Export"]');
+    await page.keyboard.press("Escape");
+
+    const rows = [...more, ...exporting].filter(([id]) => id !== "palette");
+    // Every row carries its command id: a row without one is hand-made again.
+    expect(rows.every(([id, label]) => id && label), JSON.stringify(rows)).toBe(true);
+    expect(rows.map(([id]) => id)).toEqual(expect.arrayContaining([
+      "organize", "ocr", "numbers", "theme", "dim", "autosave", "lossless", "open", "close",
+      "download", "compress", "eximg", "download-all",
+    ]));
+
+    await page.keyboard.press("Control+k");
+    await expect(page.locator(".cmdk")).toBeVisible();
+    for (const [id, label, icon, mark] of rows) {
+      const row = await paletteRow(page, id, label);
+      await expect(row, `"${label}" (${id}) is in the palette`).toHaveCount(1);
+      await expect(row.locator(".cmdk__label")).toHaveText(label);
+      await expect(row.locator("svg").first(), `"${label}" has the same icon`).toHaveAttribute("class", icon);
+      await expect(row.locator(".opens-mark"), `"${label}" is marked the same`).toHaveCount(mark ? 1 : 0);
+    }
+    await page.keyboard.press("Escape");
+    expectClean(w);
+  });
+
+  test("commands that only lived on buttons are in the palette, and run", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    const zoom = page.locator(".zoombar__label:not(.zoombar__page)");
+    const before = await zoom.textContent();
+
+    await page.keyboard.press("Control+k");
+    await (await paletteRow(page, "zoom-in", "zoom in")).click();
+    await expect(zoom).not.toHaveText(before ?? "");
+    await page.keyboard.press("Control+k");
+    await (await paletteRow(page, "zoom-fit", "fit to width")).click();
+    await expect(zoom).toHaveText(before ?? "");
+
+    // The panel toggle, named as its own button is.
+    await expect(page.locator("aside.inspector")).toBeVisible();
+    await page.keyboard.press("Control+k");
+    await (await paletteRow(page, "panel", "Hide panel")).click();
+    await expect(page.locator("aside.inspector")).toHaveCount(0);
+    await page.keyboard.press("Control+k");
+    await (await paletteRow(page, "panel", "Show panel")).click();
+    await expect(page.locator("aside.inspector")).toBeVisible();
+
+    // The pages toggle says what its button says.
+    const pagesBtn = page.locator(".appbar").getByRole("button", { name: /(Show|Hide) pages/ });
+    const pagesName = await pagesBtn.getAttribute("aria-label");
+    await page.keyboard.press("Control+k");
+    await page.fill(".cmdk input", "pages");
+    await expect(page.locator('.cmdk__item[data-cmd="pages"] .cmdk__label')).toHaveText(pagesName ?? "");
+    await page.keyboard.press("Escape");
+
+    // A device setting shows its state, and switching it there is the same switch.
+    await page.keyboard.press("Control+k");
+    const save = await paletteRow(page, "autosave", "Save session");
+    const was = (await save.getAttribute("aria-checked")) === "true";
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "More actions" }).click();
+    const item = page.getByRole("menuitemcheckbox", { name: /Save session on this device/ });
+    await expect(item).toHaveAttribute("aria-checked", String(was));
+    await item.click();
+    await page.keyboard.press("Control+k");
+    await expect(await paletteRow(page, "autosave", "Save session")).toHaveAttribute("aria-checked", String(!was));
+    await page.keyboard.press("Escape");
+  });
+
+  test("a group selection's actions are commands too, and only while there is one", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    await page.keyboard.press("Control+k");
+    await page.fill(".cmdk input", "align");
+    await expect(page.locator(".cmdk__item")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+
+    // Two strokes, one above the other, then a marquee round both.
+    await pickSubTool(page, "Pen");
+    const box = (await page.locator(".page").first().boundingBox())!;
+    for (const [x, y] of [[80, 200], [140, 260]]) {
+      await page.mouse.move(box.x + x, box.y + y);
+      await page.mouse.down();
+      await page.mouse.move(box.x + x + 100, box.y + y + 10, { steps: 8 });
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+    }
+    await pickTool(page, "Select");
+    await page.mouse.move(box.x + 40, box.y + 170);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 300, box.y + 300, { steps: 12 });
+    await page.mouse.up();
+    await expect(page.locator(".multisel")).toHaveCount(2);
+
+    const lefts = () => page.locator(".multisel").evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().left)));
+    const [a, b] = await lefts();
+    expect(a).not.toBe(b);
+    await page.keyboard.press("Control+k");
+    await (await paletteRow(page, "align-left", "Align left")).click();
+    await expect.poll(async () => new Set(await lefts()).size).toBe(1);
+    // Distributing needs three; with two it isn't offered.
+    await page.keyboard.press("Control+k");
+    await page.fill(".cmdk input", "distribute");
+    await expect(page.locator(".cmdk__item")).toHaveCount(0);
+    await page.keyboard.press("Escape");
+  });
+
+  test("the ⋯ menu says where to find everything: Search commands opens the palette", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    await page.getByRole("button", { name: "More actions" }).click();
+    const item = page.getByRole("menuitem", { name: /Search commands/ });
+    await expect(item).toContainText("Ctrl+K");
+    await item.click();
+    await expect(page.getByRole("dialog", { name: "Command palette" })).toBeVisible();
+    await expect(page.locator(".cmdk input")).toBeFocused();
+    // And the palette doesn't offer itself.
+    await page.fill(".cmdk input", "search commands");
+    await expect(page.locator(".cmdk__item")).toHaveCount(0);
   });
 });

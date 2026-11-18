@@ -1,6 +1,6 @@
 # App shell: app bar, Inspector, menus, icons, shape and motion
 
-_Read before touching `Icon.tsx`, the app bar, the Inspector, the ⋯ menu, the command palette, tooltips/popovers (`floating.ts`), `corner-shape`, easing tokens, `docActions`/`TOOLS`, prefs or theme._
+_Read before touching `Icon.tsx`, the app bar, the Inspector, the ⋯ menu, the command palette, tooltips/popovers (`floating.ts`), `corner-shape`, easing tokens, the command registry (`commands`)/`TOOLS`, prefs or theme._
 
 Moved verbatim from `CLAUDE.md`; the index there links here.
 
@@ -16,8 +16,8 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   for the meaning rather than the picture, and let `icons.spec.ts` catch the three
   failure modes it can see: unmapped names, dead keys, and two names resolving to
   the same component without an entry in `SHARED_GLYPHS`. If a call site needs a
-  tool's icon, take it from `TOOLS` — the command palette's hand-written copy of
-  that list had already drifted.
+  tool's icon, take it from `TOOLS` (or the registry) — the command palette's
+  hand-written copy of that list had already drifted.
   **What no spec catches: glyphs that are different components and the same
   picture.** Lucide's `Pen` and `Pencil` share one body path (a 4px tip stroke
   apart) and `PenLine` adds an underline to it — three components, one drawing at
@@ -72,11 +72,30 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   — a page OCR *failed* on stays offered. The Text fact never says "scanned": a
   blank or vector-only page has no text either. The document actions also live in the
   ⋯ menu — on a phone the panel is a selection-driven sheet and the palette
-  needs a keyboard — read from `docActions` and `DOC_GROUPS`.
+  needs a keyboard — read from the command registry by `MENU_GROUPS`.
+- **Every command is declared once, in the registry.** `commands` in
+  `DocumentEditor.tsx` (typed by `Command` in `CommandPalette.tsx`) is every
+  action the app has: tools, Draw sub-tools, selection actions, undo/redo,
+  find and go-to, view (pages, panel, zoom), document actions, exports,
+  device settings, file and tab switching. The palette lists all of it; the
+  ⋯ menu and the Export menu render their rows from it by `group`, through one
+  `menuRow`. A command that doesn't apply right now is `hidden` (align with no
+  group selected, the panel toggle on a phone); one that can't run *yet* is
+  `disabled` (exports while a file is being made) — menus grey it, the palette
+  leaves it out. Labels, icons, shortcuts, `opens`, `checked` and `value`
+  live on the entry, so a menu row and its palette row can't differ; the
+  palette's hand-kept list had lost zoom, the panel, align/distribute and
+  "Save session", and called the pages toggle by another name. Each row
+  carries `data-cmd`; `shell.spec` ("command registry") walks both menus and
+  finds every row in the palette with the same label, icon and mark. A new
+  button that does something the registry doesn't have is the drift starting
+  again: add the command, then render the button's label from it or keep the
+  two words identical. Buttons on the canvas (multibar, zoom pill, rail) still
+  render themselves; only the lists are generated.
 - **Download is a split button; Export holds every output.** Actions that make
   a file and leave the document alone (Compress, Sign with certificate, Export
   as images, Export text, and Download all with several tabs) are
-  `group: "export"` on `docActions`. `DOC_GROUPS` leaves that group out, so the
+  `group: "export"` in the command registry. `MENU_GROUPS` leaves that group out, so the
   Inspector and the desktop ⋯ menu don't list them; the caret beside Download
   (`Export options`, `aria-haspopup="menu"`) opens them, with "Download PDF"
   first. A phone has no width for a second control in the bar (the `shell.spec`
@@ -128,7 +147,7 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   suits a tab pill is wrong on a dialog: `--ease-spring` rings visibly,
   `--ease-settle` arrives without ringing. Both work in every current browser.
 - **"This opens something" is declared on the data, not the call site.** An
-  action that opens a dialog carries `opens: "dialog"` on `docActions`; a tool
+  action that opens a dialog carries `opens: "dialog"` in the command registry; a tool
   that opens a toolbar or dialog carries `opens` on `TOOLS`. Three surfaces
   render the same doc actions — the ⋯ menu, the Export menu, the command palette —
   and deciding per call site is exactly how they drifted apart last time.
