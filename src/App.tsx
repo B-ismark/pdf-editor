@@ -501,16 +501,22 @@ export function App() {
         else fresh.push(p);
       }
       // (Its own failures it reports itself; they aren't the picker's.)
-      if (fresh.length > 0) await openFiles(fresh.map((p) => p.file), new Map(fresh.map((p) => [p.file, p.handle]))).catch(() => {});
+      const allOpened =
+        fresh.length === 0 ||
+        (await openFiles(fresh.map((p) => p.file), new Map(fresh.map((p) => [p.file, p.handle]))).catch(() => false));
       if (already) {
-        // Said whenever it's picked, not only alone: dropped without a word it
-        // looks like it failed to open.
-        if (fresh.length === 0 && !busyRef.current && !aModalIsOpen()) switchTo(already.id);
-        setMessage(
-          fresh.length === 0 && busyRef.current
-            ? "Finish what's open first, then open the file again."
-            : `${already.fileName} is already open.`,
-        );
+        // Said whenever it's picked, not only alone — dropped without a word it
+        // looks like it failed to open. But never over why another file didn't
+        // open: that message is the one that matters.
+        const blocked = busyRef.current || aModalIsOpen();
+        if (fresh.length === 0 && !blocked) {
+          switchTo(already.id);
+          setMessage(`${already.fileName} is already open.`);
+        } else if (fresh.length === 0) {
+          setMessage("Finish what's open first, then open the file again.");
+        } else if (allOpened) {
+          setMessage(`${already.fileName} is already open.`);
+        }
       }
       // Said last, so the others opening doesn't talk over it.
       if (unreadable.length > 0) {
@@ -528,9 +534,10 @@ export function App() {
     }
   });
 
-  /** Open several files, each in its own tab (a multi-select pick or a drop). */
+  /** Open several files, each in its own tab (a multi-select pick or a drop).
+   * True when every one opened; anything else has already been reported. */
   const openFiles = useCallback(
-    async (files: FileList | File[] | null | undefined, handles?: Map<File, FileHandle>) => {
+    async (files: FileList | File[] | null | undefined, handles?: Map<File, FileHandle>): Promise<boolean> => {
       // A dialog (Organise, Compress, Finish…) acts on whatever document is in
       // front when it's confirmed, and so does an operation still running (OCR,
       // export). A file dropped then opens a tab that comes to the front *behind*
@@ -538,7 +545,7 @@ export function App() {
       // document. So nothing opens until they're done.
       if (aModalIsOpen() || busyRef.current) {
         setMessage("Finish what's open first, then drop the file again.");
-        return;
+        return false;
       }
       const picked = [...(files ?? [])];
       // Pictures picked together become one PDF, a page each in the order
@@ -592,6 +599,7 @@ export function App() {
           setMessage(head + why);
         }
       }
+      return failed.length === 0 && !pictureReason;
     },
     [openFile, openImages],
   );

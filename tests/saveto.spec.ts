@@ -612,4 +612,24 @@ test.describe("third review fixes", () => {
     await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
     await expect(page.locator(".snackbar__msg").filter({ hasText: "sample.pdf is already open." }).first()).toBeVisible();
   });
+
+  test("an already-open file never talks over why another didn't open", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.sample)] });
+    await openPicked(page);
+    await page.evaluate(() => {
+      const w = window as unknown as { showOpenFilePicker: () => Promise<unknown[]> };
+      const first = w.showOpenFilePicker;
+      w.showOpenFilePicker = async () => {
+        const [h] = (await first()) as { name: string }[];
+        const name = "notes.pdf";
+        return [h, { kind: "file", name, getFile: async () => new File(["just text"], name, { type: "application/pdf" }), isSameEntry: async (o: { name: string }) => o.name === name }];
+      };
+    });
+    await page.keyboard.press("Control+o");
+    await expect(page.locator(".snackbar__msg").filter({ hasText: '"notes.pdf" isn\'t a PDF' }).first()).toBeVisible();
+    await page.waitForTimeout(500);
+    await expect(page.locator(".snackbar__msg").filter({ hasText: "already open" })).toHaveCount(0);
+    await expect(page.locator(".doctab")).toHaveCount(1);
+  });
 });
