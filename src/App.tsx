@@ -11,6 +11,7 @@ import { useTheme } from "./hooks/useTheme";
 import { downloadBytes } from "./download";
 import { plural } from "./plural";
 import { leftOutNote } from "./pdf/standardText";
+import { keptFillableNote } from "./keptNote";
 import { loadPdf, looksLikePdf, mayBeEncrypted, releaseDoc } from "./pdf/loader";
 import { IMAGE_ACCEPT, sniffImage } from "./pdf/images";
 import { clearEngineCache } from "./pdf/engineCache";
@@ -750,6 +751,9 @@ export function App() {
       // documents it was left out of.
       const leftOut = new Set<string>();
       const leftOutOf: string[] = [];
+      // Fields chosen to be flattened that stayed a form, and where.
+      const kept: string[] = [];
+      const keptIn: string[] = [];
       for (const [n, t] of tabs.entries()) {
         setMessage(`Building ${n + 1} of ${tabs.length} · ${t.fileName}`);
         const out = await exportPdf(t.pdf, {
@@ -759,6 +763,10 @@ export function App() {
           onDropped: (chars) => {
             chars.forEach((c) => leftOut.add(c));
             if (!leftOutOf.includes(t.fileName)) leftOutOf.push(t.fileName);
+          },
+          onFormKept: (names) => {
+            kept.push(...names);
+            if (names.length > 0 && !keptIn.includes(t.fileName)) keptIn.push(t.fileName);
           },
         });
         // Two tabs can share a file name (the same file opened twice); a ZIP
@@ -784,7 +792,7 @@ export function App() {
         }),
       );
       setStatus("ready");
-      setMessage(`Downloaded ${plural(entries.length, "document")} as a ZIP.${leftOutNote(leftOut, leftOutOf)}`);
+      setMessage(`Downloaded ${plural(entries.length, "document")} as a ZIP.${leftOutNote(leftOut, leftOutOf)}${keptFillableNote(kept, keptIn)}`);
     } catch (err) {
       setStatus("error");
       setMessage(staleBuildMessage(err) ?? "Couldn't build every document. Please try again.");

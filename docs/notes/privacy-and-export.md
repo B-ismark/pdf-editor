@@ -238,7 +238,11 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     "?" instead. `drawable` checks each character first; a field it can't draw
     keeps its value, gets `/NeedAppearances`, and when flattening is *kept
     fillable* and reported (`onFormKept` → "“name” stays fillable", up to
-    three named), never flattened as "?????". Any other failure to draw a
+    three named, by `keptNote.ts`), never flattened as "?????". Every export
+    that is still a PDF reports it — Download, Save, Share, Sign, Compress
+    keeping text, Download all (naming the file); one that is a picture of
+    the page (Export as images, Print, a rasterising Compress) shows the
+    answer, as pdf.js draws it from `/NeedAppearances`, and says nothing. Any other failure to draw a
     look (a comb field holding more than its boxes) is kept and reported the
     same way: whatever wasn't drawn is never flattened. The note is sent once
     pages are settled, naming only fields still in the file — one on a

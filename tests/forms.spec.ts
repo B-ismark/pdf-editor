@@ -420,3 +420,60 @@ test.describe("what the file keeps", () => {
     expect(form.getTextField(FORM.limited.name).getText()).toBe("XY");
   });
 });
+
+/**
+ * Every export that is still a PDF says which fields stayed fillable when the
+ * form was to be flattened — not only Download. A picture of the page (Export
+ * as images) shows the answer and has no form, so it says nothing of the kind.
+ */
+test.describe("the kept-fillable note on every export that is a PDF", () => {
+  async function greekFlattened(page: Page) {
+    await field(page, FORM.text.name).fill("Ωμέγα");
+    await formPanel(page).getByRole("radio", { name: "Flatten into the page" }).check();
+  }
+  const kept = `“${FORM.text.name}” stays fillable`;
+
+  test("Compress, keeping text", async ({ page }) => {
+    const w = watch(page);
+    await open(page, (await fixtures()).form);
+    await greekFlattened(page);
+    await page.click('[aria-label="Export options"]');
+    await page.locator('[role="menuitem"]', { hasText: "Compress PDF" }).click();
+    await page.locator(".compress__preset", { hasText: "Keep text" }).click();
+    await expect(page.locator(".compress__estimate")).toContainText("text stays selectable", { timeout: 60_000 });
+    const [d] = await Promise.all([page.waitForEvent("download"), page.click(".dialog__actions .btn--filled")]);
+    const form = (await PDFDocument.load(readFileSync((await d.path())!))).getForm();
+    expect(form.getFields().map((f) => f.getName()), "the file is still that form").toEqual([FORM.text.name]);
+    await expect(page.locator(".snackbar__msg").filter({ hasText: kept }).first()).toBeVisible();
+    expectClean(w);
+  });
+
+  test("Download all, naming the document", async ({ page }) => {
+    const w = watch(page);
+    const f = await fixtures();
+    await open(page, f.form);
+    await greekFlattened(page);
+    // A second tab in front: the form's tab is parked, its choice with it.
+    await page.setInputFiles("input[data-open-input]", f.sample);
+    await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+    await page.waitForSelector(".page canvas");
+    await page.locator('[aria-label="Export options"]').click();
+    await Promise.all([
+      page.waitForEvent("download"),
+      page.locator(".menu__item", { hasText: "Download all (2) as ZIP" }).click(),
+    ]);
+    await expect(page.locator(".snackbar__msg")).toContainText(`“${FORM.text.name}” in form.pdf stays fillable`);
+    expectClean(w);
+  });
+
+  test("Export as images says nothing of a form: the picture shows the answer", async ({ page }) => {
+    const w = watch(page);
+    await open(page, (await fixtures()).form);
+    await greekFlattened(page);
+    await page.getByRole("button", { name: "Export options" }).click();
+    await Promise.all([page.waitForEvent("download"), page.getByRole("menuitem", { name: /Export as images/ }).click()]);
+    await expect(page.locator(".snackbar__msg").filter({ hasText: "Exported 1 image." })).toBeVisible();
+    await expect(page.locator(".snackbar__msg").filter({ hasText: "fillable" })).toHaveCount(0);
+    expectClean(w);
+  });
+});
