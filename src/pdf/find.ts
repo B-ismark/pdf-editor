@@ -12,6 +12,9 @@ export interface FindMatch {
   y: number;
   width: number;
   height: number;
+  /** A pattern hit the person unticked in the review list: highlighted
+   * differently, and not redacted. */
+  off?: boolean;
 }
 
 /** Current text of a fragment (edited value if any, else the original). */
@@ -210,6 +213,53 @@ function wholeFragmentBox(frag: TextFragment, size: number): Rect {
   return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
 }
 
+/** What every box on one fragment needs, worked out once per fragment. */
+interface FragContext {
+  frag: TextFragment;
+  text: string;
+  edited: boolean;
+  font: string;
+  size: number;
+  tall: number;
+  simple: boolean;
+}
+
+function fragContext(
+  frag: TextFragment,
+  edits: Edits,
+  fontFor: (frag: TextFragment) => FragmentFont | null,
+): FragContext {
+  const text = fragmentText(frag.id, frag.original, edits);
+  const edit = edits[frag.id];
+  const edited = isFragmentModified(frag, edit);
+  const source = fontFor(frag);
+  const style = resolveFragmentStyle(frag, edit?.style ?? {}, source);
+  const face = !edit || keepsSourceTypeface(edit.style) ? source : null;
+  const [a, b, c, d] = frag.transform;
+  const size = edited ? style.size : fragmentSize(frag);
+  // Horizontal scaling (Tz) shrinks the size read off the baseline vector
+  // but not the glyphs' height; take the tallest reading.
+  const tall = Math.max(size, Math.hypot(c, d), frag.height || 0);
+  const font = cssFont(style, size, face);
+  // Only an upright, left-to-right run can be measured along x.
+  const upright = a > 0 && d > 0 && Math.abs(b) <= a * 1e-3 && Math.abs(c) <= d * 1e-3;
+  return { frag, text, edited, font, size, tall, simple: upright && !frag.rtl };
+}
+
+/** The padded, measured box over `text.slice(o0, o1)` of one fragment. */
+function boxFor(ctx: FragContext, o0: number, o1: number, measure: MeasureText | null): Rect {
+  const { frag, text, edited, font, size, tall } = ctx;
+  if (!ctx.simple) return wholeFragmentBox(frag, tall);
+  const [, , , , e, f] = frag.transform;
+  const s = span(frag, text, edited, font, o0, o1 - o0, measure);
+  return {
+    x: e + s.x0 - size * SIDE - s.slack0,
+    y: f - tall * DESCENT,
+    width: s.x1 - s.x0 + size * SIDE * 2 + s.slack0 + s.slack1,
+    height: tall * (ASCENT + DESCENT),
+  };
+}
+
 /**
  * Find every occurrence of `query` across all pages' fragments.
  *
@@ -240,43 +290,149 @@ export function findMatches(
       const text = fragmentText(frag.id, frag.original, edits);
       const { hay, start, end } = foldCase(text);
       if (!hay.includes(q)) continue;
-
-      const edit = edits[frag.id];
-      const edited = isFragmentModified(frag, edit);
-      const source = fontFor(frag);
-      const style = resolveFragmentStyle(frag, edit?.style ?? {}, source);
-      const face = !edit || keepsSourceTypeface(edit.style) ? source : null;
-      const [a, b, c, d, e, f] = frag.transform;
-      const size = edited ? style.size : fragmentSize(frag);
-      // Horizontal scaling (Tz) shrinks the size read off the baseline vector
-      // but not the glyphs' height; take the tallest reading.
-      const tall = Math.max(size, Math.hypot(c, d), frag.height || 0);
-      const font = cssFont(style, size, face);
-      // Only an upright, left-to-right run can be measured along x.
-      const upright = a > 0 && d > 0 && Math.abs(b) <= a * 1e-3 && Math.abs(c) <= d * 1e-3;
-      const simple = upright && !frag.rtl;
+      const ctx = fragContext(frag, edits, fontFor);
 
       let from = 0;
       for (;;) {
         const at = hay.indexOf(q, from);
         if (at === -1) break;
-        let box: Rect;
-        if (simple) {
-          const o0 = start[at];
-          const o1 = end[at + q.length - 1];
-          const s = span(frag, text, edited, font, o0, o1 - o0, measure);
-          box = {
-            x: e + s.x0 - size * SIDE - s.slack0,
-            y: f - tall * DESCENT,
-            width: s.x1 - s.x0 + size * SIDE * 2 + s.slack0 + s.slack1,
-            height: tall * (ASCENT + DESCENT),
-          };
-        } else {
-          box = wholeFragmentBox(frag, tall);
-        }
+        const box = boxFor(ctx, start[at], end[at + q.length - 1], measure);
         out.push({ id: `${frag.id}#${at}`, pageIndex: page.pageIndex, fragmentId: frag.id, ...box });
         from = at + q.length;
       }
+    }
+  }
+  return out;
+}
+
+/** A piece of one fragment inside a page's joined text. */
+interface Piece {
+  frag: TextFragment;
+  /** Where the fragment's text starts in the joined text. */
+  at: number;
+  length: number;
+}
+
+/**
+ * A page's text as one string, fragment after fragment, so a pattern can match
+ * across the runs pdf.js splits a line into: "+44 20" and "7946 0958" are
+ * often two runs, and a phone pattern that only saw one run at a time would
+ * leave the number readable.
+ *
+ * Runs on the same line are joined directly when they touch and with a space
+ * when there's a gap; anything else (a new line, a turned or right-to-left
+ * run) starts a new line, which no preset matches across.
+ */
+function joinPage(page: PageData, edits: Edits): { text: string; pieces: Piece[] } {
+  let text = "";
+  const pieces: Piece[] = [];
+  let prev: { frag: TextFragment; end: number; base: number; size: number; flat: boolean } | null = null;
+  for (const frag of page.fragments) {
+    const t = fragmentText(frag.id, frag.original, edits);
+    const [a, b, c, d, e, f] = frag.transform;
+    const size = Math.hypot(c, d) || fragmentSize(frag) || 1;
+    const flat = a > 0 && d > 0 && Math.abs(b) <= a * 1e-3 && Math.abs(c) <= d * 1e-3 && !frag.rtl;
+    if (prev) {
+      const sameLine =
+        flat && prev.flat && Math.abs(f - prev.base) < 0.35 * Math.min(size, prev.size) && e > prev.end - 0.5 * size && e - prev.end < 2.5 * size;
+      if (!sameLine) text += "\n";
+      else if (e - prev.end > 0.15 * size && !/\s$/.test(text) && !/^\s/.test(t)) text += " ";
+    }
+    pieces.push({ frag, at: text.length, length: t.length });
+    text += t;
+    prev = { frag, end: e + (frag.width > 0 ? frag.width : t.length * size * 0.5), base: f, size, flat };
+  }
+  return { text, pieces };
+}
+
+/** One pattern hit: the text it matched and the boxes that cover it (one per
+ * run it spans). */
+export interface PatternHit {
+  /** Stable id: `${kind}@${firstFragmentId}#${offset}`. */
+  id: string;
+  kind: string;
+  pageIndex: number;
+  /** The matched text, as it reads on the page. */
+  text: string;
+  boxes: FindMatch[];
+}
+
+/** A pattern to look for: a global regular expression, and an optional check
+ * on each hit (a checksum) that weeds out look-alikes. */
+export interface PatternMatcher {
+  kind: string;
+  re: RegExp;
+  accept?: (hit: string) => boolean;
+}
+
+/**
+ * Every hit of `matchers` on every page, measured and padded exactly as
+ * {@link findMatches} does it, since these boxes become redactions too.
+ *
+ * When two patterns claim overlapping text (a card number also reads as a
+ * phone number), the matcher listed first keeps it, so the review list shows
+ * each piece of text once, under the name that fits it best.
+ */
+export function findPatternMatches(
+  pages: PageData[],
+  edits: Edits,
+  matchers: PatternMatcher[],
+  fontFor: (frag: TextFragment) => FragmentFont | null = () => null,
+  measure: MeasureText | null = canvasMeasure(),
+): PatternHit[] {
+  if (matchers.length === 0) return [];
+  const out: PatternHit[] = [];
+  for (const page of pages) {
+    const { text, pieces } = joinPage(page, edits);
+    if (!text) continue;
+    const taken: Array<[number, number]> = [];
+    const found: Array<{ kind: string; s: number; e: number }> = [];
+    for (const m of matchers) {
+      const re = new RegExp(m.re.source, m.re.flags.includes("g") ? m.re.flags : m.re.flags + "g");
+      for (const r of text.matchAll(re)) {
+        const s = r.index ?? 0;
+        const hit = r[0];
+        const e = s + hit.length;
+        if (!hit.trim()) continue;
+        if (m.accept && !m.accept(hit)) continue;
+        if (taken.some(([a, b]) => s < b && e > a)) continue;
+        taken.push([s, e]);
+        found.push({ kind: m.kind, s, e });
+      }
+    }
+    found.sort((x, y) => x.s - y.s);
+    const ctxs = new Map<string, FragContext>();
+    for (const h of found) {
+      const boxes: FindMatch[] = [];
+      for (const p of pieces) {
+        const a = Math.max(h.s, p.at);
+        const b = Math.min(h.e, p.at + p.length);
+        if (a >= b) continue;
+        // Spaces at either end of a run's share are the joint between runs:
+        // nothing to cover there.
+        const local = text.slice(a, b);
+        const lead = local.length - local.trimStart().length;
+        const trail = local.length - local.trimEnd().length;
+        if (lead + trail >= local.length) continue;
+        let ctx = ctxs.get(p.frag.id);
+        if (!ctx) ctxs.set(p.frag.id, (ctx = fragContext(p.frag, edits, fontFor)));
+        const o0 = a - p.at + lead;
+        const o1 = b - p.at - trail;
+        boxes.push({
+          id: `${h.kind}@${p.frag.id}#${o0}`,
+          pageIndex: page.pageIndex,
+          fragmentId: p.frag.id,
+          ...boxFor(ctx, o0, o1, measure),
+        });
+      }
+      if (boxes.length === 0) continue;
+      out.push({
+        id: boxes[0].id,
+        kind: h.kind,
+        pageIndex: page.pageIndex,
+        text: text.slice(h.s, h.e).replace(/\s+/g, " "),
+        boxes,
+      });
     }
   }
   return out;

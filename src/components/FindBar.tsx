@@ -10,12 +10,14 @@ interface Props {
   onNext: () => void;
   onPrev: () => void;
   onRedactAll: () => void;
+  /** Switch to looking for kinds of information instead of one word. */
+  onPatterns: () => void;
   onClose: () => void;
 }
 
 /** Floating find bar — Ctrl/⌘+F. Searches the extracted text layer, steps
  * through matches, and can redact every match in one action. */
-export function FindBar({ query, count, active, onQuery, onNext, onPrev, onRedactAll, onClose }: Props) {
+export function FindBar({ query, count, active, onQuery, onNext, onPrev, onRedactAll, onPatterns, onClose }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => {
     inputRef.current?.focus();
@@ -60,6 +62,9 @@ export function FindBar({ query, count, active, onQuery, onNext, onPrev, onRedac
         data-tip="Redact every match"
       >
         <Icon name="redact_tool" size={16} /> Redact all
+      </button>
+      <button className="icon-btn icon-btn--sm" onClick={onPatterns} aria-label="Redact patterns" aria-haspopup="dialog" data-tip="Find emails, card numbers and more to redact">
+        <Icon name="redact_patterns" size={18} />
       </button>
       <button className="icon-btn icon-btn--sm" onClick={onClose} aria-label="Close find" data-tip="Close · Esc">
         <Icon name="close" size={18} />

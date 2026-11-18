@@ -134,6 +134,16 @@ type-checking can't see, and each exists because it broke once:
   undo mid-drag isn't redone by the drop; a blocked Delete doesn't steal focus
   later; picks don't survive their page's removal; with Find open the view and
   the active hit stay put through page work and text loading;
+- `patterns.spec.ts` — Redact patterns: every preset is found in the
+  `personal` fixture, a phone number split across two runs too, and the
+  decoys (a Luhn-failing "card", a bad-checksum IBAN, a span of years, a short
+  reference) are not; the fixture's only red is the hits, so red left after
+  export means a box fell short. An unticked hit stays on the page and in the
+  file, and the rest redact in one undo step. Dates are opt-in; a custom
+  pattern that doesn't compile or matches empty text is refused with an alert.
+  Escape leaves the page untouched; the find bar leads to the panel and the two
+  never show together; on a phone the sheet fits and its Redact button is in
+  view.
 - `update.spec.ts` — the site redeployed under an open page: an on-demand
   part whose file is gone (a 404'd chunk) doesn't open, the document and its
   edits stay on screen, no modal is left half-open, and a banner offers a

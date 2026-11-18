@@ -71,6 +71,17 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   every overlay does. Case folding keeps a
   map back to the original indices (Turkish "İ" lower-cases to two code
   points). Don't tighten any of this without `export.spec`'s hostile-text test.
+- **Redact patterns searches a page's *joined* text** (`findPatternMatches`
+  in `pdf/find.ts`, presets in `pdf/patterns.ts`). Runs on one line are joined
+  (a space where the gap is wider than 0.15em) so a number a producer split
+  into runs still matches; each hit becomes one box per run it touches,
+  measured by the same code as Find. Presets never match `\s`, so a hit can't
+  run on into the next line. Where two presets claim the same text, the earlier
+  in `PATTERN_PRESETS` keeps it, so specific formats go first; checksums (Luhn,
+  IBAN mod-97) turn away look-alikes. A custom pattern is the person's own
+  regex, run on the main thread: a catastrophic one can hang the tab, and only
+  their own. Picture-only pages have no text to search until Recognise text.
+  Nothing is redacted until "Redact", and then in one history step.
 - **Export edits the loaded file in place; it doesn't rebuild one.** That keeps
   catalog-level structure (outline, page labels, tags, `/Lang`, named
   destinations, layers, the form) and shares what the source shared. It also

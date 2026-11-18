@@ -1838,6 +1838,139 @@ body {
   background: color-mix(in srgb, #ff9800 72%, transparent);
   outline: 1.5px solid #e8710a;
 }
+/* A pattern hit the person unticked: still shown, so the page says what was
+   found, but plainly not going to be covered. */
+.findhit--off {
+  background: transparent;
+  outline: 1.5px dashed color-mix(in srgb, #e8710a 70%, transparent);
+  mix-blend-mode: normal;
+}
+
+/* ============ Redact patterns ============ */
+/* A floating panel, not a modal: the page stays visible and scrollable beside
+   it, because reviewing a hit means looking at where it is. */
+.patterns {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  width: 340px;
+  max-width: calc(100% - 24px);
+  max-height: calc(100% - 24px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-container-high);
+  color: var(--on-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-2);
+  z-index: 17;
+  overflow: hidden;
+}
+.patterns__head { display: flex; align-items: center; gap: 8px; padding: 8px 6px 4px 16px; color: var(--on-surface-variant); }
+.patterns__title { flex: 1; margin: 0; color: var(--on-surface); }
+.patterns__kinds { border: none; margin: 0; padding: 4px 16px 8px; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; }
+.patterns__legend { padding: 0; margin-bottom: 4px; color: var(--on-surface-variant); }
+.patterns__kind { display: flex; align-items: center; gap: 8px; min-height: 36px; font: 400 0.875rem/1.25 var(--font-plain); cursor: pointer; }
+.patterns__kind input, .patterns__hit input { width: 18px; height: 18px; accent-color: var(--primary); flex: none; margin: 0; }
+.patterns__custom { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; margin-top: 6px; color: var(--on-surface-variant); }
+.patterns__input {
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--outline);
+  border-radius: var(--radius-sm, 8px);
+  background: transparent;
+  color: var(--on-surface);
+  font: 400 0.875rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.patterns__input:focus-visible { outline: 2px solid var(--primary); outline-offset: -1px; border-color: transparent; }
+.patterns__input[aria-invalid] { border-color: var(--error); }
+.patterns__error { grid-column: 1 / -1; margin: 2px 0 0; color: var(--error); }
+.patterns__summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--outline-variant);
+}
+.patterns__all {
+  border: none;
+  background: none;
+  color: var(--primary);
+  font: 500 0.8125rem/1 var(--font-plain);
+  padding: 8px 4px;
+  cursor: pointer;
+}
+.patterns__list { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 0 8px 4px; }
+.patterns__page { padding-bottom: 4px; }
+.patterns__pagehead { margin: 6px 8px 2px; color: var(--on-surface-variant); }
+.patterns__hit { display: flex; align-items: center; gap: 4px; padding-left: 8px; border-radius: var(--radius-sm, 8px); }
+.patterns__hit--on { background: color-mix(in srgb, var(--primary) 12%, transparent); }
+.patterns__show {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+  padding: 0 8px;
+  border: none;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.patterns__text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 400 0.875rem/1.25 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.patterns__hit--off .patterns__text { color: var(--on-surface-variant); text-decoration: line-through; }
+.patterns__kindtag { color: var(--on-surface-variant); flex: none; }
+.patterns__note { margin: 0; padding: 6px 16px 0; color: var(--on-surface-variant); }
+.patterns__foot { display: flex; justify-content: flex-end; gap: 8px; padding: 8px 12px 12px; }
+/* Wider screens: the right-hand column, full height, so the page beside it
+   stays uncovered. */
+.inspector--patterns { display: flex; flex-direction: column; overflow: hidden; }
+.patterns--docked {
+  position: static;
+  width: auto;
+  max-width: none;
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+  background: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+.patterns--docked .patterns__kinds { grid-template-columns: 1fr; }
+/* Both homes scroll as one, the action kept in reach: a list scrolling on its
+   own under the choices was squeezed to a row or two. */
+.patterns--docked { overflow-y: auto; overscroll-behavior: contain; }
+.patterns--docked .patterns__list { flex: none; overflow: visible; }
+.patterns--docked .patterns__foot { position: sticky; bottom: 0; background: var(--surface-container-low); }
+/* Phone: a bottom sheet, so the top of the page (and the hit being shown,
+   which scrolls to a third of the way down) stays in view above it. The whole
+   sheet scrolls, with the action kept in reach: a list scrolling on its own
+   inside it was squeezed to one row by the choices above it. */
+@media (max-width: 599px) {
+  .patterns {
+    top: auto;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    max-width: none;
+    max-height: 62%;
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+  .patterns__list { flex: none; overflow: visible; }
+  .patterns__foot { position: sticky; bottom: 0; background: var(--surface-container-high); }
+  .patterns__kind, .patterns__show { min-height: 44px; }
+}
 
 /* Live preview of export-time finishing layers (page numbers + watermark).
    Non-interactive — the real layers are drawn by the exporter. */
