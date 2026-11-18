@@ -438,7 +438,9 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose, outline = []
             const views = ["pages", "outline"] as const;
             const to = segmentKey(e.key, views.indexOf(view), 2);
             if (to == null) return;
+            // Not also a nudge of whatever is selected on the canvas.
             e.preventDefault();
+            e.stopPropagation();
             onView?.(views[to]);
             const tabs = e.currentTarget.querySelectorAll<HTMLElement>("[role=tab]");
             tabs[to]?.focus();

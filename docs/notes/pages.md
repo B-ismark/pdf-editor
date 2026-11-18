@@ -138,15 +138,18 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
   Download. Page numbers and the watermark are not drawn in by a merge; they
   carry over to the new document as live settings, so they number the merged
   file in its new order.
-- **`buildFromPlan` reunites twins and cuts strays.** `copyPages` follows a
-  link's `/Dest` (or any reference) into another page and copies that page a
-  *second* time, outside the page tree — for a page the plan kept as much as
-  for one it left out. Cutting every such copy deleted every link between kept
-  pages on Merge, Extract and Split. The copier clones each page dict afresh but
-  shares everything below it within one `copyPages` call, so an out-of-tree copy
-  with the same `/Contents` as an in-tree page is that page's twin: references
-  to it are moved over (`retargetPageRefs`). Only a page with no twin is cut,
-  link and all, and garbage-collected.
+- **`buildFromPlan` points links at the kept page, and cuts strays.**
+  `copyPages` follows a link's `/Dest` (or any reference) into another page and
+  copies that page a *second* time, outside the page tree — for a page the plan
+  kept as much as for one it left out. Cutting every such copy deleted every
+  link between kept pages on Merge, Extract and Split. So pages are copied by
+  hand with one `PDFObjectCopier` per source, whose map of what it has copied
+  is seeded first with each kept page's source ref → its new ref: a reference
+  to a kept page, from any page, lands on the page in the tree. (Matching
+  copies up by their `/Contents` was tried and is wrong: two pages may share a
+  content stream, and a blank page has none.) A page used twice takes links to
+  its first use. Any `/Page` still outside the tree is one the plan left out:
+  it's cut, link and all, and garbage-collected.
 - **Page labels follow their pages.** When the plan isn't the identity,
   `remapPageLabels` (`structure.ts`) rewrites `/PageLabels` one range per kept
   page, with the start number advanced to where that page sat in its range.

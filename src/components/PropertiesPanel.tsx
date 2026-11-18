@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
 import { isRejectedUrl } from "../pdf/url";
@@ -151,9 +152,15 @@ export function PropertiesPanel({
               aria-labelledby="link-target"
               // A radio group is one tab stop; the arrows move the choice.
               onKeyDown={(e) => {
-                const to = segmentKey(e.key, linkPage !== undefined ? 1 : 0, 2);
+                const at = linkPage !== undefined ? 1 : 0;
+                const to = segmentKey(e.key, at, 2);
                 if (to == null) return;
+                // Not also a nudge of the selected link on the canvas.
                 e.preventDefault();
+                e.stopPropagation();
+                // Home/End on the choice already made changes nothing — not
+                // even a deleted page's link, which stays flagged.
+                if (to === at) return;
                 onChangeLinkPage?.(to === 1 ? (linkPage ?? 0) : undefined);
                 const btns = e.currentTarget.querySelectorAll<HTMLElement>("[role=radio]");
                 requestAnimationFrame(() => btns[to]?.focus());
@@ -177,7 +184,7 @@ export function PropertiesPanel({
             </div>
           </div>
           {linkPage !== undefined ? (
-            <LinkPageField pos={linkPage} count={pageCount} onChange={(p) => onChangeLinkPage?.(p)} />
+            <LinkPageField key={selection.id} pos={linkPage} count={pageCount} onChange={(p) => onChangeLinkPage?.(p)} />
           ) : (
           <>
           <div className="field">
@@ -389,8 +396,14 @@ function LinkPageField({ pos, count, onChange }: { pos: number | null; count: nu
   useEffect(() => setDraft(shown), [shown]);
   const commit = (text: string) => {
     const n = Number(text);
-    if (Number.isInteger(n) && n >= 1 && n <= count) onChange(n - 1);
+    if (text !== shown && Number.isInteger(n) && n >= 1 && n <= count) onChange(n - 1);
   };
+  // The field can go without a blur — a click on the page deselects the link
+  // before focus moves, and React sends no blur to an input it removes. What
+  // was typed is taken then too. (Keyed by the link, so it's that link's.)
+  const latest = useRef(() => {});
+  latest.current = () => commit(draft);
+  useEffect(() => () => latest.current(), []);
   const out = draft !== "" && !(Number.isInteger(Number(draft)) && Number(draft) >= 1 && Number(draft) <= count);
   const gone = pos == null;
   return (
@@ -411,10 +424,14 @@ function LinkPageField({ pos, count, onChange }: { pos: number | null; count: nu
             onKeyDown={(e) => {
               if (e.key === "Enter") commit(draft);
               else if (e.key === "Escape") setDraft(shown);
+              // Ctrl/⌘+S (or any shortcut) acts on the document with what was
+              // typed in it: taken now, before the shortcut runs.
+              else if (e.ctrlKey || e.metaKey) flushSync(() => commit(draft));
             }}
             onBlur={() => {
               commit(draft);
-              setDraft(shown);
+              // A number that didn't take goes back to the link's page.
+              if (out || draft === "") setDraft(shown);
             }}
           />
           <span className="body-medium">of {count}</span>

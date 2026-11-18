@@ -296,11 +296,14 @@ type-checking can't see, and each exists because it broke once:
   move into the file's `/Dest`, keeps its web address when switched back, is
   flagged and left out when its page is deleted, and lands on the raster when
   its page is redacted after the link was written. `buildFromPlan` (Merge,
-  Extract, Split) keeps links between kept pages, in or out of order, and cuts
-  one whose page was left out. The page field takes its number on Enter or
-  blur, so typing "12" in a 4-page document doesn't move the link to page 1;
-  both switches are one tab stop that arrows move; closing a section keeps
-  focus in the tree;
+  Extract, Split) keeps links between kept pages, in or out of order, to a
+  blank page, to the right one of two pages sharing a content stream, and to
+  the first use of a page used twice — and cuts one whose page was left out. The page field takes its number on Enter or
+  blur, so typing "12" in a 4-page document doesn't move the link to page 1 —
+  and on a click that deselects the link before any blur; both switches are one
+  tab stop that arrows move, without also nudging the selected link, and End
+  on a deleted page's link leaves it flagged; closing a section keeps focus in
+  the tree;
 - `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
   never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
   character WinAnsi can't encode instead of throwing, so `sanitize`

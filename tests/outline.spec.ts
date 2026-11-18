@@ -1,5 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef, PDFString } from "pdf-lib";
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef, PDFString, type PDFPage } from "pdf-lib";
 import { readFileSync } from "node:fs";
 import { fixtures, OUTLINED } from "./fixtures";
 import { open, watch, pickTool, dragOnPage, expectClean, pageTexts } from "./helpers";
@@ -143,6 +143,12 @@ test.describe("the outline", () => {
 });
 
 test.describe("a link to a page", () => {
+  /** A page number takes on Enter (or on leaving the field). */
+  async function setLinkPage(page: Page, n: string) {
+    await page.fill("#link-page", n);
+    await page.locator("#link-page").press("Enter");
+  }
+
   async function linkOnFirstPage(page: Page) {
     await pickTool(page, "Link");
     await dragOnPage(page, { x: 80, y: 120 }, { x: 280, y: 165 });
@@ -154,7 +160,7 @@ test.describe("a link to a page", () => {
     const w = watch(page);
     await open(page, (await fixtures()).outlined);
     await linkOnFirstPage(page);
-    await page.fill("#link-page", "3");
+    await setLinkPage(page, "3");
     await expect(page.locator("#link-page-note")).toContainText("opens page 3");
     await expect(page.locator(".linkbox")).toHaveAttribute("data-tip", "Page 3");
 
@@ -185,7 +191,7 @@ test.describe("a link to a page", () => {
     await dragOnPage(page, { x: 80, y: 120 }, { x: 280, y: 165 });
     await page.fill("#link-url", "https://example.com/a");
     await page.getByRole("radio", { name: "Page" }).click();
-    await page.fill("#link-page", "2");
+    await setLinkPage(page, "2");
     await page.getByRole("radio", { name: "Web address" }).click();
     await expect(page.locator("#link-url")).toHaveValue("https://example.com/a");
     const doc = await PDFDocument.load(await download(page));
@@ -195,7 +201,7 @@ test.describe("a link to a page", () => {
   test("to a deleted page is flagged and left out of the file", async ({ page }) => {
     await open(page, (await fixtures()).outlined);
     await linkOnFirstPage(page);
-    await page.fill("#link-page", "2");
+    await setLinkPage(page, "2");
     await page.keyboard.press("Escape");
     await page.getByRole("button", { name: "Show pages" }).click();
     await page.locator(".pagenav__item").nth(1).click();
@@ -215,7 +221,7 @@ test.describe("a link to a page", () => {
   test("lands on the raster that replaces a redacted page", async ({ page }) => {
     await open(page, (await fixtures()).outlined);
     await linkOnFirstPage(page);
-    await page.fill("#link-page", "2");
+    await setLinkPage(page, "2");
     await page.keyboard.press("Escape");
     // Redact on page 2, which is exported after the link is written.
     await pickTool(page, "Redact");
@@ -280,6 +286,52 @@ test.describe("a rebuild keeps links between kept pages", () => {
     expect(linksOn(doc, 0)).toEqual([]);
     expect(Buffer.from(bytes).toString("latin1").match(/\/Type\s*\/Page\b/g)?.length).toBe(1);
   });
+
+  /** Three pages; `shape` sets each one up, then `from → to` links are added. */
+  async function built(shape: (pages: PDFPage[], doc: PDFDocument) => void, links: [number, number][]) {
+    const doc = await PDFDocument.create();
+    const pages = [doc.addPage([300, 300]), doc.addPage([300, 300]), doc.addPage([300, 300])];
+    shape(pages, doc);
+    for (const [from, to] of links)
+      pages[from].node.addAnnot(
+        doc.context.register(
+          doc.context.obj({ Type: "Annot", Subtype: "Link", Rect: [10, 10, 100, 40], Dest: [pages[to].ref, PDFName.of("Fit")] }),
+        ),
+      );
+    const bytes = await doc.save();
+    return new Map([["main", bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer]]);
+  }
+
+  test("two pages drawn from one content stream are still two pages", async () => {
+    // Pages 1 and 2 share their drawing (a template); page 3 links to page 1.
+    const sources = await built(([a, b, c]) => {
+      a.drawText("same", { x: 20, y: 200 });
+      // One stream, by reference from both pages.
+      const drawn = a.node.get(PDFName.of("Contents"));
+      const stream = drawn instanceof PDFArray ? drawn.get(0) : drawn!;
+      a.node.set(PDFName.of("Contents"), stream);
+      b.node.set(PDFName.of("Contents"), stream);
+      c.drawText("three", { x: 20, y: 200 });
+    }, [[2, 0]]);
+    let doc = await PDFDocument.load(await buildFromPlan(plan(0, 1, 2), sources));
+    expect(linksOn(doc, 2), "to page 1, not its look-alike").toEqual([{ to: 0, uri: undefined }]);
+    doc = await PDFDocument.load(await buildFromPlan(plan(1, 2), sources));
+    expect(linksOn(doc, 1), "page 1 left out: the link goes, not to page 2").toEqual([]);
+  });
+
+  test("a link to a blank page, and to a page used twice", async () => {
+    // Page 2 is blank — no content stream at all.
+    const sources = await built(([a, , c]) => {
+      a.drawText("one", { x: 20, y: 200 });
+      c.drawText("three", { x: 20, y: 200 });
+    }, [[0, 1], [2, 0]]);
+    let doc = await PDFDocument.load(await buildFromPlan(plan(0, 1, 2), sources));
+    expect(linksOn(doc, 0), "to the blank page").toEqual([{ to: 1, uri: undefined }]);
+    // Page 2 twice: its link goes to its first use.
+    doc = await PDFDocument.load(await buildFromPlan(plan(0, 1, 1, 2), sources));
+    expect(linksOn(doc, 0)).toEqual([{ to: 1, uri: undefined }]);
+    expect(linksOn(doc, 3)).toEqual([{ to: 0, uri: undefined }]);
+  });
 });
 
 test.describe("the link panel's controls", () => {
@@ -328,6 +380,53 @@ test.describe("the link panel's controls", () => {
     await page.keyboard.press("ArrowRight");
     await expect(outlineTab).toBeFocused();
     await expect(tree(page)).toBeVisible();
+  });
+
+  test("arrowing between Web address and Page doesn't also nudge the link", async ({ page }) => {
+    await open(page, (await fixtures()).outlined);
+    await pickTool(page, "Link");
+    await dragOnPage(page, { x: 80, y: 120 }, { x: 280, y: 165 });
+    const before = await page.locator(".linkbox").boundingBox();
+    await page.getByRole("radio", { name: "Web address" }).focus();
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowDown");
+    await expect(page.getByRole("radio", { name: "Web address" })).toHaveAttribute("aria-checked", "true");
+    expect(await page.locator(".linkbox").boundingBox()).toEqual(before);
+  });
+
+  test("End on a link whose page was deleted leaves it flagged, not sent to page 1", async ({ page }) => {
+    await open(page, (await fixtures()).outlined);
+    await pickTool(page, "Link");
+    await dragOnPage(page, { x: 80, y: 120 }, { x: 280, y: 165 });
+    await page.getByRole("radio", { name: "Page" }).click();
+    await page.fill("#link-page", "2");
+    await page.locator("#link-page").press("Enter");
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Show pages" }).click();
+    await page.locator(".pagenav__item").nth(1).click();
+    await page.keyboard.press("Delete");
+    await expect.poll(() => order(page)).toEqual([0, 2, 3]);
+    await page.locator(".linkbox").click();
+    await page.getByRole("radio", { name: "Page" }).focus();
+    await page.keyboard.press("End");
+    await expect(page.locator("#link-page-note")).toContainText("was deleted");
+    await expect(page.locator(".linkbox")).toHaveAttribute("data-tip", "Its page was deleted");
+  });
+
+  test("a page number typed and then left by clicking the page still takes", async ({ page }) => {
+    await open(page, (await fixtures()).outlined);
+    await pickTool(page, "Link");
+    await dragOnPage(page, { x: 80, y: 120 }, { x: 280, y: 165 });
+    await pickTool(page, "Select");
+    await page.locator(".linkbox").click();
+    await page.getByRole("radio", { name: "Page" }).click();
+    await page.fill("#link-page", "4");
+    // With Select, a click on bare page deselects the link before focus moves.
+    const overlay = page.locator('.page[data-page-pos="0"] .page__overlay');
+    const box = (await overlay.boundingBox())!;
+    await overlay.click({ position: { x: box.width - 30, y: 300 } });
+    await expect(page.locator("#link-page")).toHaveCount(0);
+    await expect(page.locator(".linkbox").first()).toHaveAttribute("data-tip", "Page 4");
   });
 
   test("closing a section by its arrow keeps focus in the tree", async ({ page }) => {
