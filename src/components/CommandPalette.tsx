@@ -63,7 +63,8 @@ export interface Command {
   value?: string;
   /** What it does, where the label alone doesn't say (a tooltip in the menus). */
   detail?: string;
-  /** Exists but can't run right now (a file is being made). Not listed. */
+  /** Exists but can't run right now (a file is being made). Greyed in a
+   * menu; left out of the palette, which only lists what will run. */
   disabled?: boolean;
   /** Doesn't apply in this state (no selection to align). Not listed. */
   hidden?: boolean;
@@ -76,6 +77,17 @@ export interface Command {
 interface Props {
   commands: Command[];
   onClose: () => void;
+}
+
+/** A shortcut as shown ("Ctrl+D", "Del") in `aria-keyshortcuts` form
+ * ("Control+D", "Delete"). The visible hint is hidden from the accessible
+ * name, so a row is announced by its label and its keys come from here. */
+export function ariaKeys(shortcut: string | undefined): string | undefined {
+  if (!shortcut) return undefined;
+  return shortcut
+    .replace(/\bCtrl\b/g, "Control")
+    .replace(/^Del$/, "Delete")
+    .replace(/^Esc$/, "Escape");
 }
 
 /** Fuzzy-ish (substring, all-terms) filter over label + keywords. */
@@ -100,7 +112,19 @@ export function CommandPalette({ commands, onClose }: Props) {
     [commands, q],
   );
 
-  useEffect(() => inputRef.current?.focus(), []);
+  // Focus goes back where it was when the palette closes, before the command
+  // runs, so a command that moves focus itself (Find) still wins and one that
+  // doesn't (Next match, Zoom in) leaves it where the person was, not on <body>.
+  const returnTo = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    returnTo.current = document.activeElement as HTMLElement | null;
+    inputRef.current?.focus();
+  }, []);
+  const close = () => {
+    onClose();
+    const back = returnTo.current;
+    if (back && back.isConnected && back !== document.body) back.focus({ preventScroll: true });
+  };
   useEffect(() => setActive(0), [q]);
   useEffect(() => {
     listRef.current
@@ -113,12 +137,12 @@ export function CommandPalette({ commands, onClose }: Props) {
     // made and the exports go), so Enter runs the last row rather than nothing.
     const cmd = results[Math.min(i, results.length - 1)];
     if (!cmd) return;
-    onClose();
+    close();
     cmd.run();
   };
 
   return (
-    <div className="cmdk-scrim" onPointerDown={onClose}>
+    <div className="cmdk-scrim" onPointerDown={close}>
       <div
         className="cmdk"
         role="dialog"
@@ -150,12 +174,12 @@ export function CommandPalette({ commands, onClose }: Props) {
                 // through, the editor's own Escape cleared the selection the
                 // palette's Selection commands were about to act on.
                 e.stopPropagation();
-                onClose();
+                close();
               }
             }}
           />
         </div>
-        <div className="cmdk__list" role="listbox" ref={listRef}>
+        <div className="cmdk__list" role="listbox" aria-label="Commands" ref={listRef}>
           {results.length === 0 && <div className="cmdk__empty">No matching commands</div>}
           {results.map((c, i) => (
             <button
@@ -163,9 +187,11 @@ export function CommandPalette({ commands, onClose }: Props) {
               className={`cmdk__item${i === active ? " cmdk__item--on" : ""}`}
               data-active={i === active}
               data-cmd={c.id}
+              data-group={c.group}
               role="option"
               aria-selected={i === active}
               aria-checked={c.checked}
+              aria-keyshortcuts={ariaKeys(c.shortcut)}
               onPointerEnter={() => setActive(i)}
               onClick={() => runAt(i)}
             >
@@ -173,7 +199,7 @@ export function CommandPalette({ commands, onClose }: Props) {
               <span className="cmdk__label">{c.label}</span>
               {c.value && <span className="cmdk__value label-medium">{c.value}</span>}
               {c.checked && <Icon name="check" size={16} className="cmdk__check" />}
-              <span className="cmdk__hint label-medium">{c.shortcut ?? GROUP_LABEL[c.group]}</span>
+              <span className="cmdk__hint label-medium" aria-hidden="true">{c.shortcut ?? GROUP_LABEL[c.group]}</span>
               {/* The dialog mark is for dialogs only: Draw opens a toolbar,
                   which the dock marks its own way. */}
               {c.opens === "dialog" && <Icon name="opens_dialog" size={16} className="opens-mark" />}

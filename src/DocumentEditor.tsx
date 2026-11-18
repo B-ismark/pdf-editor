@@ -25,7 +25,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { FindBar } from "./components/FindBar";
 import { PageNav } from "./components/PageNav";
 import { PageJump } from "./components/PageJump";
-import { CommandPalette, GROUP_LABEL, type Command, type CommandGroup } from "./components/CommandPalette";
+import { CommandPalette, GROUP_LABEL, ariaKeys, type Command, type CommandGroup } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
 import { findMatches, extractText, type FindMatch } from "./pdf/find";
 import { isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
@@ -2230,7 +2230,7 @@ export const DocumentEditor = memo(function DocumentEditor({
 
     { id: "open", group: "file", label: "Open another PDF", icon: "note_add", shortcut: "Ctrl+O", keywords: "new tab file", run: onOpenAnother },
     { id: "close", group: "file", label: "Close document", icon: "close", keywords: "home start exit leave", run: goHome },
-    { id: "palette", group: "file", label: "Search commands", icon: "command", shortcut: "Ctrl+K", keywords: "palette", hidden: cmdOpen, run: () => setCmdOpen(true) },
+    { id: "palette", group: "file", label: "Search commands", icon: "command", shortcut: "Ctrl+K", keywords: "palette", opens: "dialog", hidden: cmdOpen, run: () => setCmdOpen(true) },
 
     ...tabs
       .filter((t) => t.id !== activeId)
@@ -2251,6 +2251,8 @@ export const DocumentEditor = memo(function DocumentEditor({
       key={c.id}
       className="menu__item"
       data-cmd={c.id}
+      data-group={c.group}
+      aria-keyshortcuts={ariaKeys(c.shortcut)}
       role={c.checked !== undefined ? "menuitemcheckbox" : "menuitem"}
       aria-checked={c.checked}
       aria-haspopup={c.opens === "dialog" ? "dialog" : undefined}
@@ -2270,7 +2272,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       {c.value && <span className="menu__value label-medium">{c.value}</span>}
       {c.checked && <Icon name="check" size={16} className="menu__check" />}
       {/* No keys to press on a phone, so no shortcuts to show there. */}
-      {c.shortcut && !compact && !c.value && !c.checked && <span className="menu__value label-medium">{c.shortcut}</span>}
+      {c.shortcut && !compact && !c.value && !c.checked && <span className="menu__value label-medium" aria-hidden="true">{c.shortcut}</span>}
       {c.opens === "dialog" && <Icon name="opens_dialog" size={16} className="opens-mark" />}
     </button>
   );

@@ -769,16 +769,39 @@ test.describe("Export split button", () => {
  * ("Show page thumbnails" there, "Show pages" on the button it mirrors).
  */
 test.describe("command registry", () => {
-  /** Every row of an open menu, as [command id, visible label]. */
+  /** Every row of an open menu — any menuitem, whatever its class, so a
+   * hand-made row can't hide from this — as [id, label, icon, mark, checked, group]. */
   const rowsOf = (page: Page, menu: string) =>
-    page.locator(`${menu} .menu__item`).evaluateAll((els) =>
+    page.locator(`${menu} [role^="menuitem"]`).evaluateAll((els) =>
       els.map((el) => [
         el.getAttribute("data-cmd") ?? "",
         el.querySelector(".menu__itemlabel")?.textContent?.trim() ?? "",
         el.querySelector("svg")?.getAttribute("class") ?? "",
         el.querySelector(".opens-mark") ? "opens" : "",
+        el.getAttribute("aria-checked") ?? "",
+        el.getAttribute("data-group") ?? "",
       ]),
     );
+
+  /** Every command the palette lists with an empty query, as [id, group]. */
+  async function paletteAll(page: Page) {
+    await page.fill(".cmdk input", "");
+    return page.locator(".cmdk__item").evaluateAll((els) =>
+      els.map((el) => [el.getAttribute("data-cmd") ?? "", el.getAttribute("data-group") ?? ""]),
+    );
+  }
+
+  /** Each group a menu shows holds exactly the palette's commands of that
+   * group — both ways, so a menu that drops one is caught as surely as a row
+   * the palette lacks. `except` are rows a menu leaves out on purpose. */
+  function sameGroups(menuRows: string[][], palette: string[][], except: string[] = []) {
+    const groups = new Set(menuRows.map((r) => r[5]));
+    for (const g of groups) {
+      const inMenu = menuRows.filter((r) => r[5] === g).map((r) => r[0]).filter((id) => id !== "palette").sort();
+      const inPalette = palette.filter(([, pg]) => pg === g).map(([id]) => id).filter((id) => !except.includes(id)).sort();
+      expect(inMenu, `the "${g}" group`).toEqual(inPalette);
+    }
+  }
 
   /** Search the palette for `label` and return the row for command `id`. */
   async function paletteRow(page: Page, id: string, label: string) {
@@ -802,6 +825,7 @@ test.describe("command registry", () => {
     await page.keyboard.press("Escape");
 
     const rows = [...more, ...exporting].filter(([id]) => id !== "palette");
+    expect(new Set(more.map((r) => r[5]))).toEqual(new Set(["organise", "text", "finish", "settings", "file"]));
     // Every row carries its command id: a row without one is hand-made again.
     expect(rows.every(([id, label]) => id && label), JSON.stringify(rows)).toBe(true);
     expect(rows.map(([id]) => id)).toEqual(expect.arrayContaining([
@@ -811,15 +835,33 @@ test.describe("command registry", () => {
 
     await page.keyboard.press("Control+k");
     await expect(page.locator(".cmdk")).toBeVisible();
-    for (const [id, label, icon, mark] of rows) {
+    sameGroups([...more, ...exporting], await paletteAll(page));
+    for (const [id, label, icon, mark, checked] of rows) {
       const row = await paletteRow(page, id, label);
       await expect(row, `"${label}" (${id}) is in the palette`).toHaveCount(1);
       await expect(row.locator(".cmdk__label")).toHaveText(label);
+      // Named by its label alone: the hint beside it is not part of the name.
+      await expect(row).toHaveAccessibleName(new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+      if (checked) await expect(row).toHaveAttribute("aria-checked", checked);
       await expect(row.locator("svg").first(), `"${label}" has the same icon`).toHaveAttribute("class", icon);
       await expect(row.locator(".opens-mark"), `"${label}" is marked the same`).toHaveCount(mark ? 1 : 0);
     }
     await page.keyboard.press("Escape");
     expectClean(w);
+  });
+
+  test("on a phone, the ⋯ menu (Export first) is the palette's groups too", async ({ browser }) => {
+    const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true });
+    const page = await ctx.newPage();
+    await open(page, (await fixtures()).sample);
+    await page.getByRole("button", { name: "More actions" }).click();
+    const more = await rowsOf(page, '[role="menu"]');
+    expect(more[0][5]).toBe("export");
+    await page.getByRole("menuitem", { name: /Search commands/ }).click();
+    await expect(page.locator(".cmdk")).toBeVisible();
+    // Download PDF is the bar's own button on a phone, so the menu leaves it out.
+    sameGroups(more, await paletteAll(page), ["download"]);
+    await ctx.close();
   });
 
   test("commands that only lived on buttons are in the palette, and run", async ({ page }) => {
@@ -862,7 +904,12 @@ test.describe("command registry", () => {
     await expect(item).toHaveAttribute("aria-checked", String(was));
     await item.click();
     await page.keyboard.press("Control+k");
-    await expect(await paletteRow(page, "autosave", "Save session")).toHaveAttribute("aria-checked", String(!was));
+    const again = await paletteRow(page, "autosave", "Save session");
+    await expect(again).toHaveAttribute("aria-checked", String(!was));
+    // And the other way: switched from the palette, the menu shows it.
+    await again.click();
+    await page.getByRole("button", { name: "More actions" }).click();
+    await expect(item).toHaveAttribute("aria-checked", String(was));
     await page.keyboard.press("Escape");
   });
 
@@ -897,8 +944,10 @@ test.describe("command registry", () => {
     await page.keyboard.press("Control+k");
     await (await paletteRow(page, "align-left", "Align left")).click();
     await expect.poll(async () => new Set(await lefts()).size).toBe(1);
-    // Distributing needs three; with two it isn't offered.
+    // Distributing needs three; with two it isn't offered (while the group,
+    // and so aligning, still is — otherwise this would pass on a lost selection).
     await page.keyboard.press("Control+k");
+    await expect(await paletteRow(page, "align-right", "Align right")).toHaveCount(1);
     await page.fill(".cmdk input", "distribute");
     await expect(page.locator(".cmdk__item")).toHaveCount(0);
     await page.keyboard.press("Escape");
@@ -937,7 +986,15 @@ test.describe("command registry", () => {
     // Backing out of the palette leaves the selection it was opened over.
     await expect(page.locator(".multisel")).toHaveCount(2);
     const prevented = page.evaluate(
-      () => new Promise<boolean>((done) => window.addEventListener("keydown", (e) => setTimeout(() => done(e.defaultPrevented)), { once: true })),
+      () =>
+        new Promise<boolean>((done) => {
+          const h = (e: KeyboardEvent) => {
+            if (e.key.toLowerCase() !== "d") return; // not the Control press before it
+            window.removeEventListener("keydown", h);
+            setTimeout(() => done(e.defaultPrevented));
+          };
+          window.addEventListener("keydown", h);
+        }),
     );
     await page.keyboard.press("Control+d");
     expect(await prevented, "Ctrl+D reached the browser").toBe(true);
@@ -965,6 +1022,23 @@ test.describe("command registry", () => {
     // The strip stands down so the page is there to draw on, and says which.
     await expect(page.locator(".drawbar--closed")).toHaveCount(1);
     await expect(page.locator(".drawbar__handle")).toContainText("Arrow");
+  });
+
+  test("a command that doesn't move focus leaves it where it was", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    const zoomIn = page.getByRole("button", { name: "Zoom in" });
+    await zoomIn.focus();
+    await page.keyboard.press("Control+k");
+    await (await paletteRow(page, "zoom-out", "Zoom out")).click();
+    await expect(zoomIn).toBeFocused();
+    await page.keyboard.press("Control+k");
+    await page.keyboard.press("Escape");
+    await expect(zoomIn).toBeFocused();
+    // One that does move it still gets to.
+    await page.keyboard.press("Control+k");
+    await (await paletteRow(page, "find", "Find in document")).click();
+    await expect(page.locator(".findbar__input")).toBeFocused();
   });
 
   test("the ⋯ menu says where to find everything: Search commands opens the palette", async ({ page }) => {

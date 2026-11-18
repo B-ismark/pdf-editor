@@ -71,8 +71,8 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   each page it read (`PageData.ocrRead`), so the offer goes once nothing is left
   — a page OCR *failed* on stays offered. The Text fact never says "scanned": a
   blank or vector-only page has no text either. The document actions also live in the
-  ⋯ menu — on a phone the panel is a selection-driven sheet and the palette
-  needs a keyboard — read from the command registry by `MENU_GROUPS`.
+  ⋯ menu — on a phone the panel is a selection-driven sheet and typing in the
+  palette is slow — read from the command registry by `MENU_GROUPS`.
 - **Every command is declared once, in the registry.** `commands` in
   `DocumentEditor.tsx` (typed by `Command` in `CommandPalette.tsx`) is every
   action the app has: tools, Draw sub-tools, selection actions, undo/redo,
@@ -91,7 +91,13 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   button that does something the registry doesn't have is the drift starting
   again: add the command, then render the button's label from it or keep the
   two words identical. Buttons on the canvas (multibar, zoom pill, rail) still
-  render themselves; only the lists are generated.
+  render themselves; only the lists are generated. A row's accessible name is
+  its label: the hint beside it (shortcut or group) is `aria-hidden`, and the
+  keys reach assistive tech as `aria-keyshortcuts`. Closing the palette puts
+  focus back where it was *before* the command runs, so a command that moves
+  focus wins and one that doesn't leaves it with the person. Its Escape stops
+  there — the editor's Escape would otherwise drop the selection the
+  Selection commands act on.
 - **Download is a split button; Export holds every output.** Actions that make
   a file and leave the document alone (Compress, Sign with certificate, Export
   as images, Export text, and Download all with several tabs) are
@@ -99,7 +105,7 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   Inspector and the desktop ⋯ menu don't list them; the caret beside Download
   (`Export options`, `aria-haspopup="menu"`) opens them, with "Download PDF"
   first. A phone has no width for a second control in the bar (the `shell.spec`
-  360px budget), so there the caret is not rendered and `EXPORT_GROUP` heads
+  360px budget), so there the caret is not rendered and the export group heads
   the ⋯ menu instead (Download all included). Both menus share `menuKeys`
   (arrows, Home/End, Escape back to the opener, Tab closes); it stops the
   event, so Delete or an arrow in an open menu never reaches the selection on

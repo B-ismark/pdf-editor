@@ -72,7 +72,7 @@ Surface key:
 | Link | L | Rectangle with a URL (allow-list: http(s)/mailto/tel). **No link-to-page target.** |
 | Add image | *not in Dock*: Insp-D "Organise", ⋯, Pal | Same stamp mechanism as Sign, but filed under "Organise" (see §2). |
 
-### 1.3 Document actions (`docActions`: shared by Insp-D, ⋯ and Pal)
+### 1.3 Document actions (`docActions` at the time; now the command registry `commands`, shared by ⋯, Export and Pal)
 
 | Group | Action | Commit model | Notes |
 |---|---|---|---|
