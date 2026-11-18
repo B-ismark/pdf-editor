@@ -456,7 +456,7 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose }: Props) {
               onFocus={() => setFocusKey(p.index)}
             >
               <span className="pagenav__thumb">
-                <Thumbnail bytes={bytes} index={p.index} rotation={p.rotate} />
+                <Thumbnail bytes={bytes} index={p.index} rotation={p.rotate} crop={p.crop} />
                 <span className="pagenav__num label-small" aria-hidden="true">
                   {i + 1}
                 </span>

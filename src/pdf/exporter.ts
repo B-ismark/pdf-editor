@@ -16,7 +16,7 @@ import {
   remapPageLabels,
 } from "./structure";
 import { alignPageTree, setPageList } from "./pageTree";
-import { isIdentityPlan, quarterTurn, resolvePlan } from "./pagePlan";
+import { fitCrop, isIdentityPlan, quarterTurn, resolvePlan } from "./pagePlan";
 import { safeLinkUrl } from "./url";
 import { markPolylines, markStroke } from "./marks";
 import { createSourceFontEmbedder, type SourceFontEmbedder } from "./fontEmbed";
@@ -109,11 +109,16 @@ export interface ExportInput {
   password?: string;
 }
 
+/** The part of a finished page the reader sees, in the page's own user space:
+ * the loaded view moved to where it sits in the file. A raster replacement is
+ * the view itself, at 0,0. */
+interface ViewFrame { x: number; y: number; width: number; height: number }
+
 /** Draw a page number onto a finished page (vector or rasterised alike). */
-function drawPageNumber(page: PDFPage, font: PDFFont, label: string, opts: PageNumberOptions): void {
+function drawPageNumber(page: PDFPage, font: PDFFont, label: string, opts: PageNumberOptions, frame: ViewFrame): void {
   const c = hexToRgb(opts.color);
   const margin = 28;
-  const { width, height } = page.getSize();
+  const { width, height } = frame;
   const tw = font.widthOfTextAtSize(label, opts.size);
   const top = opts.position.startsWith("top");
   const y = top ? height - margin - opts.size : margin;
@@ -122,19 +127,19 @@ function drawPageNumber(page: PDFPage, font: PDFFont, label: string, opts: PageN
     : opts.position.endsWith("right")
       ? width - margin - tw
       : width / 2 - tw / 2;
-  page.drawText(label, { x, y, size: opts.size, font, color: rgb(c.r, c.g, c.b) });
+  page.drawText(label, { x: frame.x + x, y: frame.y + y, size: opts.size, font, color: rgb(c.r, c.g, c.b) });
 }
 
 /** Stamp a diagonal text watermark centred on a finished page. */
-function drawWatermark(page: PDFPage, font: PDFFont, opts: WatermarkOptions): void {
+function drawWatermark(page: PDFPage, font: PDFFont, opts: WatermarkOptions, frame: ViewFrame): void {
   if (!opts.text.trim()) return;
   const c = hexToRgb(opts.color);
   const rad = (opts.angle * Math.PI) / 180;
   const len = font.widthOfTextAtSize(opts.text, opts.size);
-  const { width, height } = page.getSize();
+  const { width, height } = frame;
   // Start point so the text's midpoint lands at the page centre.
-  const x = width / 2 - (len / 2) * Math.cos(rad);
-  const y = height / 2 - (len / 2) * Math.sin(rad);
+  const x = frame.x + width / 2 - (len / 2) * Math.cos(rad);
+  const y = frame.y + height / 2 - (len / 2) * Math.sin(rad);
   page.drawText(opts.text, {
     x,
     y,
@@ -173,14 +178,16 @@ function fillAndFlattenForm(src: PDFDocument, formValues: Record<string, string 
  * if a value arrives from a restored session or a future call site. A rejected
  * scheme (`javascript:`, `data:`, `file:`, …) drops the annotation rather than
  * writing an active action into a document the user is about to share. */
-function addLinkAnnots(out: PDFDocument, page: PDFPage, links: LinkAnnot[]): void {
+function addLinkAnnots(out: PDFDocument, page: PDFPage, links: LinkAnnot[], frame: ViewFrame): void {
   for (const l of links) {
     const url = safeLinkUrl(l.url);
     if (!url) continue;
+    const x = frame.x + l.x;
+    const y = frame.y + l.y;
     const dict = out.context.obj({
       Type: "Annot",
       Subtype: "Link",
-      Rect: [l.x, l.y, l.x + l.width, l.y + l.height],
+      Rect: [x, y, x + l.width, y + l.height],
       Border: [0, 0, 0],
       A: { Type: "Action", S: "URI", URI: PDFString.of(url) },
     });
@@ -485,7 +492,9 @@ export async function exportPdf(
   // their *source* page index, so a page's markup is drawn on it wherever it
   // goes; pages left out of the plan were deleted and must not survive.
   const plan = resolvePlan(input.pages, loaded.pages.length);
-  const planned = new Map(plan.map((p, pos) => [p.index, { pos, rotate: p.rotate }] as const));
+  const planned = new Map(
+    plan.map((p, pos) => [p.index, { pos, rotate: p.rotate, crop: fitCrop(p.crop, loaded.pages[p.index].viewBox) }] as const),
+  );
   // updateMetadata: false stops pdf-lib stamping its own Producer / Creator /
   // CreationDate / ModDate on load; sanitizeDocument() then clears anything
   // else before save (see below).
@@ -566,23 +575,34 @@ export async function exportPdf(
     // annotations are then applied uniformly on top. The page number is the
     // page's position in the plan, not its source index — after a reorder the
     // two differ, and the reader counts positions.
-    const applyPageLayers = (page: PDFPage) => {
-      if (pageNumbers) drawPageNumber(page, helv, String(pageNumbers.start + slot.pos), pageNumbers);
-      if (watermark && wmFont) drawWatermark(page, wmFont, watermark);
-      addLinkAnnots(out, page, pageLinks);
+    const applyPageLayers = (page: PDFPage, frame: ViewFrame) => {
+      if (pageNumbers) drawPageNumber(page, helv, String(pageNumbers.start + slot.pos), pageNumbers, frame);
+      if (watermark && wmFont) drawWatermark(page, wmFont, watermark, frame);
+      addLinkAnnots(out, page, pageLinks, frame);
     };
+    // What the reader will see of the page, in view space: the plan's crop, or
+    // the whole view. Page numbers and the watermark are placed against it.
+    const seen = slot.crop ?? { x: 0, y: 0, ...pageData.viewBox };
 
     if (needsRaster) {
       const oldRef = finished[i].ref;
       const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, pageEdited, await getJpegEncoder());
       finished[i] = rasterPage;
       replaced.set(oldRef, rasterPage.ref);
-      applyPageLayers(rasterPage);
+      applyPageLayers(rasterPage, seen);
+      // The raster is the view at 0,0, so the crop goes on as it is.
+      if (slot.crop) rasterPage.setCropBox(seen.x, seen.y, seen.width, seen.height);
       continue;
     }
 
     // Vector path: draw edits + text boxes on top of the original page.
     const page = finished[i];
+    // Everything below is in view space (see `PageData.origin`); one move puts
+    // it back where the view sits in this page's own user space.
+    const ox = pageData.origin?.x ?? 0;
+    const oy = pageData.origin?.y ?? 0;
+    const moved = ox !== 0 || oy !== 0;
+    if (moved) page.pushOperators(pushGraphicsState(), concatTransformationMatrix(1, 0, 0, 1, ox, oy));
 
     for (const fragment of pageData.fragments) {
       const edit = edits[fragment.id];
@@ -670,8 +690,13 @@ export async function exportPdf(
       const c = hexToRgb(cov.color);
       page.drawRectangle({ x: cov.x, y: cov.y, width: cov.width, height: cov.height, color: rgb(c.r, c.g, c.b) });
     }
+    if (moved) page.pushOperators(popGraphicsState());
 
-    applyPageLayers(page);
+    const frame = { x: ox + seen.x, y: oy + seen.y, width: seen.width, height: seen.height };
+    applyPageLayers(page, frame);
+    // Cropping is the page's CropBox: what's outside it stays in the file,
+    // hidden, as every PDF crop leaves it (Redact is what removes things).
+    if (slot.crop) page.setCropBox(frame.x, frame.y, frame.width, frame.height);
   }
 
   await embedder?.destroy();

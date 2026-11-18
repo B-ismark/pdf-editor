@@ -164,6 +164,16 @@ type-checking can't see, and each exists because it broke once:
   still protected and closing the warning stays in the app; on a phone with
   something selected, the dialog opens (the deselect's removal no longer
   closes it) and Back closes it without leaving the app.
+- `crop.spec.ts` — Package 8b. A page whose CropBox starts at 100,200: the
+  heading's overlay sits on its glyphs (not off the page), an edit is redrawn
+  at the run's own user-space position, and a link drawn 20 points in from
+  the view's corner gets a `/Rect` that far in from the CropBox's. Crop: the
+  slot takes the crop's shape and text past the cut edge sits outside it, the
+  download has exactly that CropBox on that page only, undo restores it; "All
+  pages" applies one set of margins to all 12, the dialog reopens on them and
+  "Whole page" + Uncrop clears every crop; on a `/Rotate 90` page "Top" cuts
+  the user-space left side; Organise's thumbnail shows the crop and a plain
+  move keeps it with the page.
 - `pagetools.spec.ts` — Package 8a. Pictures: a phone JPEG (stored
   landscape, EXIF orientation 6, with GPS text in EXIF, XMP, a comment and
   IPTC) opens upright (portrait, its red corner top-right), 150 × 300 points

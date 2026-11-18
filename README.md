@@ -59,6 +59,9 @@ and is **mobile- and tablet-first**:
   before each page you pick, downloaded together as one ZIP (Export menu, or
   Split in Organise). The parts are made from the document as you see it, so
   redactions stay redacted.
+- **Crop** — keep part of a page: drag the frame or type the margins, for one
+  page or every page at once (⋯ menu or the command palette). Undoable, and
+  shown cropped everywhere — the page, the sidebar, Organise.
 - **Pictures to PDF** — open or drop JPEG and PNG pictures and they become a
   PDF, a page each, in the order picked. Photos stand the right way up, and
   what the camera recorded (location, device, time, comments) is left out of
@@ -257,6 +260,9 @@ A pragmatic, client-side editor — worth knowing where the seams are:
   fragment is covered with a white rectangle and the new text is drawn on top;
   the original glyphs still exist in the content stream. Use **Redact** (which
   flattens the page) if you need content to actually be removed.
+- **Cropping hides, it doesn't remove.** A crop sets the page's visible box, as
+  every PDF crop does; what's outside it is still in the file, and a reader that
+  ignores the crop shows it. Redact anything that must go.
 - **Redacting flattens the whole page to an image.** That page loses its
   selectable text layer, and unless you switch on *Lossless redacted pages* the
   image is a high-quality JPEG rather than an exact copy. Pages you don't redact

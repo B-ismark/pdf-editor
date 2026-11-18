@@ -1,3 +1,4 @@
+import type { CropRect } from "./types";
 import { PDFDict, PDFDocument, PDFName, PDFRef, degrees, type PDFPage } from "@cantoo/pdf-lib";
 import { sanitizeDocument } from "./sanitize";
 import { collectGarbage, cutDeletedPages } from "./structure";
@@ -11,6 +12,10 @@ export interface PlanEntry {
   index: number;
   /** Extra clockwise rotation in degrees (0/90/180/270). */
   rotation: number;
+  /** The document's own crop for this page (`PageRef.crop`), carried so the
+   * grid shows it and a plain rearrange keeps it. Never read by
+   * `buildFromPlan`: a cropped document is baked first, crop included. */
+  crop?: CropRect;
 }
 
 /** Cache of loaded pdf-lib source documents keyed by buffer identity. */
@@ -110,10 +115,12 @@ export async function shownPageSize(
   bytes: ArrayBuffer,
   index: number,
   extra: number,
+  /** The plan's crop of it, if any: the page shows that much. */
+  crop?: CropRect,
 ): Promise<{ width: number; height: number }> {
   const doc = await loadSource(bytes);
   const page = doc.getPage(Math.min(index, doc.getPageCount() - 1));
-  const { width, height } = page.getCropBox();
+  const { width, height } = crop ?? page.getCropBox();
   const turn = (((page.getRotation().angle + extra) % 360) + 360) % 360;
   return turn % 180 === 0 ? { width, height } : { width: height, height: width };
 }

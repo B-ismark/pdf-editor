@@ -81,15 +81,25 @@ export interface FormField {
 export interface PageData {
   pageIndex: number;
   /** Unscaled page dimensions in PDF units (== points), *unrotated*: the
-   * page's own user space, the one fragment transforms and every overlay
-   * object are stored in. The page as shown is this turned by `rotation`. */
+   * page's view space, the one fragment transforms and every overlay object
+   * are stored in. The page as shown is this turned by `rotation`. */
   viewBox: { width: number; height: number };
+  /** Where the view's lower-left corner sits in the file's own user space —
+   * the visible box (CropBox ∩ MediaBox) need not start at 0,0. The loader
+   * moves everything it reads by minus this, so the whole app works with the
+   * view at the origin; the exporter adds it back when it draws on the
+   * original page. Absent means 0,0. */
+  origin?: { x: number; y: number };
   /** Clockwise turn the page is shown at, in degrees (0/90/180/270). For a
    * page straight from the loader this is the file's own `/Rotate`; for a page
    * in the shown order (`pagePlan.ts`) it also includes the turn the page plan
    * adds. The overlay is laid out unrotated and turned with the canvas, so
    * markup stays in user space and turns with the page. */
   rotation: number;
+  /** For a page in the shown order: the part of it the plan keeps (see
+   * `PageRef.crop`). Overlay coordinates are unchanged by it — they stay in the
+   * whole page's view space — and the page is shown through this window. */
+  crop?: CropRect;
   fragments: TextFragment[];
   /** Interactive form fields on this page (empty if none). */
   fields: FormField[];
@@ -285,6 +295,18 @@ export interface WatermarkOptions {
 export interface PageRef {
   index: number;
   rotate: number;
+  /** The part of the page kept, in the page's view space (PDF units, y up,
+   * unturned). Absent means the whole page. Cropping hides the rest; it stays
+   * in the file, as it does in every PDF crop. */
+  crop?: CropRect;
+}
+
+/** A rectangle on a page, in its view space: lower-left corner and size. */
+export interface CropRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 /** The full editable document state tracked by the undo/redo history. */

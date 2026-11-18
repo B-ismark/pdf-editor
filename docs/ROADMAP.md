@@ -72,9 +72,9 @@ Read only the section a package points at, not the whole folder.
   - [x] A "Remove hidden information" report. Guarded by the `hidden` spec; notes in `docs/notes/privacy-and-export.md`.
   - [x] Encrypt and decrypt on export (`@cantoo/pdf-lib` or qpdf-wasm, lazy-loaded and self-hosted). — Export → Download with password (AES-256 via `@cantoo/pdf-lib`); decrypt was already the password prompt on open.
 - [ ] **8. Page tools** (M ×2). (PRODUCT §2.1)
-  - [ ] Split, Images → PDF, Crop, insert a page at a position.
+  - [x] Split, Images → PDF, Crop, insert a page at a position.
     - [x] Split, Images → PDF, insert at a position (8a). Guarded by the `pagetools` spec; notes in `docs/notes/pages.md`.
-    - [ ] Crop (8b).
+    - [x] Crop (8b). Guarded by the `crop` spec; notes in `docs/notes/pages.md` (view origin, Crop).
   - Print, Share, Save in place.
   - Complete forms, with a keep-fillable/flatten choice.
   - Outline sidebar; links to a page.

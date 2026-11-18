@@ -687,6 +687,10 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .page__skeleton { animation: none; }
 }
+/* The whole page. Uncropped it fills the slot; cropped, it's sized and moved by
+   PageView so the slot shows only the crop, and the slot clips the rest. */
+.page__sheet { position: absolute; inset: 0; border-radius: inherit; }
+.page[data-cropped] { overflow: clip; }
 .page__canvas { display: block; width: 100%; height: 100%; border-radius: inherit; }
 .page__overlay {
   position: absolute;
@@ -2733,3 +2737,64 @@ body {
 .split__hint { color: var(--on-surface-variant); margin: -4px 0 0 28px; }
 .split__summary { color: var(--on-surface-variant); margin-top: 8px; }
 .organize__at { color: var(--on-surface); font-weight: 500; }
+
+/* ============ Crop ============ */
+.crop { width: min(560px, 100%); gap: 12px; }
+.crop__stage {
+  height: min(52vh, 460px);
+  display: grid;
+  place-items: center;
+  background: var(--surface-container);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  overflow: hidden;
+}
+.crop__page { position: relative; background: #fff; box-shadow: var(--shadow-1); touch-action: none; }
+.crop__host, .crop__canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.crop__err { position: absolute; inset: 0; display: grid; place-items: center; color: var(--on-surface-variant); }
+/* What's cut away is dimmed by the frame's own shadow, clipped to the page. */
+.crop__page { overflow: hidden; }
+.crop__frame {
+  position: absolute;
+  box-shadow: 0 0 0 9999px rgb(0 0 0 / 0.45);
+  outline: 1.5px solid #fff;
+  cursor: move;
+}
+.crop__frame:focus-visible { outline: 3px solid var(--primary); }
+.crop__grip {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  margin: -12px 0 0 -12px;
+  padding: 0;
+  border: 0;
+  background: none;
+  touch-action: none;
+}
+/* The visible knob is smaller than the hit area. */
+.crop__grip::after {
+  content: "";
+  position: absolute;
+  inset: 7px;
+  background: #fff;
+  border: 1.5px solid var(--primary);
+  border-radius: 2px;
+}
+.crop__grip:focus-visible::after { background: var(--primary); }
+.crop__grip--nw { left: 0; top: 0; cursor: nwse-resize; }
+.crop__grip--n { left: 50%; top: 0; cursor: ns-resize; }
+.crop__grip--ne { left: 100%; top: 0; cursor: nesw-resize; }
+.crop__grip--e { left: 100%; top: 50%; cursor: ew-resize; }
+.crop__grip--se { left: 100%; top: 100%; cursor: nwse-resize; }
+.crop__grip--s { left: 50%; top: 100%; cursor: ns-resize; }
+.crop__grip--sw { left: 0; top: 100%; cursor: nesw-resize; }
+.crop__grip--w { left: 0; top: 50%; cursor: ew-resize; }
+.crop__fields { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.crop__field { display: flex; flex-direction: column; gap: 4px; color: var(--on-surface-variant); }
+.crop__input { display: flex; align-items: center; gap: 4px; }
+.crop__input input { width: 100%; min-width: 0; }
+.crop__note { color: var(--on-surface-variant); margin: 0; }
+.dialog__spacer { flex: 1; }
+@media (max-width: 480px) {
+  .crop__fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

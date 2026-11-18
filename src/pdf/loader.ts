@@ -2,7 +2,8 @@ import * as pdfjsLib from "pdfjs-dist";
 // Vite resolves this to a hashed URL for the worker bundle.
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { TextItem, TextStyle } from "pdfjs-dist/types/src/display/api";
-import type { FormField, LoadedPdf, PageData, TextFragment } from "./types";
+import { cropOffset, shownSize } from "./pagePlan";
+import type { CropRect, FormField, LoadedPdf, PageData, TextFragment } from "./types";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -42,6 +43,11 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
     // Unturned: the page's own user space, which is what text transforms and
     // every overlay object are measured in. The turn is applied at render.
     const viewport = page.getViewport({ scale: 1, rotation: 0 });
+    // The view need not start at the user-space origin (a CropBox of
+    // [100 200 …]). Everything read off the page is moved into view space
+    // here, once, so nothing downstream has to know; the exporter moves it back.
+    const ox = page.view[0] ?? 0;
+    const oy = page.view[1] ?? 0;
     const content = await page.getTextContent();
     const fragments: TextFragment[] = [];
 
@@ -57,7 +63,7 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
         pageIndex: p,
         itemIndex,
         original: item.str,
-        transform: item.transform,
+        transform: ox || oy ? [...item.transform.slice(0, 4), item.transform[4] - ox, item.transform[5] - oy] : item.transform,
         width: item.width,
         height: item.height,
         fontFamily: style?.fontFamily ?? "sans-serif",
@@ -74,8 +80,8 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
         const ft = a.fieldType as string | undefined;
         const rect = a.rect as number[] | undefined;
         if (!rect || rect.length < 4) return;
-        const x = Math.min(rect[0], rect[2]);
-        const y = Math.min(rect[1], rect[3]);
+        const x = Math.min(rect[0], rect[2]) - ox;
+        const y = Math.min(rect[1], rect[3]) - oy;
         const width = Math.abs(rect[2] - rect[0]);
         const height = Math.abs(rect[3] - rect[1]);
         const name = (a.fieldName as string) || `field-${p}-${k}`;
@@ -94,6 +100,7 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
     pages.push({
       pageIndex: p,
       viewBox: { width: viewport.width, height: viewport.height },
+      ...(ox || oy ? { origin: { x: ox, y: oy } } : {}),
       rotation: ((page.rotate % 360) + 360) % 360,
       fragments,
       fields,
@@ -269,4 +276,29 @@ export function mayBeEncrypted(bytes: ArrayBuffer): boolean {
     return true;
   }
   return false;
+}
+
+/**
+ * A page render cut down to a crop (`PageRef.crop`, view space). The render is
+ * the page as the file turns it, so the crop is turned the same way before it's
+ * cut out. The full render's backing store is given back.
+ */
+export async function cutToCrop(
+  bytes: ArrayBuffer,
+  pageIndex: number,
+  full: HTMLCanvasElement,
+  scale: number,
+  crop: CropRect,
+): Promise<HTMLCanvasElement> {
+  const page = await (await getCachedDoc(bytes)).getPage(pageIndex + 1);
+  const unturned = page.getViewport({ scale: 1, rotation: 0 });
+  const shape = { viewBox: { width: unturned.width, height: unturned.height }, rotation: ((page.rotate % 360) + 360) % 360, crop };
+  const o = cropOffset(shape);
+  const size = shownSize(shape);
+  const out = document.createElement("canvas");
+  out.width = Math.max(1, Math.round(size.width * scale));
+  out.height = Math.max(1, Math.round(size.height * scale));
+  out.getContext("2d")?.drawImage(full, o.x * scale, o.y * scale, size.width * scale, size.height * scale, 0, 0, out.width, out.height);
+  full.width = full.height = 0;
+  return out;
 }

@@ -33,7 +33,7 @@ test("the ⋯ menu, the Export menu and the palette mark the same actions", asyn
   await page.click('[aria-label="More actions"]');
   const menu = await page.locator(".menu__item").evaluateAll(marked);
   await page.keyboard.press("Escape");
-  expect(menu, "the ⋯ menu marks what opens a dialog").toEqual(["Add image", "Hidden information", "Organise pages", "Page numbers", "Redact patterns", "Search commands", "Watermark"]);
+  expect(menu, "the ⋯ menu marks what opens a dialog").toEqual(["Add image", "Crop pages", "Hidden information", "Organise pages", "Page numbers", "Redact patterns", "Search commands", "Watermark"]);
   // "Search commands" is the palette itself, which doesn't list itself.
   const panel = menu.filter((l) => l !== "Search commands");
 
