@@ -81,7 +81,15 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   record it in the report in the same place. The "still in the file" list is
   what the export deliberately keeps: comment authors (`/T`), layers that are
   switched off, and text covered by an edit or a whiteout on a page that isn't
-  flattened (counted in `DocumentEditor`, where the edits are).
+  flattened (counted in `DocumentEditor`, where the edits are). "Kept" counts
+  only pages that ship their own content (in the plan, not flattened by a true
+  redaction); whiteouts count only when `findUnsafeCovers` says they're over
+  text, the same measure as the Download warning. Things the report must not
+  get wrong, each with a test: an action type or Info key is whatever name the
+  file gives (`actions` has no prototype; label tables are read with an own-key
+  check); one file spec named twice is one attachment; `ANNOT_DROP` subtypes
+  are never "comments"; a plain destination in `/OpenAction` isn't "something
+  runs"; private data counts objects, not entries.
 - **Redact patterns searches a page's *joined* text** (`joinPage` and
   `findPatternMatches` in `pdf/find.ts`; matching in `pdf/patternScan.ts`;
   presets in `pdf/patterns.ts`). Runs on one line, judged in the text's own

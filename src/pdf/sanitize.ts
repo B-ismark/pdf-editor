@@ -1,4 +1,4 @@
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFStream, PDFString, PDFHexString } from "@cantoo/pdf-lib";
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNull, PDFStream, PDFString, PDFHexString } from "@cantoo/pdf-lib";
 import { isSafeExistingUri } from "./url";
 
 /**
@@ -68,7 +68,9 @@ export interface ScrubReport {
   xmp: boolean;
   /** The file identifier in the trailer. */
   fileId: boolean;
-  /** Something runs when the file opens (`/OpenAction` or the catalog's `/AA`). */
+  /** Something runs when the file opens: the catalog's `/AA`, or an
+   * `/OpenAction` that does more than show a page (a plain destination, which
+   * nearly every LaTeX file has, is not counted). */
   autoRun: boolean;
   /** Document-level scripts (the JavaScript name tree). */
   scripts: number;
@@ -84,7 +86,8 @@ export interface ScrubReport {
   media: number;
   /** An XFA form (a second, scriptable form alongside the visible one). */
   xfa: boolean;
-  /** Private data and per-object metadata on pages, images and drawings. */
+  /** Pages, images and drawings carrying private data or their own metadata
+   * (each counted once, however many such entries it has). */
   privateData: number;
   /** Other catalog entries dropped (by name, e.g. `Threads`, `PieceInfo`). */
   other: string[];
@@ -97,7 +100,9 @@ export const emptyScrubReport = (): ScrubReport => ({
   autoRun: false,
   scripts: 0,
   triggers: 0,
-  actions: {},
+  // No prototype: an action type is whatever name the file gives it, and a
+  // `/toString` or `/__proto__` must count like any other.
+  actions: Object.create(null) as Record<string, number>,
   attachments: [],
   media: 0,
   xfa: false,
@@ -110,7 +115,7 @@ const XOBJECT_DROP = ["PieceInfo", "Metadata", "LastModified", "AF"];
 
 /** Annotations that *are* a payload or a player rather than a mark on the page:
  * an attached file, embedded media, 3D (whose stream can carry JavaScript). */
-const ANNOT_DROP = new Set(["/FileAttachment", "/RichMedia", "/3D", "/Movie", "/Sound", "/Screen"]);
+export const ANNOT_DROP = new Set(["/FileAttachment", "/RichMedia", "/3D", "/Movie", "/Sound", "/Screen"]);
 
 /** `/Named` actions that only move around the document. Viewers also accept
  * menu items here (Print, SaveAs, …), which is not something a link should do. */
@@ -172,8 +177,12 @@ export function sanitizeDocument(doc: PDFDocument, report: ScrubReport = emptySc
     const name = key.decodeText();
     if (CATALOG_KEEP.has(name)) continue;
     if (name === "Metadata") report.xmp = true;
-    else if (name === "OpenAction" || name === "AA") report.autoRun = true;
-    else if (name === "PieceInfo") report.privateData++;
+    else if (name === "AA") report.autoRun = true;
+    else if (name === "OpenAction") {
+      // A destination (`[page /Fit]`) or a safe GoTo only sets the opening view.
+      const open = deref(catalog.get(key));
+      if (!(open instanceof PDFArray) && !(open instanceof PDFDict && isSafeAction(open, deref))) report.autoRun = true;
+    } else if (name === "PieceInfo") report.privateData++;
     else if (name === "AF") countFiles(deref(catalog.get(key)), deref, report);
     else report.other.push(name);
     catalog.delete(key);
@@ -188,8 +197,8 @@ export function sanitizeDocument(doc: PDFDocument, report: ScrubReport = emptySc
         const name = key.decodeText();
         if (NAMES_KEEP.has(name)) continue;
         const leaves = nameTreeLeaves(deref(names.get(key)), deref);
-        if (name === "JavaScript") report.scripts += Math.max(1, leaves.length);
-        else if (name === "EmbeddedFiles") for (const [n, spec] of leaves) report.attachments.push(fileName(spec, deref) || n);
+        if (name === "JavaScript") report.scripts += leaves.length;
+        else if (name === "EmbeddedFiles") for (const [n, spec] of leaves) addFile(report, spec, deref, n);
         else report.other.push(`Names/${name}`);
         names.delete(key);
       }
@@ -255,15 +264,22 @@ export function sanitizeDocument(doc: PDFDocument, report: ScrubReport = emptySc
   //    isn't a plain link. Ordinary URI/GoTo links are preserved (and their
   //    URIs scheme-checked) so real links keep working.
   for (const page of doc.getPages()) {
+    let privateHere = false;
     for (const key of PAGE_DROP) {
       try {
         const name = PDFName.of(key);
         const value = page.node.get(name);
         if (value === undefined) continue;
-        if (key === "AA") report.triggers++;
+        const present = !(deref(value) === PDFNull);
+        if (!present) {
+          /* `/Key null` is the same as absent: drop it, report nothing */
+        } else if (key === "AA") report.triggers++;
         else if (key === "AF") countFiles(deref(value), deref, report);
         else if (key === "B") report.other.push("B");
-        else report.privateData++;
+        else if (!privateHere) {
+          privateHere = true;
+          report.privateData++;
+        }
         page.node.delete(name);
       } catch {
         /* ignore */
@@ -286,7 +302,7 @@ export function sanitizeDocument(doc: PDFDocument, report: ScrubReport = emptySc
       if (!(annot instanceof PDFDict)) continue;
       const subtype = String(annot.get(PDFName.of("Subtype")));
       if (ANNOT_DROP.has(subtype)) {
-        if (subtype === "/FileAttachment") report.attachments.push(fileName(deref(annot.get(PDFName.of("FS"))), deref) || "Attachment");
+        if (subtype === "/FileAttachment") addFile(report, deref(annot.get(PDFName.of("FS"))), deref, "Attachment");
         else report.media++;
         annots.remove(i);
         continue;
@@ -300,11 +316,18 @@ export function sanitizeDocument(doc: PDFDocument, report: ScrubReport = emptySc
     if (!(obj instanceof PDFStream)) continue;
     const subtype = String(obj.dict.get(PDFName.of("Subtype")));
     if (subtype !== "/Image" && subtype !== "/Form") continue;
+    let privateHere = false;
     for (const key of XOBJECT_DROP) {
       const name = PDFName.of(key);
-      if (!obj.dict.has(name)) continue;
-      if (key === "AF") countFiles(deref(obj.dict.get(name)), deref, report);
-      else report.privateData++;
+      const value = obj.dict.get(name);
+      if (value === undefined) continue;
+      if (deref(value) === PDFNull) {
+        /* same as absent */
+      } else if (key === "AF") countFiles(deref(value), deref, report);
+      else if (!privateHere) {
+        privateHere = true;
+        report.privateData++;
+      }
       obj.dict.delete(name);
     }
   }
@@ -326,10 +349,25 @@ function fileName(spec: unknown, deref: (obj: unknown) => unknown): string {
   return textOf(deref(spec.get(PDFName.of("UF")))) || textOf(deref(spec.get(PDFName.of("F"))));
 }
 
+/** File specifications already counted, per report: a PDF/A-3 or e-invoice
+ * (ZUGFeRD, Factur-X) names the same file from the catalog's `/AF` *and* the
+ * EmbeddedFiles tree, and that's one file. */
+const counted = new WeakMap<ScrubReport, Set<unknown>>();
+
+function addFile(report: ScrubReport, spec: unknown, deref: (obj: unknown) => unknown, fallback: string) {
+  if (spec instanceof PDFDict) {
+    let seen = counted.get(report);
+    if (!seen) counted.set(report, (seen = new Set()));
+    if (seen.has(spec)) return;
+    seen.add(spec);
+  }
+  report.attachments.push(fileName(spec, deref) || fallback);
+}
+
 /** Associated files (`/AF`, an array of file specifications). */
 function countFiles(arr: unknown, deref: (obj: unknown) => unknown, report: ScrubReport) {
   if (!(arr instanceof PDFArray)) return;
-  for (let i = 0; i < arr.size(); i++) report.attachments.push(fileName(deref(arr.get(i)), deref) || "Attachment");
+  for (let i = 0; i < arr.size(); i++) addFile(report, deref(arr.get(i)), deref, "Attachment");
 }
 
 /** A name tree's leaves as [key, value] pairs (with a cap, for a malformed
@@ -364,7 +402,7 @@ function scrubActions(dict: PDFDict, deref: (obj: unknown) => unknown, report: S
     const action = deref(dict.get(PDFName.of("A")));
     if (action !== undefined && !(action instanceof PDFDict && isSafeAction(action, deref))) {
       const kind = action instanceof PDFDict ? unsafeKind(action, deref) : "Other";
-      report.actions[kind] = (report.actions[kind] ?? 0) + 1;
+      report.actions[kind] = (Object.prototype.hasOwnProperty.call(report.actions, kind) ? report.actions[kind] : 0) + 1;
       dict.delete(PDFName.of("A"));
     }
   } catch {
@@ -382,7 +420,14 @@ function unsafeKind(action: PDFDict, deref: (obj: unknown) => unknown, depth = 0
   if (!isSafeAction(shallow(action), deref)) return name;
   const next = deref(action.get(PDFName.of("Next")));
   const items = next instanceof PDFArray ? Array.from({ length: next.size() }, (_, i) => deref(next.get(i))) : [next];
-  for (const n of items) if (n instanceof PDFDict && !isSafeAction(n, deref)) return unsafeKind(n, deref, depth + 1);
+  for (const n of items) {
+    // A chain item that isn't an action at all is what `isSafeAction` refused.
+    if (!(n instanceof PDFDict)) {
+      if (n !== undefined) return "Other";
+      continue;
+    }
+    if (!isSafeAction(n, deref)) return unsafeKind(n, deref, depth + 1);
+  }
   return name;
 }
 

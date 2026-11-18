@@ -84,7 +84,7 @@ export function HiddenInfoDialog({ onInspect, onDownload, onClose, busy }: Props
         </div>
         <div className="hidden__body" aria-live="polite" aria-busy={!rows && !failed}>
           {failed ? (
-            <p className="body-medium hidden__status">Couldn't read this file's hidden information. Try again.</p>
+            <p className="body-medium hidden__status">Couldn't read this file's hidden information. Close and reopen to try again.</p>
           ) : !rows ? (
             <p className="body-medium hidden__status">
               <span className="spinner spinner--sm" aria-hidden="true" /> Looking through the file…

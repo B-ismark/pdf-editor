@@ -140,7 +140,15 @@ type-checking can't see, and each exists because it broke once:
   right heading; the download, read structurally (it's compressed, so byte
   searches prove nothing), has none of what was listed as removed and all of
   what was listed as kept; and the download, reopened, has nothing left to
-  remove. Edits and whiteouts count as covered text until the page is redacted.
+  remove. Edits, and whiteouts that sit over text (a whiteout on blank paper
+  isn't counted), are covered text until the page is redacted, which also
+  takes its comments out of the "kept" list. A `describe` block reads the
+  report in Node straight from `inspectHidden`/`hiddenRows`, over small files
+  built for each way review caught it lying: an action named `/toString`, one
+  file named in both `/AF` and EmbeddedFiles, a `/Screen` player, an opening
+  view, an empty script tree, a broken `/Next` chain, a page with three
+  private entries, `/BaseState /OFF` layers, and comments on a page that
+  doesn't ship.
 - `patterns.spec.ts` — Redact patterns: every preset is found in the
   `personal` fixture, a phone number split across two runs too, and the
   decoys (a Luhn-failing "card", a bad-checksum IBAN, a span of years, a short

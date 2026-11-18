@@ -2215,17 +2215,20 @@ export const DocumentEditor = memo(function DocumentEditor({
   const inspectHiddenInfo = useCallback(async () => {
     if (!pdf) throw new Error("No document");
     const { inspectHidden, hiddenRows } = await import("./pdf/hiddenInfo");
-    const info = await inspectHidden(pdf.bytes);
+    // A page ships its own content unless the plan deletes it or a true
+    // redaction flattens it to a picture: then nothing on it is "kept".
     const kept = new Set(plan.map((p) => p.index));
     const flattened = new Set(redactions.filter((r) => !r.cover).map((r) => r.pageIndex));
     const stays = (i: number) => kept.has(i) && !flattened.has(i);
-    let covered = redactions.filter((r) => r.cover && stays(r.pageIndex)).length;
+    const info = await inspectHidden(pdf.bytes, stays);
+    // Whiteouts over text, by the same measure as the download warning.
+    let covered = findUnsafeCovers(pdf, redactions.filter((r) => stays(r.pageIndex)), planned).count;
     for (const pg of pdf.pages) {
       if (!stays(pg.pageIndex)) continue;
       covered += pg.fragments.filter((f) => isFragmentModified(f, edits[f.id])).length;
     }
     return hiddenRows(info, covered);
-  }, [pdf, plan, redactions, edits]);
+  }, [pdf, plan, planned, redactions, edits]);
 
   const runExport = useCallback(async () => {
     if (!pdf) return;

@@ -1,5 +1,5 @@
 import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFString } from "@cantoo/pdf-lib";
-import { emptyScrubReport, sanitizeDocument, type ScrubReport } from "./sanitize";
+import { ANNOT_DROP, emptyScrubReport, sanitizeDocument, type ScrubReport } from "./sanitize";
 
 /**
  * What a document carries that you can't see on the page, for the "Hidden
@@ -27,10 +27,16 @@ export interface HiddenInfo {
   };
 }
 
-/** Subtypes that aren't comments: links, form fields, a comment's pop-up. */
+/** Subtypes that aren't comments: links, form fields, a comment's pop-up. (And
+ * the sanitiser's `ANNOT_DROP`: attachments and players, which export removes.) */
 const NOT_COMMENTS = new Set(["/Link", "/Widget", "/Popup"]);
 
-export async function inspectHidden(bytes: ArrayBuffer): Promise<HiddenInfo> {
+/**
+ * @param ships whether a source page (0-based) keeps its own content in the
+ *   download: false for a page deleted in the plan, or one a true redaction
+ *   flattens to a picture. Its comments don't ship, so they aren't "kept".
+ */
+export async function inspectHidden(bytes: ArrayBuffer, ships: (pageIndex: number) => boolean = () => true): Promise<HiddenInfo> {
   const doc = await PDFDocument.load(bytes.slice(0), { updateMetadata: false });
   const ctx = doc.context;
   const deref = (obj: unknown) => (obj ? ctx.lookup(obj as never) : undefined);
@@ -39,7 +45,8 @@ export async function inspectHidden(bytes: ArrayBuffer): Promise<HiddenInfo> {
   // Kept: read before the scrub, which doesn't touch either.
   let comments = 0;
   const authors = new Set<string>();
-  for (const page of doc.getPages()) {
+  for (const [index, page] of doc.getPages().entries()) {
+    if (!ships(index)) continue;
     try {
       const annots = deref(page.node.get(PDFName.of("Annots")));
       if (!(annots instanceof PDFArray)) continue;
@@ -47,7 +54,7 @@ export async function inspectHidden(bytes: ArrayBuffer): Promise<HiddenInfo> {
         const a = deref(annots.get(i));
         if (!(a instanceof PDFDict)) continue;
         const subtype = String(a.get(PDFName.of("Subtype")));
-        if (NOT_COMMENTS.has(subtype) || subtype === "/FileAttachment") continue;
+        if (NOT_COMMENTS.has(subtype) || ANNOT_DROP.has(subtype)) continue;
         comments++;
         const who = text(deref(a.get(PDFName.of("T"))));
         if (who) authors.add(who);
@@ -61,13 +68,20 @@ export async function inspectHidden(bytes: ArrayBuffer): Promise<HiddenInfo> {
   try {
     const oc = deref(doc.catalog.get(PDFName.of("OCProperties")));
     const d = oc instanceof PDFDict ? deref(oc.get(PDFName.of("D"))) : undefined;
-    const off = d instanceof PDFDict ? deref(d.get(PDFName.of("OFF"))) : undefined;
-    if (off instanceof PDFArray) {
-      for (let i = 0; i < off.size(); i++) {
-        const g = deref(off.get(i));
-        if (g instanceof PDFDict) hiddenLayers.push(text(deref(g.get(PDFName.of("Name")))) || "Untitled layer");
+    const list = (key: string, from: unknown = d) => {
+      const arr = from instanceof PDFDict ? deref(from.get(PDFName.of(key))) : undefined;
+      const out: PDFDict[] = [];
+      if (arr instanceof PDFArray) for (let i = 0; i < arr.size(); i++) {
+        const g = deref(arr.get(i));
+        if (g instanceof PDFDict && !out.includes(g)) out.push(g);
       }
-    }
+      return out;
+    };
+    // `/BaseState /OFF` switches every layer off but those listed `/ON`.
+    const base = d instanceof PDFDict ? d.get(PDFName.of("BaseState")) : undefined;
+    const on = list("ON");
+    const off = String(base) === "/OFF" ? list("OCGs", oc).filter((g) => !on.includes(g)) : list("OFF");
+    for (const g of off) hiddenLayers.push(text(deref(g.get(PDFName.of("Name")))) || "Untitled layer");
   } catch {
     /* no layers */
   }
@@ -108,6 +122,10 @@ export function pdfDate(v: string): string {
   return `${+d} ${month} ${y}${h ? `, ${h}:${mi ?? "00"}` : ""}`;
 }
 
+/** A key the table itself has (not one from Object's prototype, such as a
+ * file's Info key `/constructor`). */
+const own = (table: object, k: string) => Object.prototype.hasOwnProperty.call(table, k);
+
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /** Action types in words. */
@@ -122,6 +140,7 @@ const ACTION_LABEL: Record<string, string> = {
   Named: "runs a menu command",
   ResetForm: "clears the form",
   Hide: "hides parts of the page",
+  Other: "does something that can't be checked",
 };
 
 /** The report's rows: what export removes, then what it keeps. */
@@ -131,7 +150,7 @@ export function hiddenRows(info: HiddenInfo, covered: number): { removed: Hidden
   // In the order a person reads them: what it is, who, then the tools and
   // dates. A producer's own entries go after the known ones.
   const order = Object.keys(INFO_LABEL);
-  const rank = (k: string) => (order.includes(k) ? order.indexOf(k) : 4.5);
+  const rank = (k: string) => (own(INFO_LABEL, k) ? order.indexOf(k) : order.length);
   const fields = r.info.filter((e) => e.value.trim()).sort((a, b) => rank(a.key) - rank(b.key));
   if (fields.length) {
     removed.push({
@@ -139,7 +158,7 @@ export function hiddenRows(info: HiddenInfo, covered: number): { removed: Hidden
       title: "Document properties",
       detail: "",
       facts: fields.map((e) => ({
-        label: INFO_LABEL[e.key] ?? e.key,
+        label: own(INFO_LABEL, e.key) ? INFO_LABEL[e.key] : e.key,
         value: e.key.endsWith("Date") ? pdfDate(e.value) : e.value,
       })),
     });
@@ -164,12 +183,12 @@ export function hiddenRows(info: HiddenInfo, covered: number): { removed: Hidden
     removed.push({
       id: "actions",
       title: plural(n, "link that does more than open a page", "links that do more than open a page"),
-      detail: cap(acts.map(([k, c]) => `${c} ${ACTION_LABEL[k] ?? `runs a ${k} action`}`).join(" · ")),
+      detail: cap(acts.map(([k, c]) => `${c} ${own(ACTION_LABEL, k) ? ACTION_LABEL[k] : `runs a ${k} action`}`).join(" · ")),
     });
   }
   if (r.media) removed.push({ id: "media", title: plural(r.media, "embedded player", "embedded players"), detail: "Video, sound or 3D that plays inside the file" });
   if (r.xfa) removed.push({ id: "xfa", title: "Second form layer (XFA)", detail: "A scriptable copy of the form most viewers never show" });
-  if (r.privateData) removed.push({ id: "private", title: "Private app data", detail: `Left by the apps that made the file, on ${plural(r.privateData, "item", "items")}` });
+  if (r.privateData) removed.push({ id: "private", title: "Private app data", detail: `Left by the apps that made the file, on ${plural(r.privateData, "page, image or drawing", "pages, images or drawings")}` });
   const other = [...new Set(r.other)];
   if (other.length) removed.push({ id: "other", title: "Other hidden entries", detail: other.join(", ") });
 
