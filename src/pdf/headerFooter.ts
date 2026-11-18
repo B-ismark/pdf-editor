@@ -57,7 +57,9 @@ export function batesNumber(b: BatesOptions, pos: number): string {
 export function normalBates(b: BatesOptions): BatesOptions {
   return {
     prefix: typeof b.prefix === "string" ? b.prefix : "",
-    start: Math.max(0, Math.round(b.start) || 0),
+    // Finite, whole and within what a number field holds — the same range the
+    // dialog clamps to, so opening it and pressing Update renumbers nothing.
+    start: Number.isFinite(b.start) ? Math.min(Number.MAX_SAFE_INTEGER, Math.max(0, Math.round(b.start))) : 0,
     digits: Math.max(1, Math.min(MAX_BATES_DIGITS, Math.round(b.digits) || 1)),
   };
 }

@@ -3,7 +3,7 @@ import { flushSync } from "react-dom";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
 import { useModal } from "../hooks/useModal";
-import { DEFAULT_BATES, MAX_BATES_DIGITS, POSITIONS, TOKENS, batesNumber, dateLabel, firstNumber, labelsFor, normalBates, slotsOf, textColor, uses } from "../pdf/headerFooter";
+import { DEFAULT_BATES, MAX_BATES_DIGITS, POSITIONS, TOKENS, batesNumber, dateLabel, firstNumber, labelsFor, normalBates, slotsOf, textColor, textSize, uses } from "../pdf/headerFooter";
 import type { BatesOptions, NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/types";
 
 interface Props {
@@ -119,20 +119,23 @@ export function FinishDialog({
     el?.setSelectionRange(from + token.length, from + token.length);
   };
 
+  // The size has no control here; keep what the setting has (11 for a new one).
+  const size = currentNumbers ? textSize(currentNumbers) : 11;
+
   // What Apply stores, and so what the preview line, the page and the file read.
   const draft = useMemo<PageNumberOptions>(() => {
-    const filled = slotsOf({ position: "bottom-center", start, size: 11, color: numColor, slots });
+    const filled = slotsOf({ position: "bottom-center", start, size, color: numColor, slots });
     return {
       position: filled[0]?.[0] ?? "bottom-center",
       start,
-      size: 11,
+      size,
       color: numColor,
       slots: Object.fromEntries(filled),
       bates,
       date: refresh || storedDate == null ? today : storedDate,
       file: refresh || storedFile == null ? fileName : storedFile,
     };
-  }, [slots, start, numColor, bates, fileName, refresh, today, storedDate, storedFile]);
+  }, [slots, start, size, numColor, bates, fileName, refresh, today, storedDate, storedFile]);
   const empty = slotsOf(draft).length === 0;
   const usesBates = slotsOf(draft).some(([, t]) => /\{bates\}/i.test(t));
   const firstPage = labelsFor(draft, 0, Math.max(1, pageTotal));

@@ -317,8 +317,9 @@ type-checking can't see, and each exists because it broke once:
   can't write reaches the file whole (in English); the caret is after the
   token the moment the chip is handled; number fields clear and retype; a
   damaged stored setting still renders, exports, and opens in the dialog as
-  the page reads it; a date added later is today's, not a stored, unshown one; the preview's baselines match the
-  exporter's; a page-number setting from before opens as its one place;
+  the page reads it, and Update with nothing touched keeps its size and Bates
+  numbers; a date added later is today's, not a stored, unshown one; the
+  preview's baselines match the exporter's; a page-number setting from before opens as its one place;
 - `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
   never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
   character WinAnsi can't encode instead of throwing, so `sanitize`

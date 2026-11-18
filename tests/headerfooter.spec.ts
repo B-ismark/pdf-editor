@@ -287,6 +287,23 @@ test("a damaged saved setting still opens, exports, and edits without renumberin
   expectClean(w);
 });
 
+test("Update with nothing touched changes nothing, even past what the fields hold", async ({ page }) => {
+  const f = await fixtures();
+  const pageNumbers: PageNumberOptions = {
+    position: "bottom-center", start: 1, size: 14, color: "#000000",
+    slots: { "bottom-right": "{bates}" }, bates: { prefix: "", start: 1e17, digits: 3 },
+  };
+  await restoreWith(page, f.sample, { pageNumbers });
+  await page.keyboard.press("Escape");
+  const label = page.locator(".page").first().locator(".finishlayer__num");
+  const before = { text: await label.textContent(), size: await label.evaluate((e) => getComputedStyle(e).fontSize) };
+  // No size control in the dialog, so the stored size is kept as it is.
+  await page.getByRole("button", { name: "Edit header & footer" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Update" }).click();
+  await expect(label).toHaveText(before.text!);
+  expect(await label.evaluate((e) => getComputedStyle(e).fontSize)).toBe(before.size);
+});
+
 test("a date added later is today's, not one stored but never shown", async ({ page }) => {
   const f = await fixtures();
   const pageNumbers: PageNumberOptions = {
