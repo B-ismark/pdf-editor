@@ -30,6 +30,7 @@ import { PageJump } from "./components/PageJump";
 import { CommandPalette, GROUP_LABEL, ariaKeys, type Command, type CommandGroup } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
 import { leftOutNote } from "./pdf/standardText";
+import { keptFillableNote } from "./keptNote";
 import { findMatches, findPatternMatches, joinPage, extractText, type FindMatch, type PatternHit } from "./pdf/find";
 import { PATTERN_PRESETS, customMatcher } from "./pdf/patterns";
 import { fitCrop, isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
@@ -117,23 +118,6 @@ type NavKey = Tool | "sign";
 // the memo on PageView and re-renders every page of the document per keystroke.
 const NO_LINKS: LinkAnnot[] = [];
 const NO_FORM_VALUES: Record<string, FormValue> = {};
-
-/** What to say when fields chosen to be flattened stayed a form: their look
- * couldn't be drawn (text the built-in font lacks, a layout it can't do).
- * Named, so the user knows which to check — up to three, then a count. */
-function keptFillableNote(names: string[]): string {
-  if (names.length === 0) return "";
-  const shown = names.slice(0, 3).map((n) => `“${n}”`);
-  const rest = names.length - shown.length;
-  const list =
-    rest > 0
-      ? `${shown.join(", ")} and ${plural(rest, "other")}`
-      : shown.length > 1
-        ? `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}`
-        : shown[0];
-  const one = names.length === 1;
-  return ` ${list} ${one ? "stays" : "stay"} fillable — ${one ? "it" : "they"} couldn't be drawn into the page.`;
-}
 
 /** What a page with nothing of a kind on it gets: one shared identity each, so
  * its props stay referentially equal and the memo'd `PageView` skips it. */
@@ -1013,15 +997,19 @@ export const DocumentEditor = memo(function DocumentEditor({
 
 
   /** Export the current edits to fresh bytes so finishing ops build on them.
-   * `leftOut` is the note for what a standard font couldn't write, or "". */
-  const bakeCurrent = useCallback(async (): Promise<{ buf: ArrayBuffer; leftOut: string }> => {
+   * `leftOut` is the note for what a standard font couldn't write, or "";
+   * `kept` the note for fields that stayed fillable when flattening, or "" —
+   * for a result that is still a PDF (see keptNote.ts). */
+  const bakeCurrent = useCallback(async (): Promise<{ buf: ArrayBuffer; leftOut: string; kept: string }> => {
     const { exportPdf } = await import("./pdf/exporter");
     let leftOut = "";
+    let kept = "";
     const out = await exportPdf(pdf!, {
       edits, textBoxes, redactions, annotations, stamps, links, formValues, formFlatten, pageNumbers, watermark, losslessRaster, pages: planned,
       onDropped: (chars) => (leftOut = leftOutNote(chars)),
+      onFormKept: (names) => (kept = keptFillableNote(names)),
     });
-    return { buf: toAB(out), leftOut };
+    return { buf: toAB(out), leftOut, kept };
     // `losslessRaster` is read for the export, so it has to be a dependency —
     // otherwise this captures whatever it was when `pdf` last changed.
   }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, formFlatten, pageNumbers, watermark, losslessRaster, planned]);
@@ -1067,7 +1055,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   // before committing: estimate (bake once, then compress at the chosen preset)
   // then download the previewed bytes. The baked bytes don't depend on the
   // preset, so they're cached across estimates for the life of the dialog.
-  const compressBaked = useRef<{ buf: ArrayBuffer; sizes: { width: number; height: number }[]; before: number; leftOut: string } | null>(null);
+  const compressBaked = useRef<{ buf: ArrayBuffer; sizes: { width: number; height: number }[]; before: number; leftOut: string; kept: string } | null>(null);
   const compressOut = useRef<{ bytes: Uint8Array; lossless: boolean; helped: boolean; before: number; after: number } | null>(null);
   // Cached text-preserving (image-optimised) result — computing it decodes and
   // re-encodes images, so don't redo it each time "Keep text" is re-selected.
@@ -1092,11 +1080,11 @@ export const DocumentEditor = memo(function DocumentEditor({
         // The baked document already re-serialises through pdf-lib with object
         // streams and stripped metadata, keeping selectable text — that IS the
         // lossless result, and the size to beat for the rasterising presets.
-        const { buf: baked, leftOut } = await bakeCurrent();
+        const { buf: baked, leftOut, kept } = await bakeCurrent();
         // The baked file is in shown order with the turns applied, and its
         // pages are re-imaged as shown.
         const sizes = shown.map(shownSize);
-        compressBaked.current = { buf: baked, sizes, before: baked.byteLength, leftOut };
+        compressBaked.current = { buf: baked, sizes, before: baked.byteLength, leftOut, kept };
       }
       const { buf, sizes, before } = compressBaked.current;
       if (preset.kind === "lossless") {
@@ -1129,6 +1117,9 @@ export const DocumentEditor = memo(function DocumentEditor({
     const out = compressOut.current;
     if (!out) return;
     const leftOut = compressBaked.current?.leftOut ?? "";
+    // Only a copy that is still the text version keeps a form to speak of; a
+    // rasterised one is pictures of the pages, answers and all.
+    const kept = out.lossless || !out.helped ? (compressBaked.current?.kept ?? "") : "";
     setCompressOpen(false);
     const base = compressName.current.replace(/\.pdf$/i, "");
     const suffix = out.lossless ? "-optimized.pdf" : out.helped ? "-compressed.pdf" : ".pdf";
@@ -1143,7 +1134,7 @@ export const DocumentEditor = memo(function DocumentEditor({
         ? `Optimized, text kept — ${fmt(out.before)}.`
         : out.helped
           ? `Compressed — ${fmt(out.before)} → ${fmt(out.after)} (${Math.round((1 - out.after / out.before) * 100)}% smaller).`
-          : `Already compact — kept the text version at ${fmt(out.before)}.`) + leftOut,
+          : `Already compact — kept the text version at ${fmt(out.before)}.`) + leftOut + kept,
     );
     compressBaked.current = null;
     compressOut.current = null;
@@ -1160,13 +1151,13 @@ export const DocumentEditor = memo(function DocumentEditor({
     ): Promise<void> => {
       if (!pdf) throw new Error("No document");
       const mark = markNow.current;
-      const { buf: baked, leftOut } = await bakeCurrent();
+      const { buf: baked, leftOut, kept } = await bakeCurrent();
       const { signPdf } = await import("./pdf/sign");
       const signed = await signPdf(baked, identity, meta);
       downloadBytes(signed, fileName.replace(/\.pdf$/i, "") + "-signed.pdf");
       onSaved(activeId, mark);
       setStatus("ready");
-      setMessage("Signed the document and downloaded it." + leftOut);
+      setMessage("Signed the document and downloaded it." + leftOut + kept);
     },
     [pdf, bakeCurrent, fileName, downloadBytes],
   );

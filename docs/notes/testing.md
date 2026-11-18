@@ -190,7 +190,9 @@ type-checking can't see, and each exists because it broke once:
   for and the dropdown as its stored value, and the file stays a form by
   default. Flatten prints the answers onto the page (pdf.js text) and leaves no
   fields. Greek can't be drawn by the standard font: that field stays fillable
-  with `/NeedAppearances`, the user is told, and no "?????" reaches the page.
+  with `/NeedAppearances`, the user is told, and no "?????" reaches the page —
+  told by Compress (keeping text) and Download all too, never by Export as
+  images, whose picture shows the answer.
   The choice undoes. The review's findings each have a test: the fields
   don't block text or boxes around them, Backspace in a field never deletes the
   selected box, radios are named "size: option 2 of 3" and arrow keys move the

@@ -11,6 +11,7 @@ import { useTheme } from "./hooks/useTheme";
 import { downloadBytes } from "./download";
 import { plural } from "./plural";
 import { leftOutNote } from "./pdf/standardText";
+import { keptFillableNote } from "./keptNote";
 import { loadPdf, looksLikePdf, mayBeEncrypted, releaseDoc } from "./pdf/loader";
 import { IMAGE_ACCEPT, sniffImage } from "./pdf/images";
 import { clearEngineCache } from "./pdf/engineCache";
@@ -750,8 +751,13 @@ export function App() {
       // documents it was left out of.
       const leftOut = new Set<string>();
       const leftOutOf: string[] = [];
+      // Fields chosen to be flattened that stayed a form, each with the ZIP
+      // entry it's in (two tabs can share a file name; the entries can't).
+      const kept: string[] = [];
+      const keptIn: string[] = [];
       for (const [n, t] of tabs.entries()) {
         setMessage(`Building ${n + 1} of ${tabs.length} · ${t.fileName}`);
+        let keptHere: string[] = [];
         const out = await exportPdf(t.pdf, {
           ...EMPTY_DOC,
           ...marks.get(t.id)!.doc,
@@ -760,6 +766,7 @@ export function App() {
             chars.forEach((c) => leftOut.add(c));
             if (!leftOutOf.includes(t.fileName)) leftOutOf.push(t.fileName);
           },
+          onFormKept: (names) => (keptHere = names),
         });
         // Two tabs can share a file name (the same file opened twice); a ZIP
         // with duplicate entries silently loses one on extraction.
@@ -769,6 +776,10 @@ export function App() {
         for (let k = 2; used.has(entry.toLowerCase()); k++) entry = `${base}-${k}.pdf`;
         used.add(entry.toLowerCase());
         entries.push({ name: entry, data: out });
+        for (const name of keptHere) {
+          kept.push(name);
+          keptIn.push(entry);
+        }
       }
       downloadBytes(makeZip(entries), "documents-edited.zip", "application/zip");
       setTabs((list) =>
@@ -784,7 +795,7 @@ export function App() {
         }),
       );
       setStatus("ready");
-      setMessage(`Downloaded ${plural(entries.length, "document")} as a ZIP.${leftOutNote(leftOut, leftOutOf)}`);
+      setMessage(`Downloaded ${plural(entries.length, "document")} as a ZIP.${leftOutNote(leftOut, leftOutOf)}${keptFillableNote(kept, keptIn)}`);
     } catch (err) {
       setStatus("error");
       setMessage(staleBuildMessage(err) ?? "Couldn't build every document. Please try again.");
