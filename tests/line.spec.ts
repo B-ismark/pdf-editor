@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PDFDocument, StandardFonts } from "pdf-lib";
 import { SPLIT_LINE, fixtures } from "./fixtures";
-import { dragOnPage, expectClean, open, pageTexts, pickTool, watch } from "./helpers";
+import { dragOnPage, expectClean, open, openOrganise, pageTexts, pickTool, watch } from "./helpers";
 
 /**
  * An edited run keeps to its line — see `src/pdf/lineFit.ts`.
@@ -172,7 +172,7 @@ test("a turned page condenses an edit on screen as the file does", async ({ page
   // Afresh, then turned a quarter.
   await open(page, (await fixtures()).splitLine);
 
-  await page.getByRole("button", { name: /Organise pages/ }).first().click();
+  await openOrganise(page);
   const org = page.locator(".organize");
   await org.locator(".pcard").nth(0).locator('[aria-label="Rotate"]').click();
   await org.locator(".btn--filled").click();
