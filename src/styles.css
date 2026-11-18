@@ -1246,7 +1246,8 @@ body {
   border-radius: var(--radius-sm);
   background: var(--surface-container-lowest);
   color: var(--on-surface);
-  font-size: 0.9375rem;
+  /* 16px: smaller, and iOS zooms the page when a slot takes focus. */
+  font-size: 1rem;
 }
 .hf__band .hf__slot:nth-child(2) { text-align: center; }
 .hf__band .hf__slot:nth-child(3) { text-align: right; }
@@ -1265,6 +1266,8 @@ body {
 }
 .hf__bates legend { padding: 0 4px; }
 .hf__prefix { width: 120px; }
+.hf__refresh { display: flex; align-items: center; gap: 10px; min-height: 44px; color: var(--on-surface); }
+.hf__refresh input { width: 20px; height: 20px; accent-color: var(--primary); }
 .numinput {
   width: 88px;
   padding: 8px 10px;
@@ -2099,6 +2102,10 @@ body {
 .finishlayer__num {
   font-family: Helvetica, Arial, sans-serif;
   white-space: pre;
+  line-height: 1;
+  /* The box ends on the baseline, so `bottom` places the baseline where the
+     exporter draws it, whatever the font's descent. */
+  text-box: trim-end text alphabetic;
 }
 
 .drawbar__tools { display: flex; gap: 2px; flex: none; }

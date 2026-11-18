@@ -1,7 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { plural } from "../plural";
-import { DEFAULT_BATES, batesNumber, slotsOf, uses } from "../pdf/headerFooter";
+import { DEFAULT_BATES, batesNumber, firstNumber, slotsOf, uses } from "../pdf/headerFooter";
 import type { NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/types";
 
 /** One shown page, as far as this panel cares: its size as displayed (points,
@@ -122,7 +122,7 @@ const POSITION: Record<NumberPosition, string> = {
 function headerFooterSummary(o: PageNumberOptions): string {
   const slots = slotsOf(o);
   if (slots.length === 1 && slots[0][1].trim().toLowerCase() === "{page}") {
-    return `${POSITION[slots[0][0]]} · from ${o.start}`;
+    return `${POSITION[slots[0][0]]} · from ${firstNumber(o)}`;
   }
   const where = slots.map(([p]) => POSITION[p]).join(", ");
   return uses(o, "{bates}") ? `${where} · Bates ${batesNumber(o.bates ?? DEFAULT_BATES, 0)}` : where;

@@ -1,8 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
+import { PDFDocument } from "pdf-lib";
 import { fixtures } from "./fixtures";
 import { open, watch, pageTexts, expectClean, seedStore, docRecord, restoreSeeded, EMPTY } from "./helpers";
-import { batesNumber, labelsFor } from "../src/pdf/headerFooter";
+import { batesNumber, dateLabel, labelsFor } from "../src/pdf/headerFooter";
 import type { DocState, PageNumberOptions } from "../src/pdf/types";
 
 /**
@@ -65,6 +66,18 @@ test.describe("the resolver", () => {
     expect(batesNumber({ prefix: "X", start: 998, digits: 3 }, 5)).toBe("X1003");
     // Nonsense in a stored setting reads as something sensible, not "NaN".
     expect(batesNumber({ prefix: "", start: Number.NaN, digits: 99 }, 0)).toBe("000000000000");
+  });
+
+  test("the date is one the font can write: the reader's language where it can, English where it can't", () => {
+    const d = new Date(2026, 10, 18);
+    expect(dateLabel(d, "fr-FR")).toBe("18 novembre 2026");
+    for (const l of ["ja-JP", "ru-RU", "ar-EG", "fa-IR", "tr-TR"]) expect(dateLabel(d, l), l).toBe("18 November 2026");
+  });
+
+  test("a damaged stored setting reads as something, never throws", () => {
+    const o = { ...base, position: "nowhere", start: "x", slots: { "top-left": 5, "bottom-center": "{page} {bates}" }, bates: { digits: 3 } } as unknown as PageNumberOptions;
+    expect(labelsFor(o, 0, 3)).toEqual([{ position: "bottom-center", text: "1 000" }]);
+    expect(labelsFor({ ...o, slots: undefined }, 0, 3)).toEqual([{ position: "bottom-center", text: "1" }]);
   });
 });
 
@@ -134,7 +147,14 @@ test("a chip goes in at the caret, not at the end", async ({ page }) => {
   await left.fill("ab");
   await page.keyboard.press("Home");
   await page.keyboard.press("ArrowRight");
-  await page.getByRole("dialog").getByRole("button", { name: "File name" }).click();
+  // Where the caret is the moment the click is handled — before a frame could
+  // pass, which is when a fast next keystroke arrives.
+  const caret = await page.evaluate(() => {
+    const chip = [...document.querySelectorAll<HTMLButtonElement>(".hf__token")].find((b) => b.textContent === "File name")!;
+    chip.click();
+    return (document.activeElement as HTMLInputElement).selectionStart;
+  });
+  expect(caret).toBe("a{file}".length);
   await page.keyboard.type("x");
   await expect(left).toHaveValue("a{file}xb");
 });
@@ -172,4 +192,109 @@ test("a page-number setting from before opens as its one place", async ({ page }
   await expect(dialog.getByLabel("Header, right")).toHaveValue("{page}");
   await expect(dialog.getByLabel("Footer, centre")).toHaveValue("");
   await expect(dialog.getByLabel("Number pages from")).toHaveValue("101");
+});
+
+test.describe("in a language the font can't write", () => {
+  test.use({ locale: "ja-JP" });
+  test("the date on the page is the date in the file", async ({ page }) => {
+    const f = await fixtures();
+    await open(page, f.sample);
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Add header & footer" }).click();
+    await page.getByRole("dialog").getByLabel("Footer, centre").fill("{date}");
+    await page.getByRole("dialog").getByRole("button", { name: "Apply" }).click();
+    const shown = (await page.locator(".page").first().locator(".finishlayer__num").textContent())!;
+    expect(shown).toMatch(/^\d{1,2} [A-Z][a-z]+ \d{4}$/);
+    const [text] = await pageTexts(await download(page), [1]);
+    expect(text).toContain(shown);
+  });
+});
+
+test("Update keeps the applied date and file name unless asked for today's", async ({ page }) => {
+  const f = await fixtures();
+  const pageNumbers: PageNumberOptions = {
+    position: "top-left", start: 1, size: 11, color: "#000000",
+    slots: { "top-left": "{date} {file}" }, date: "1 January 2020", file: "brief.pdf",
+  };
+  await restoreWith(page, f.sample, { pageNumbers }, "renamed.pdf");
+  await page.keyboard.press("Escape");
+  const label = page.locator(".page").first().locator(".finishlayer__num");
+  const edit = page.getByRole("button", { name: "Edit header & footer" });
+  await edit.click();
+  const dialog = page.getByRole("dialog");
+  // The dialog says what the page says.
+  await expect(dialog.locator(".hf__preview")).toContainText("1 January 2020 brief.pdf");
+  await dialog.getByRole("button", { name: "Update" }).click();
+  await expect(label).toHaveText("1 January 2020 brief.pdf");
+
+  await edit.click();
+  await dialog.getByRole("checkbox", { name: /today’s date/ }).check();
+  await expect(dialog.locator(".hf__preview")).toContainText("renamed.pdf");
+  await dialog.getByRole("button", { name: "Update" }).click();
+  await expect(label).not.toContainText("2020");
+  await expect(label).toContainText("renamed.pdf");
+});
+
+test("a number field can be cleared and retyped", async ({ page }) => {
+  const f = await fixtures();
+  await open(page, f.sample);
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "Add header & footer" }).click();
+  const dialog = page.getByRole("dialog");
+  await dialog.getByLabel("Footer, centre").fill("{bates}");
+  const digits = dialog.getByLabel("Bates digits");
+  await digits.click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("2");
+  await expect(digits).toHaveValue("2");
+  await expect(dialog.locator(".hf__range")).toHaveText("01 – 12");
+  const from = dialog.getByLabel("Number pages from");
+  await from.click();
+  await page.keyboard.press("End");
+  await page.keyboard.press("Backspace");
+  await page.keyboard.type("5");
+  await expect(from).toHaveValue("5");
+  // Left empty, it settles on something it can number from.
+  await digits.fill("");
+  await from.focus();
+  await expect(digits).toHaveValue("1");
+});
+
+test("a damaged saved setting still opens the document", async ({ page }) => {
+  const w = watch(page);
+  const f = await fixtures();
+  const broken = { position: "nowhere", start: "x", size: 11, color: "#000000", slots: { "top-left": 5, "bottom-center": "{page}" } };
+  await restoreWith(page, f.sample, { pageNumbers: broken as unknown as PageNumberOptions });
+  await expect(page.locator(".page").first().locator(".finishlayer__num")).toHaveText("1");
+  expectClean(w);
+});
+
+test("the preview's text sits on the file's baseline", async ({ page }) => {
+  const f = await fixtures();
+  const pts = (await PDFDocument.load(readFileSync(f.sample))).getPage(0).getSize();
+  await restoreWith(page, f.sample, {
+    pageNumbers: { position: "top-left", start: 1, size: 20, color: "#000000", slots: { "top-left": "Head", "bottom-left": "Foot" } },
+  });
+  const layer = page.locator(".page").first().locator(".finishlayer");
+  await expect(layer.locator(".finishlayer__num")).toHaveCount(2);
+  // A zero-height inline block sits on its line's baseline.
+  const [box, head, foot] = await layer.evaluate((el) => {
+    const base = (span: Element) => {
+      const probe = document.createElement("span");
+      probe.style.cssText = "display:inline-block;width:0;height:0";
+      span.appendChild(probe);
+      const y = probe.getBoundingClientRect().bottom;
+      probe.remove();
+      return y;
+    };
+    const r = el.getBoundingClientRect();
+    const [h, ft] = [...el.querySelectorAll(".finishlayer__num")];
+    return [{ top: r.top, bottom: r.bottom, height: r.height }, base(h), base(ft)];
+  });
+  const scale = box.height / pts.height;
+  // The exporter: the footer's baseline on the 28pt margin, the header's a
+  // text size below the top margin.
+  expect(Math.abs(foot - (box.bottom - 28 * scale))).toBeLessThan(1);
+  expect(Math.abs(head - (box.top + (28 + 20) * scale))).toBeLessThan(1);
 });

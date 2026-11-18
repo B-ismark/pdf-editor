@@ -30,10 +30,14 @@ export const MAX_BATES_DIGITS = 12;
 
 /** The places that have text, in reading order, with their template. */
 export function slotsOf(o: PageNumberOptions): [NumberPosition, string][] {
-  if (!o.slots) return [[o.position, "{page}"]];
+  if (!o.slots || typeof o.slots !== "object") {
+    return [[POSITIONS.includes(o.position) ? o.position : "bottom-center", "{page}"]];
+  }
+  // A stored value that isn't text (a damaged or future session) is no place,
+  // rather than a page that can't render.
   return POSITIONS.flatMap((p) => {
     const t = o.slots?.[p];
-    return t && t.trim() ? [[p, t] as [NumberPosition, string]] : [];
+    return typeof t === "string" && t.trim() ? [[p, t] as [NumberPosition, string]] : [];
   });
 }
 
@@ -46,24 +50,47 @@ export function uses(o: PageNumberOptions, token: string): boolean {
 export function batesNumber(b: BatesOptions, pos: number): string {
   const digits = Math.max(1, Math.min(MAX_BATES_DIGITS, Math.round(b.digits) || 1));
   const n = Math.max(0, Math.round(b.start) || 0) + pos;
-  return `${b.prefix}${String(n).padStart(digits, "0")}`;
+  return `${typeof b.prefix === "string" ? b.prefix : ""}${String(n).padStart(digits, "0")}`;
+}
+
+/** The first page's number, read safely from a stored setting. */
+export function firstNumber(o: PageNumberOptions): number {
+  return Number.isFinite(o.start) ? Math.max(0, Math.round(o.start)) : 1;
+}
+
+/** Characters the header & footer font (Helvetica, WinAnsi) can write. */
+const WIN_ANSI = /^[\x20-\x7e\xa0-\xff\u0152\u0153\u0160\u0161\u0178\u017d\u017e\u0192\u02c6\u02dc\u2013\u2014\u2018-\u201a\u201c-\u201e\u2020-\u2022\u2026\u2030\u2039\u203a\u20ac\u2122]*$/;
+
+/** A date as `{date}` writes it: in the reader's language when the font can
+ * draw it ("18 novembre 2026"), otherwise in English ("18 November 2026") —
+ * never a date the file would get only fragments of. */
+export function dateLabel(d: Date, locale?: string): string {
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "long", year: "numeric", numberingSystem: "latn", calendar: "gregory" };
+  try {
+    const local = d.toLocaleDateString(locale, opts).replace(/[\u200e\u200f]/g, "");
+    if (WIN_ANSI.test(local)) return local;
+  } catch {
+    // An unknown locale: fall through to English.
+  }
+  return d.toLocaleDateString("en-GB", opts);
 }
 
 /** One template filled in for the page at `pos` of `total`. A brace that
  * isn't a token is left as typed. */
 export function fill(template: string, o: PageNumberOptions, pos: number, total: number): string {
+  const start = firstNumber(o);
   return template.replace(/\{(page|pages|date|file|bates)\}/gi, (_, name: string) => {
     switch (name.toLowerCase()) {
       case "page":
-        return String(o.start + pos);
+        return String(start + pos);
       case "pages":
         // The last page's number, so "Page 3 of 7" holds when numbering
         // starts somewhere other than 1.
-        return String(o.start + total - 1);
+        return String(start + total - 1);
       case "date":
-        return o.date ?? "";
+        return typeof o.date === "string" ? o.date : "";
       case "file":
-        return o.file ?? "";
+        return typeof o.file === "string" ? o.file : "";
       default:
         return batesNumber(o.bates ?? DEFAULT_BATES, pos);
     }

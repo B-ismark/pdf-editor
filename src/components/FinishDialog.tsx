@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
 import { useModal } from "../hooks/useModal";
-import { DEFAULT_BATES, MAX_BATES_DIGITS, POSITIONS, TOKENS, batesNumber, labelsFor, slotsOf } from "../pdf/headerFooter";
+import { DEFAULT_BATES, MAX_BATES_DIGITS, POSITIONS, TOKENS, batesNumber, dateLabel, firstNumber, labelsFor, slotsOf } from "../pdf/headerFooter";
 import type { BatesOptions, NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/types";
 
 interface Props {
@@ -32,10 +33,29 @@ const PLACE: Record<NumberPosition, string> = {
   "bottom-right": "Footer, right",
 };
 
-/** Today, as a reader would write it: fixed into the setting at Apply, so the
- * preview, every page and every later export agree. */
-function today(): string {
-  return new Date().toLocaleDateString(undefined, { day: "numeric", month: "long", year: "numeric" });
+/** A whole number typed into a field, clamped to its range; what was typed is
+ * kept as typed (so it can be cleared and retyped) and only read through this. */
+function whole(text: string, min: number, max: number, fallback: number): number {
+  const n = Math.round(Number(text));
+  return text.trim() === "" || !Number.isFinite(n) ? fallback : Math.max(min, Math.min(max, n));
+}
+
+/** A number field that lets the person clear it and type: it holds the text,
+ * and settles on the clamped number when focus leaves. */
+function NumberField({ label, value, onChange, min, max }: { label: string; value: string; onChange: (v: string) => void; min: number; max?: number }) {
+  return (
+    <input
+      className="numinput"
+      type="number"
+      inputMode="numeric"
+      min={min}
+      max={max}
+      aria-label={label}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onBlur={() => onChange(String(whole(value, min, max ?? Number.MAX_SAFE_INTEGER, min)))}
+    />
+  );
 }
 
 export function FinishDialog({
@@ -56,8 +76,22 @@ export function FinishDialog({
   const [slots, setSlots] = useState<Slots>(() =>
     Object.fromEntries(currentNumbers ? slotsOf(currentNumbers) : [["bottom-center", "{page}"]]),
   );
-  const [start, setStart] = useState(currentNumbers?.start ?? 1);
-  const [bates, setBates] = useState<BatesOptions>(currentNumbers?.bates ?? DEFAULT_BATES);
+  const [startText, setStartText] = useState(String(currentNumbers ? firstNumber(currentNumbers) : 1));
+  const storedBates = currentNumbers?.bates ?? DEFAULT_BATES;
+  const [prefix, setPrefix] = useState(typeof storedBates.prefix === "string" ? storedBates.prefix : "");
+  const [batesStartText, setBatesStartText] = useState(String(whole(String(storedBates.start), 0, Number.MAX_SAFE_INTEGER, 1)));
+  const [digitsText, setDigitsText] = useState(String(whole(String(storedBates.digits), 1, MAX_BATES_DIGITS, 6)));
+  const start = whole(startText, 0, Number.MAX_SAFE_INTEGER, 0);
+  const bates = useMemo<BatesOptions>(
+    () => ({ prefix, start: whole(batesStartText, 0, Number.MAX_SAFE_INTEGER, 0), digits: whole(digitsText, 1, MAX_BATES_DIGITS, 1) }),
+    [prefix, batesStartText, digitsText],
+  );
+  // The date and file name were fixed when the setting was applied; Update
+  // keeps them unless the person asks for today's and this file's.
+  const today = useMemo(() => dateLabel(new Date()), []);
+  const storedDate = typeof currentNumbers?.date === "string" ? currentNumbers.date : null;
+  const storedFile = typeof currentNumbers?.file === "string" ? currentNumbers.file : null;
+  const [refresh, setRefresh] = useState(false);
   const [numColor, setNumColor] = useState(currentNumbers?.color ?? "#444444");
   const [text, setText] = useState(currentWatermark?.text ?? "DRAFT");
   const [wmColor, setWmColor] = useState(currentWatermark?.color ?? "#888888");
@@ -75,11 +109,11 @@ export function FinishDialog({
     const value = slots[at] ?? "";
     const from = el?.selectionStart ?? value.length;
     const to = el?.selectionEnd ?? value.length;
-    setSlots((s) => ({ ...s, [at]: value.slice(0, from) + token + value.slice(to) }));
-    requestAnimationFrame(() => {
-      el?.focus();
-      el?.setSelectionRange(from + token.length, from + token.length);
-    });
+    // Commit the new text and put the caret after the token in the same task:
+    // waiting a frame lets a fast next keystroke land at the end instead.
+    flushSync(() => setSlots((s) => ({ ...s, [at]: value.slice(0, from) + token + value.slice(to) })));
+    el?.focus();
+    el?.setSelectionRange(from + token.length, from + token.length);
   };
 
   // What Apply stores, and so what the preview line, the page and the file read.
@@ -92,13 +126,17 @@ export function FinishDialog({
       color: numColor,
       slots: Object.fromEntries(filled),
       bates,
-      date: today(),
-      file: fileName,
+      date: refresh || storedDate == null ? today : storedDate,
+      file: refresh || storedFile == null ? fileName : storedFile,
     };
-  }, [slots, start, numColor, bates, fileName]);
+  }, [slots, start, numColor, bates, fileName, refresh, today, storedDate, storedFile]);
   const empty = slotsOf(draft).length === 0;
   const usesBates = slotsOf(draft).some(([, t]) => /\{bates\}/i.test(t));
   const firstPage = labelsFor(draft, 0, Math.max(1, pageTotal));
+  // Offer a refresh only where it would change something the pages show.
+  const usesDate = slotsOf(draft).some(([, t]) => /\{date\}/i.test(t));
+  const usesFile = slotsOf(draft).some(([, t]) => /\{file\}/i.test(t));
+  const stale = (usesDate && storedDate != null && storedDate !== today) || (usesFile && storedFile != null && storedFile !== fileName);
 
   return (
     <div className="dialog-scrim" onPointerDown={onClose}>
@@ -174,34 +212,40 @@ export function FinishDialog({
                   ))}
                 </div>
               </div>
-              <p className="hf__preview body-medium" aria-live="polite">
+              <p className="hf__preview body-medium">
                 {empty
                   ? "Nothing to add yet — type in a place above."
                   : <>Page 1 reads: {firstPage.map((l, i) => <span key={l.position}>{i > 0 && " · "}<b>{l.text}</b></span>)}</>}
               </p>
               <div className="field field--row">
                 <span className="field__label label-medium">Number pages from</span>
-                <input className="numinput" type="number" min={0} aria-label="Number pages from" value={start} onChange={(e) => setStart(Math.max(0, Math.round(Number(e.target.value)) || 0))} />
+                <NumberField label="Number pages from" min={0} value={startText} onChange={setStartText} />
               </div>
               {usesBates && (
                 <fieldset className="hf__bates">
                   <legend className="field__label label-medium">Bates number</legend>
                   <div className="field field--row">
                     <span className="field__label label-medium">Prefix</span>
-                    <input className="numinput hf__prefix" aria-label="Bates prefix" value={bates.prefix} onChange={(e) => setBates((b) => ({ ...b, prefix: e.target.value }))} />
+                    <input className="numinput hf__prefix" aria-label="Bates prefix" value={prefix} onChange={(e) => setPrefix(e.target.value)} />
                   </div>
                   <div className="field field--row">
                     <span className="field__label label-medium">Start at</span>
-                    <input className="numinput" type="number" min={0} aria-label="Bates start" value={bates.start} onChange={(e) => setBates((b) => ({ ...b, start: Math.max(0, Math.round(Number(e.target.value)) || 0) }))} />
+                    <NumberField label="Bates start" min={0} value={batesStartText} onChange={setBatesStartText} />
                   </div>
                   <div className="field field--row">
                     <span className="field__label label-medium">Digits</span>
-                    <input className="numinput" type="number" min={1} max={MAX_BATES_DIGITS} aria-label="Bates digits" value={bates.digits} onChange={(e) => setBates((b) => ({ ...b, digits: Math.max(1, Math.min(MAX_BATES_DIGITS, Math.round(Number(e.target.value)) || 1)) }))} />
+                    <NumberField label="Bates digits" min={1} max={MAX_BATES_DIGITS} value={digitsText} onChange={setDigitsText} />
                   </div>
                   <p className="hf__range body-medium">
                     {batesNumber(bates, 0)} – {batesNumber(bates, Math.max(1, pageTotal) - 1)}
                   </p>
                 </fieldset>
+              )}
+              {stale && (
+                <label className="hf__refresh body-medium">
+                  <input type="checkbox" checked={refresh} onChange={(e) => setRefresh(e.target.checked)} />
+                  Use today’s date and this file’s name
+                </label>
               )}
               <div className="field field--row">
                 <span className="field__label label-medium">Colour</span>

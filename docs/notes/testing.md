@@ -313,7 +313,11 @@ type-checking can't see, and each exists because it broke once:
   and its range appear once it's used; the page previews exactly what the file
   gets, a cleared place leaves no number behind, right-aligned text ends on the
   same margin; `{date}` and `{file}` are the applied ones, not today's or the
-  tab's; a page-number setting from before opens as its one place;
+  tab's, and Update keeps them unless asked; a date in a language Helvetica
+  can't write reaches the file whole (in English); the caret is after the
+  token the moment the chip is handled; number fields clear and retype; a
+  damaged stored setting still renders; the preview's baselines match the
+  exporter's; a page-number setting from before opens as its one place;
 - `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
   never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
   character WinAnsi can't encode instead of throwing, so `sanitize`

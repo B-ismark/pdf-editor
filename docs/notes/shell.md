@@ -302,9 +302,22 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   `{pages}` is the *last page's number* (start + count − 1), so "Page 3 of 7"
   holds when numbering starts elsewhere. `{date}` and `{file}` are fixed into
   the setting at Apply — the preview, every page and a later export (or a
-  restored session, or a renamed file) read the same thing; Update re-fixes
-  them. Bates is prefix + a zero-padded count from its own start, one per page
+  restored session, or a renamed file) read the same thing. Update keeps them
+  too, unless the person ticks "Use today's date and this file's name" (shown
+  only when that would change a page). The date is written in the reader's
+  language only when Helvetica can draw it (`dateLabel`: "18 novembre 2026"),
+  in English otherwise — a Japanese or Russian date would reach the file as
+  fragments while the preview showed it whole. Bates is prefix + a zero-padded count from its own start, one per page
   as arranged, and keeps counting past its digits rather than wrapping. Text
   goes through `sanitize` like a watermark: a character Helvetica can't write
   is dropped and reported, not drawn as "?". Token chips in the dialog take
-  `preventDefault` on mousedown so the caret stays in the place being typed.
+  `preventDefault` on mousedown so the caret stays in the place being typed,
+  and put the caret back in the same task (`flushSync`), not a frame later —
+  a fast keystroke in between lands at the end. The number fields hold what
+  was typed and clamp on blur; clamping per keystroke made "6 → backspace → 2"
+  read 12. The preview places each label by its *baseline* (`text-box:
+  trim-end text alphabetic` makes the span's bottom the baseline): the
+  exporter's footer baseline is on the margin, the header's a text size below
+  it. Stored values are read defensively (`slotsOf`, `firstNumber`): restore
+  doesn't validate `DocState`, and a non-text slot must not stop the page
+  rendering.

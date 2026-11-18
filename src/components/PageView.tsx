@@ -828,12 +828,14 @@ function FinishPreview({
         labels.map(({ position: at, text }) => {
           const style: React.CSSProperties = {
             position: "absolute",
-            lineHeight: 1,
             color: pageNumbers.color,
             fontSize: pageNumbers.size * scale,
           };
-          if (at.startsWith("top")) style.top = m;
-          else style.bottom = m;
+          // Placed by the baseline, as the exporter draws it: the footer's
+          // sits on the margin, the header's one text size below it. The
+          // span's box ends at its baseline (`text-box`, in the stylesheet).
+          const size = pageNumbers.size * scale;
+          style.bottom = at.startsWith("top") ? `calc(100% - ${m + size}px)` : m;
           if (at.endsWith("left")) style.left = m;
           else if (at.endsWith("right")) style.right = m;
           else {
