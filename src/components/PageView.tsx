@@ -487,7 +487,7 @@ function PageViewInner(props: Props) {
               {findMatches.map((m) => (
                 <span
                   key={m.id}
-                  className={`findhit${m.id === activeFindId ? " findhit--active" : ""}`}
+                  className={`findhit${m.id === activeFindId ? " findhit--active" : ""}${m.off ? " findhit--off" : ""}`}
                   style={{
                     left: m.x * scale,
                     top: (H - (m.y + m.height)) * scale,

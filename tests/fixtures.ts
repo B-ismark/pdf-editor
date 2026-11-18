@@ -57,6 +57,10 @@ export interface Fixtures {
   splitLine: string;
   /** Body text in an embedded TrueType face with ligatures — see {@link LIGATURES}. */
   ligatures: string;
+  /** One page of personal details for pattern redaction — see {@link PERSONAL}. */
+  personal: string;
+  /** The hard cases for pattern redaction — see {@link TRICKY}. */
+  tricky: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
@@ -261,8 +265,133 @@ async function build(): Promise<Fixtures> {
     ownerLocked: write("owner-locked.pdf", await lockedPdf("")),
     splitLine: write("split-line.pdf", await splitLinePdf()),
     ligatures: write("ligatures.pdf", await ligaturesPdf()),
+    personal: write("personal.pdf", await personalPdf()),
+    tricky: write("tricky.pdf", await trickyPdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
+}
+
+/**
+ * Personal details for "Redact patterns", one per line. Every `hit` is drawn
+ * pure red and is the only red on the page, so after redacting and exporting,
+ * any red pixel left is a leak (the same test as {@link SEARCH_HOSTILE}).
+ *
+ * The phone number is two runs with the word space between them a run of its
+ * own, the way word processors write a line: a pattern that only looked inside one run at a time
+ * would find neither half. The `decoys` are black and look like matches but
+ * fail a checksum or a sanity check, so they must not be listed; `date` and
+ * `custom` are black too and only listed once asked for.
+ */
+export const PERSONAL = {
+  page: { width: 600, height: 460 },
+  size: 14,
+  x: 40,
+  lines: [
+    { pre: "Contact ", hit: "jane.doe@example.org", post: " for details" },
+    { pre: "Card ", hit: "4111 1111 1111 1111", post: " on file" },
+    { pre: "IBAN ", hit: "GB82 WEST 1234 5698 7654 32", post: "" },
+    { pre: "SSN ", hit: "123-45-6789", post: "" },
+  ],
+  /** Drawn as two runs: "Call " + first, then second a space further on. */
+  phone: { pre: "Call ", first: "+44 20", second: "7946 0958" },
+  decoys: ["Invoice 4111 1111 1111 1112", "Years 2019-2024", "Ref 12345", "Account GB00WEST12345698765432"],
+  date: { pre: "Signed ", hit: "31 Jan 2024" },
+  custom: { pre: "Order ", hit: "INV-004211", pattern: String.raw`INV-\d{6}` },
+  /** The phone number as the review list shows it. */
+  phoneText: "+44 20 7946 0958",
+};
+
+async function personalPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const { page: dims, size, x } = PERSONAL;
+  const page = doc.addPage([dims.width, dims.height]);
+  const f = page.node.newFontDictionary("F", font.ref).asString();
+  const enc = (s: string) => (s ? `${font.encodeText(s).toString()} Tj` : "");
+  const runs: string[] = [];
+  const line = (y: number, parts: Array<[string, boolean]>, at = x) =>
+    runs.push(`q BT ${f} ${size} Tf 1 0 0 1 ${at} ${y} Tm ${parts.map(([t, red]) => `${red ? "1 0 0 rg" : "0 g"} ${enc(t)}`).join(" ")} ET Q`);
+  let y = dims.height - 50;
+  for (const l of PERSONAL.lines) {
+    line(y, [[l.pre, false], [l.hit, true], [l.post, false]]);
+    y -= 32;
+  }
+  const p = PERSONAL.phone;
+  line(y, [[p.pre, false], [p.first, true]]);
+  // The word space is a run of its own, as Word writes it (see SPLIT_LINE):
+  // pdf.js then reports two fragments and the loader drops the space.
+  const after = x + font.widthOfTextAtSize(p.pre + p.first, size);
+  line(y, [[" ", false]], after);
+  line(y, [[p.second, true]], after + font.widthOfTextAtSize(" ", size));
+  y -= 32;
+  for (const d of PERSONAL.decoys) {
+    line(y, [[d, false]]);
+    y -= 32;
+  }
+  line(y, [[PERSONAL.date.pre + PERSONAL.date.hit, false]]);
+  y -= 32;
+  line(y, [[PERSONAL.custom.pre + PERSONAL.custom.hit, false]]);
+  page.node.set(PDFName.of("Contents"), doc.context.register(doc.context.flateStream(runs.join("\n"))));
+  return doc.save();
+}
+
+/**
+ * Pattern hits a first version missed or cut short, each drawn in red (and
+ * nothing else red), so red left after export is a leak. From review:
+ * - a real hit next to a neighbour the checksum refuses together with it
+ *   (a card and its security code, an IBAN and "BIC", two phone numbers);
+ * - a phone number's one-digit first group or its leading "1-";
+ * - an IBAN in lower case;
+ * - a custom pattern overlapping a preset's hit (it kept only the email);
+ * - digits drawn one to a box, as on a form's comb field;
+ * - a number split across two runs of a turned line.
+ */
+export const TRICKY = {
+  page: { width: 600, height: 520 },
+  size: 14,
+  x: 40,
+  lines: [
+    { pre: "Card ", hit: "4111 1111 1111 1111", post: " 123" },
+    { pre: "IBAN ", hit: "AT61 1904 3002 3457 3201", post: " BIC BKAUATWW" },
+    { pre: "Tel ", hit: "+33 1 23 45 67 89", post: "" },
+    { pre: "Toll free ", hit: "1-800-555-1234", post: "" },
+    { pre: "iban: ", hit: "gb82 west 1234 5698 7654 32", post: "" },
+    { pre: "Lines ", hit: "020 7946 0958 020 7946 0959", post: "" },
+    { pre: "", hit: "Patient: John Smith <john@example.com", post: ">" },
+  ],
+  custom: "Patient: .+",
+  /** Drawn one digit to a run, 1.5em apart. */
+  comb: { pre: "Member", digits: "123456789" },
+  /** Drawn turned a quarter, as two runs with a space run between. */
+  turned: { first: "555 123", second: "4567" },
+};
+
+async function trickyPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const { page: dims, size, x } = TRICKY;
+  const page = doc.addPage([dims.width, dims.height]);
+  const f = page.node.newFontDictionary("F", font.ref).asString();
+  const enc = (t: string) => (t ? `${font.encodeText(t).toString()} Tj` : "");
+  const runs: string[] = [];
+  const run = (m: string, parts: Array<[string, boolean]>) =>
+    runs.push(`q BT ${f} ${size} Tf ${m} Tm ${parts.map(([t, red]) => `${red ? "1 0 0 rg" : "0 g"} ${enc(t)}`).join(" ")} ET Q`);
+  let y = dims.height - 50;
+  for (const l of TRICKY.lines) {
+    run(`1 0 0 1 ${x} ${y}`, [[l.pre, false], [l.hit, true], [l.post, false]]);
+    y -= 32;
+  }
+  run(`1 0 0 1 ${x} ${y}`, [[TRICKY.comb.pre, false]]);
+  [...TRICKY.comb.digits].forEach((d, i) => run(`1 0 0 1 ${x + 80 + i * size * 1.5} ${y}`, [[d, true]]));
+  // Turned a quarter anticlockwise, reading upwards along the right edge.
+  const { first, second } = TRICKY.turned;
+  const tx = dims.width - 40;
+  const w1 = font.widthOfTextAtSize(first, size);
+  run(`0 1 -1 0 ${tx} 60`, [[first, true]]);
+  run(`0 1 -1 0 ${tx} ${60 + w1}`, [[" ", false]]);
+  run(`0 1 -1 0 ${tx} ${60 + w1 + font.widthOfTextAtSize(" ", size)}`, [[second, true]]);
+  page.node.set(PDFName.of("Contents"), doc.context.register(doc.context.flateStream(runs.join("\n"))));
+  return doc.save();
 }
 
 export const LOCKED_PASSWORD = "open sesame";

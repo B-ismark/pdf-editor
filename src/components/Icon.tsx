@@ -54,6 +54,7 @@ import {
   RotateCw,
   Save,
   ScanText,
+  TextSearch,
   Search,
   SendToBack,
   Shrink,
@@ -207,6 +208,9 @@ const MAP: Record<string, LucideIcon> = {
   dark_mode: Moon,
   system_mode: Monitor,
   search: Search,
+  /** Look through the text for kinds of information (emails, card numbers)
+   * to redact: a search over lines of text, not for one word. */
+  redact_patterns: TextSearch,
   /** Jump to a page by number (the zoom pill's page chip, "Go to page…"). */
   go_to_page: ArrowDownToLine,
   command: Command,
