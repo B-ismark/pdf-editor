@@ -62,6 +62,8 @@ interface Props {
   annotations: Annotation[];
   stamps: Stamp[];
   links: LinkAnnot[];
+  /** Source page → position as shown: what a link to a page names. */
+  pagePos: ReadonlyMap<number, number>;
   formValues: Record<string, FormValue>;
   /** Document-wide finishing layers, previewed live (drawn for real at export). */
   pageNumbers: PageNumberOptions | null;
@@ -126,7 +128,7 @@ export const PageView = memo(PageViewInner);
 function PageViewInner(props: Props) {
   const {
     bytes, page, position, scale, tool, drawTool, drawStyle, edits, textBoxes, redactions,
-    annotations, stamps, links, formValues, pageNumbers, watermark, multiIds, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, onSelect, onEditText, onFinishEdit,
+    annotations, stamps, links, pagePos, formValues, pageNumbers, watermark, multiIds, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, onSelect, onEditText, onFinishEdit,
     onChangeFragmentText, onChangeTextBoxText, onChangeTextBox, onChangeRedaction, onChangeLink,
     onChangeNoteText, onMoveAnnotation, onChangeStamp, onDeleteStamp, onAddTextBox, onAddRedaction, onAddLink, onChangeFormValue, onMarquee, onMoveMulti, onAddAnnotation,
     onPlaceStamp, onSpill,
@@ -683,6 +685,13 @@ function PageViewInner(props: Props) {
             <LinkItem
               key={l.id}
               link={l}
+              target={
+                l.page == null
+                  ? l.url || null
+                  : pagePos.has(l.page)
+                    ? `Page ${pagePos.get(l.page)! + 1}`
+                    : null
+              }
               scale={scale}
               pageHeight={H}
               pageWidth={Wpdf}

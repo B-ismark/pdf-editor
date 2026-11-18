@@ -287,6 +287,15 @@ type-checking can't see, and each exists because it broke once:
   across a tab switch; Recognise text makes the words editable. Both came from
   one user report (a blank screen after Compress; a printed-to-PDF file whose
   words did nothing);
+- `outline.spec.ts` — Package 8e, on the `outlined` fixture (nested
+  bookmarks: a direct `/Dest`, a named destination, a GoTo action and a web
+  address). The Outline tab lists them as a tree and goes to each one's page
+  *as arranged* (after a move it names and opens the new position; after a
+  delete it stays, disabled, and goes nowhere), works from the keyboard, and
+  isn't offered without bookmarks. A link to a page follows its page through a
+  move into the file's `/Dest`, keeps its web address when switched back, is
+  flagged and left out when its page is deleted, and lands on the raster when
+  its page is redacted after the link was written;
 - `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
   never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
   character WinAnsi can't encode instead of throwing, so `sanitize`

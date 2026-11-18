@@ -80,6 +80,35 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
   *changes*. Before, any rebuild of the match list (a sidebar action, or just
   text arriving for newly rendered pages) threw the view back to it.
 
+## Outline and links to a page
+
+- **The outline is the file's own, read with pdf.js** (`pdf/outline.ts`,
+  `readOutline`) from the parse the pages already use. pdf.js reports a
+  bookmark's `/Dest`, its GoTo action and a named destination alike as `dest`;
+  each is resolved to a *source* page once, on load. Capped at 2000 entries and
+  32 levels: a crafted file can nest or loop without end. A bookmark that opens
+  nothing in this document (a web address, a script, a dangling name) has
+  `page: null`.
+- **Shown against the document as arranged.** The sidebar's Pages | Outline
+  switch appears only when there are bookmarks. A row goes to its page's
+  *current* position and shows that number; one whose page was deleted (or that
+  opens nothing) stays in the tree, dimmed, `aria-disabled`, and goes nowhere —
+  the structure still reads. Export already keeps the outline and retargets or
+  prunes it (below); the sidebar doesn't edit it.
+- **Both panels stay mounted**, hidden by the attribute (with a CSS rule, since
+  the list's own `display: flex` beats `[hidden]`): the page list keeps its
+  touch listener and roving focus, the outline the sections you opened. The
+  view (Pages or Outline) is the editor's state, so it survives closing the
+  sidebar.
+- **A link to a page** (`LinkAnnot.page`) names the target's *source* index, so
+  it follows the page through moves; the Inspector and the box's tip speak the
+  shown position ("Page 3"). The address is kept while it goes to a page, so
+  switching back finds it. The exporter writes `/Dest [page /Fit]` to the
+  target's `finished` page — a page that a raster replaces later is moved over
+  by `retargetPageRefs` like every other reference to it — and **leaves out a
+  link whose page was deleted**; the Inspector says so first, in red, and the
+  box shows as empty.
+
 ## Export
 
 - `exportPdf` takes `pages`. It draws on every kept source page in user space,

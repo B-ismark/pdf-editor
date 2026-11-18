@@ -43,6 +43,8 @@ export interface Fixtures {
   /** Three pages carrying every catalog-level structure export must keep — see
    * {@link STRUCTURED}. */
   structured: string;
+  /** Four pages and a nested outline: see {@link OUTLINED}. */
+  outlined: string;
   /** One page per way a search box can be mis-estimated — see
    * {@link SEARCH_HOSTILE}. Each target is painted pure red. */
   searchHostile: string;
@@ -263,6 +265,7 @@ async function build(): Promise<Fixtures> {
     rotated: write("rotated.pdf", await rotatedPdf()),
     searchRedact: write("search-redact.pdf", await searchRedactPdf()),
     structured: write("structured.pdf", await structuredPdf()),
+    outlined: write("outlined.pdf", await outlinedPdf()),
     searchHostile: write("search-hostile.pdf", await searchHostilePdf()),
     damagedTree: write("damaged-tree.pdf", damagedTreePdf()),
     sharedResources: write("shared-resources.pdf", await sharedResourcesPdf()),
@@ -570,6 +573,46 @@ async function sharedResourcesPdf(): Promise<Uint8Array> {
     page.node.set(PDFName.of("Resources"), res);
     page.node.set(PDFName.of("Contents"), doc.context.register(doc.context.flateStream(`/${name} Do`)));
   }
+  return doc.save();
+}
+
+/**
+ * A four-page document whose outline nests: "Part one" (page 1) holds
+ * "Section A" (page 2, a direct destination) and "Section B" (page 3, through a
+ * named destination); "Part two" opens page 4 by a GoTo action; "Website" is a
+ * web address and opens no page.
+ */
+export const OUTLINED = {
+  pages: 4,
+  bodyText: (n: number) => `Outlined page ${n}`,
+  top: ["Part one", "Part two", "Website"],
+  children: ["Section A", "Section B"],
+} as const;
+
+async function outlinedPdf(): Promise<Uint8Array> {
+  const O = OUTLINED;
+  const doc = await PDFDocument.create();
+  const ctx = doc.context;
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const refs = Array.from({ length: O.pages }, (_, i) => {
+    const p = doc.addPage([595, 842]);
+    p.drawText(O.bodyText(i + 1), { x: 60, y: 760, size: 24, font });
+    return p.ref;
+  });
+  const str = (t: string) => PDFString.of(t);
+  const fit = (r: PDFRef) => [r, PDFName.of("Fit")];
+  doc.catalog.set(PDFName.of("Dests"), ctx.obj({ secb: fit(refs[2]) }));
+
+  const root = ctx.nextRef();
+  const [p1, p2, web, a, b] = Array.from({ length: 5 }, () => ctx.nextRef());
+  const item = (ref: PDFRef, fields: Record<string, unknown>) => ctx.assign(ref, ctx.obj(fields as never));
+  item(p1, { Title: str(O.top[0]), Parent: root, Next: p2, First: a, Last: b, Count: -2, Dest: fit(refs[0]) });
+  item(a, { Title: str(O.children[0]), Parent: p1, Next: b, Dest: fit(refs[1]) });
+  item(b, { Title: str(O.children[1]), Parent: p1, Prev: a, Dest: str("secb") });
+  item(p2, { Title: str(O.top[1]), Parent: root, Prev: p1, Next: web, A: { S: "GoTo", D: fit(refs[3]) } });
+  item(web, { Title: str(O.top[2]), Parent: root, Prev: p2, A: { S: "URI", URI: str("https://example.com/") } });
+  item(root, { Type: "Outlines", First: p1, Last: web, Count: 3 });
+  doc.catalog.set(PDFName.of("Outlines"), root);
   return doc.save();
 }
 

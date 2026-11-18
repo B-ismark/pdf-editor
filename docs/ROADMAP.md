@@ -77,7 +77,7 @@ Read only the section a package points at, not the whole folder.
     - [x] Crop (8b). Guarded by the `crop` spec; notes in `docs/notes/pages.md` (view origin, Crop).
   - [x] Print, Share, Save in place (8c). Guarded by the `saveto` spec; notes in `docs/notes/shell.md`.
   - [x] Complete forms, with a keep-fillable/flatten choice (8d). Guarded by the `forms` spec; notes in `docs/notes/privacy-and-export.md` (Forms).
-  - Outline sidebar; links to a page.
+  - [x] Outline sidebar; links to a page (8e). Guarded by the `outline` spec; notes in `docs/notes/pages.md` (Outline and links to a page).
   - Header/footer tokens and Bates numbering.
   - Compare two documents.
 - [ ] **9. Engine upgrades** (M). (TECH 2.5, 2.7, §3)

@@ -6,6 +6,9 @@ import type { LinkAnnot } from "../pdf/types";
 
 interface Props {
   link: LinkAnnot;
+  /** What clicking it opens — a web address or "Page 3" — or null when it
+   * opens nothing yet (no address, or its page was deleted). */
+  target: string | null;
   scale: number;
   pageHeight: number;
   pageWidth: number;
@@ -32,7 +35,7 @@ const MIN = 8;
 
 /** A clickable-link region: a translucent box, draggable and resizable, whose
  * URL is edited in the properties panel. */
-export function LinkItem({ link, scale, pageHeight, pageWidth, selected, interactive, onSelect, onChange }: Props) {
+export function LinkItem({ link, target, scale, pageHeight, pageWidth, selected, interactive, onSelect, onChange }: Props) {
   const gesture = useRef(0);
   const H = pageHeight;
   const left = link.x * scale;
@@ -81,7 +84,7 @@ export function LinkItem({ link, scale, pageHeight, pageWidth, selected, interac
 
   return (
     <div
-      className={`linkbox${selected ? " linkbox--selected" : ""}${link.url ? "" : " linkbox--empty"}`}
+      className={`linkbox${selected ? " linkbox--selected" : ""}${target ? "" : " linkbox--empty"}`}
       style={{
         left: `${left}px`,
         top: `${top}px`,
@@ -93,7 +96,7 @@ export function LinkItem({ link, scale, pageHeight, pageWidth, selected, interac
       onPointerDown={beginMove}
       // The app's own tooltip, not a native `title` — consistent styling, and
       // it's suppressed on touch where a `title` never appears anyway.
-      data-tip={link.url || "No URL yet"}
+      data-tip={target ?? (link.page != null ? "Its page was deleted" : "No URL yet")}
     >
       <span className="linkbox__chip">
         <Icon name="link_tool" size={12} />
