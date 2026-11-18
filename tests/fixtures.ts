@@ -1,4 +1,4 @@
-import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFString, StandardFonts, degrees, rgb } from "pdf-lib";
+import { PDFBool, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFRef, PDFString, StandardFonts, degrees, rgb } from "pdf-lib";
 import { chromium } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import fontkit from "@pdf-lib/fontkit";
@@ -63,6 +63,10 @@ export interface Fixtures {
   tricky: string;
   /** One page carrying every kind of hidden information — see {@link HIDDEN}. */
   hidden: string;
+  /** One page with one form field of every kind — see {@link FORM}. */
+  form: string;
+  /** One page of form fields the write path gets wrong easily — see {@link FORM_EDGE}. */
+  formEdge: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
@@ -270,6 +274,8 @@ async function build(): Promise<Fixtures> {
     personal: write("personal.pdf", await personalPdf()),
     tricky: write("tricky.pdf", await trickyPdf()),
     hidden: write("hidden.pdf", await hiddenPdf()),
+    form: write("form.pdf", await formPdf()),
+    formEdge: write("form-edge.pdf", await formEdgePdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -1179,4 +1185,243 @@ async function hiddenPdf(): Promise<Uint8Array> {
   info.set(PDFName.of("Company"), str(H.company));
   ctx.trailerInfo.ID = ctx.obj([PDFHexString.of("00112233445566778899aabbccddeeff"), PDFHexString.of("00112233445566778899aabbccddeeff")]);
   return doc.save({ useObjectStreams: false });
+}
+
+/**
+ * A form with one field of every kind the editor fills.
+ *
+ * Two of them store a different value from the one they show, which is what a
+ * real form does and what the export has to translate: the dropdown's options
+ * are `[export, shown]` pairs, and pdf-lib names its radio buttons' on-states
+ * "0", "1", "2" with the shown values in `/Opt`.
+ */
+export const FORM = {
+  page: { width: 500, height: 560 },
+  label: "APPLICATION FORM",
+  text: { name: "fullName", rect: [40, 470, 240, 22] },
+  multiline: { name: "address", rect: [40, 400, 240, 50] },
+  limited: { name: "postcode", rect: [300, 470, 80, 22], maxLength: 5 },
+  checkbox: { name: "agree", rect: [40, 360, 16, 16] },
+  radio: { name: "size", options: ["Small", "Medium", "Large"], y: 320 },
+  dropdown: {
+    name: "country",
+    rect: [40, 260, 160, 22],
+    options: [
+      ["gh", "Ghana"],
+      ["fr", "France"],
+      ["jp", "Japan"],
+    ] as [string, string][],
+  },
+  list: { name: "languages", rect: [240, 200, 140, 70], options: ["English", "French", "Twi", "Japanese"] },
+  fields: 7,
+};
+
+async function formPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([FORM.page.width, FORM.page.height]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText(FORM.label, { x: 40, y: 520, size: 16, font });
+  const form = doc.getForm();
+  const at = (r: number[]) => ({ x: r[0], y: r[1], width: r[2], height: r[3] });
+
+  form.createTextField(FORM.text.name).addToPage(page, at(FORM.text.rect));
+  const address = form.createTextField(FORM.multiline.name);
+  address.enableMultiline();
+  address.addToPage(page, at(FORM.multiline.rect));
+  const postcode = form.createTextField(FORM.limited.name);
+  postcode.setMaxLength(FORM.limited.maxLength);
+  postcode.addToPage(page, at(FORM.limited.rect));
+  form.createCheckBox(FORM.checkbox.name).addToPage(page, at(FORM.checkbox.rect));
+
+  const size = form.createRadioGroup(FORM.radio.name);
+  FORM.radio.options.forEach((o, i) => size.addOptionToPage(o, page, { x: 40 + i * 60, y: FORM.radio.y, width: 16, height: 16 }));
+
+  const country = form.createDropdown(FORM.dropdown.name);
+  country.addToPage(page, at(FORM.dropdown.rect));
+  country.acroField.dict.set(
+    PDFName.of("Opt"),
+    doc.context.obj(FORM.dropdown.options.map(([v, shown]) => [PDFString.of(v), PDFString.of(shown)])),
+  );
+
+  const langs = form.createOptionList(FORM.list.name);
+  langs.addOptions(FORM.list.options);
+  langs.enableMultiselect();
+  langs.addToPage(page, at(FORM.list.rect));
+
+  return doc.save();
+}
+
+/**
+ * The form fields that are easy to get wrong, one page:
+ * - `city`: an editable dropdown holding a value that isn't one of its options,
+ *   with a tooltip (`/TU`) that names it, and a look that shows the value;
+ * - `answer`: radio buttons where two stand for the same value (`/Opt [Yes Yes No]`);
+ * - `secret`: a hidden text field with a value — never to be printed;
+ * - `script`: a list one of whose options the standard font can't draw;
+ * - `level`: a single-choice list with nothing chosen;
+ * - `signature`: an unsigned signature field.
+ */
+export const FORM_EDGE = {
+  page: { width: 500, height: 560 },
+  label: "EDGE CASES",
+  city: { name: "city", tip: "Home city", rect: [40, 460, 160, 22], options: ["Accra", "Kumasi"], value: "Tamale" },
+  answer: { name: "answer", options: ["Yes", "Yes", "No"], y: 400 },
+  secret: { name: "secret", rect: [40, 340, 200, 22], value: "HIDDENVALUE" },
+  script: { name: "script", rect: [40, 250, 140, 50], options: ["English", "Ελληνικά"] },
+  level: { name: "level", rect: [240, 250, 140, 50], options: ["Beginner", "Intermediate", "Expert"] },
+  signature: { name: "signature", rect: [300, 40, 160, 40] },
+  /** Radio buttons whose on-states are Cyrillic names, UTF-8 in the file
+   * ("Да", "Нет"): pdf.js reads their bytes as PDFDocEncoding. */
+  cyrillic: { name: "da", states: ["\u00D0\u0094\u00D0\u00B0", "\u00D0\u009D\u00D0\u00B5\u00D1\u0082"], y: 190 },
+  /** A text field in a `/Parent` loop with its parent (pdf.js reads it fine). */
+  loop: { name: "mid.top", rect: [240, 180, 140, 22] },
+  /** A text field under a parent with no `/T`: pdf.js names it "leaf". */
+  leaf: { name: "leaf", rect: [240, 140, 140, 22] },
+  /** A comb text field holding more than its boxes (`/MaxLen` 2, value
+   * "ABCDE"): pdf-lib can't lay it out, so it can't be flattened. */
+  comb: { name: "comb", rect: [40, 140, 140, 22], value: "ABCDE", maxLength: 2 },
+  /** A dropdown that takes no typing, holding a value none of its options
+   * has, with no look: flattened, it must still show the value. */
+  legacy: { name: "legacy", rect: [40, 100, 140, 22], options: ["Alpha", "Beta"], value: "Gamma" },
+  /** A multi-line field whose value breaks lines the PDF way (`\r`). */
+  notes: { name: "notes", rect: [40, 40, 200, 50], value: "First line\rSecond line" },
+  /** An empty multi-line field, for a long answer that must wrap. */
+  essay: { name: "essay", rect: [300, 85, 160, 50] },
+  /** A text field locked along with its contents (`/F` 4+128+512). */
+  locked: { name: "locked", rect: [300, 340, 160, 22], value: "Fixed" },
+  /** The form's own defaults, unlike pdf-lib's: Times, and asks viewers to draw. */
+  da: "/TiRo 0 Tf 0 g",
+};
+
+async function formEdgePdf(): Promise<Uint8Array> {
+  const E = FORM_EDGE;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([E.page.width, E.page.height]);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  page.drawText(E.label, { x: 40, y: 520, size: 16, font });
+  const form = doc.getForm();
+  const at = (r: number[]) => ({ x: r[0], y: r[1], width: r[2], height: r[3] });
+
+  const city = form.createDropdown(E.city.name);
+  city.addOptions(E.city.options);
+  city.enableEditing();
+  city.select(E.city.value);
+  city.addToPage(page, at(E.city.rect));
+  // On the field and its one widget, as a field drawn once usually is (merged):
+  // pdf.js reads a tooltip from the widget only.
+  city.acroField.dict.set(PDFName.of("TU"), PDFString.of(E.city.tip));
+  city.acroField.getWidgets()[0].dict.set(PDFName.of("TU"), PDFString.of(E.city.tip));
+
+  const answer = form.createRadioGroup(E.answer.name);
+  E.answer.options.forEach((o, i) => answer.addOptionToPage(o, page, { x: 40 + i * 60, y: E.answer.y, width: 16, height: 16 }));
+
+  const secret = form.createTextField(E.secret.name);
+  secret.setText(E.secret.value);
+  secret.addToPage(page, { ...at(E.secret.rect), hidden: true });
+
+  // Options set after the look is drawn: this pdf-lib can't draw the Greek.
+  const script = form.createOptionList(E.script.name);
+  script.addOptions(["English", "French"]);
+  script.addToPage(page, at(E.script.rect));
+  script.acroField.dict.set(PDFName.of("Opt"), doc.context.obj(E.script.options.map((o) => PDFHexString.fromText(o))));
+  form.markFieldAsClean(script.ref);
+
+  const level = form.createOptionList(E.level.name);
+  level.addOptions(E.level.options);
+  level.addToPage(page, at(E.level.rect));
+
+  const sig = doc.context.register(
+    doc.context.obj({
+      Type: "Annot",
+      Subtype: "Widget",
+      FT: "Sig",
+      T: PDFString.of(E.signature.name),
+      Rect: [E.signature.rect[0], E.signature.rect[1], E.signature.rect[0] + E.signature.rect[2], E.signature.rect[1] + E.signature.rect[3]],
+      F: 4,
+      P: page.ref,
+    }),
+  );
+  page.node.addAnnot(sig);
+  form.acroForm.addField(sig);
+
+  // Every look drawn now: pdf-lib's own redraw at save would walk the loop below.
+  form.updateFieldAppearances();
+
+  const ctx = doc.context;
+  const box = (r: number[]) => [r[0], r[1], r[0] + r[2], r[1] + r[3]];
+  const look = (ops: string) => ctx.register(ctx.stream(ops, { Type: "XObject", Subtype: "Form", BBox: [0, 0, 16, 16] }));
+  const widget = (extra: Record<string, unknown>) => {
+    const ref = ctx.register(ctx.obj({ Type: "Annot", Subtype: "Widget", F: 4, P: page.ref, ...extra }));
+    page.node.addAnnot(ref);
+    return ref;
+  };
+
+  // Radio buttons named in UTF-8 bytes.
+  const daRef = ctx.nextRef();
+  const daKids = E.cyrillic.states.map((state, i) =>
+    widget({
+      Parent: daRef,
+      Rect: box([40 + i * 60, E.cyrillic.y, 16, 16]),
+      AS: PDFName.of("Off"),
+      AP: { N: { [state]: look("0 g 4 4 8 8 re f"), Off: look("") } },
+    }),
+  );
+  ctx.assign(daRef, ctx.obj({ FT: "Btn", Ff: (1 << 15) | (1 << 14), T: PDFString.of(E.cyrillic.name), Kids: daKids, V: PDFName.of("Off") }));
+  form.acroForm.addField(daRef);
+
+  // A field and its parent, each the other's parent.
+  const midRef = ctx.nextRef();
+  const topRef = widget({ FT: "Tx", T: PDFString.of("top"), Parent: midRef, Rect: box(E.loop.rect), DA: PDFString.of("0 g /Helv 10 Tf") });
+  ctx.assign(midRef, ctx.obj({ T: PDFString.of("mid"), Kids: [topRef], Parent: topRef }));
+  form.acroForm.addField(midRef);
+
+  // A field under an untitled parent.
+  const anonRef = ctx.nextRef();
+  const leafRef = widget({ T: PDFString.of(E.leaf.name), Parent: anonRef, Rect: box(E.leaf.rect) });
+  ctx.assign(anonRef, ctx.obj({ FT: "Tx", Kids: [leafRef], DA: PDFString.of("0 g /Helv 10 Tf") }));
+  form.acroForm.addField(anonRef);
+
+  // A comb field holding more than it has boxes for.
+  const comb = form.createTextField(E.comb.name);
+  comb.addToPage(page, at(E.comb.rect));
+  comb.acroField.setFlagTo(1 << 24, true);
+  comb.acroField.setMaxLength(E.comb.maxLength);
+  comb.acroField.dict.set(PDFName.of("V"), PDFString.of(E.comb.value));
+  // No look of its own, so flattening has to draw one — and can't.
+  for (const w of comb.acroField.getWidgets()) w.dict.delete(PDFName.of("AP"));
+  form.markFieldAsClean(comb.ref);
+
+  const legacy = form.createDropdown(E.legacy.name);
+  legacy.addOptions(E.legacy.options);
+  legacy.addToPage(page, at(E.legacy.rect));
+  legacy.acroField.dict.set(PDFName.of("V"), PDFString.of(E.legacy.value));
+  for (const w of legacy.acroField.getWidgets()) w.dict.delete(PDFName.of("AP"));
+  form.markFieldAsClean(legacy.ref);
+
+  const notes = form.createTextField(E.notes.name);
+  notes.enableMultiline();
+  notes.addToPage(page, at(E.notes.rect));
+  notes.acroField.dict.set(PDFName.of("V"), PDFString.of(E.notes.value));
+  form.markFieldAsClean(notes.ref);
+
+  const essay = form.createTextField(E.essay.name);
+  essay.enableMultiline();
+  essay.addToPage(page, at(E.essay.rect));
+  form.markFieldAsClean(essay.ref);
+
+  const locked = form.createTextField(E.locked.name);
+  locked.setText(E.locked.value);
+  locked.addToPage(page, at(E.locked.rect));
+  locked.updateAppearances(font);
+  for (const w of locked.acroField.getWidgets()) w.dict.set(PDFName.of("F"), PDFNumber.of(4 | 128 | 512));
+  form.markFieldAsClean(locked.ref);
+
+  // The form's defaults: Times, in its resources, and drawn by the viewer.
+  const times = doc.context.register(doc.context.obj({ Type: "Font", Subtype: "Type1", BaseFont: "Times-Roman" }));
+  const acro = form.acroForm.dict;
+  acro.set(PDFName.of("DR"), ctx.obj({ Font: { TiRo: times } }));
+  acro.set(PDFName.of("DA"), PDFString.of(E.da));
+  acro.set(PDFName.of("NeedAppearances"), PDFBool.True);
+
+  return doc.save({ updateFieldAppearances: false });
 }

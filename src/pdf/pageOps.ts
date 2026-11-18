@@ -1,5 +1,16 @@
 import type { CropRect } from "./types";
-import { PDFDict, PDFDocument, PDFName, PDFRef, degrees, type PDFPage } from "@cantoo/pdf-lib";
+import {
+  PDFArray,
+  PDFBool,
+  PDFDict,
+  PDFDocument,
+  PDFName,
+  PDFObjectCopier,
+  PDFRef,
+  degrees,
+  type PDFObject,
+  type PDFPage,
+} from "@cantoo/pdf-lib";
 import { sanitizeDocument } from "./sanitize";
 import { collectGarbage, cutDeletedPages } from "./structure";
 
@@ -95,10 +106,11 @@ export async function buildFromPlan(
     if (obj instanceof PDFDict && obj.get(PDFName.of("Type")) === PDFName.of("Page") && !inTree.has(ref)) stray.add(ref);
   }
   if (stray.size > 0) cutDeletedPages(out, stray);
+  const prunedForm = rebuildForm(out, plan.map((p) => docs.get(p.sourceKey)!));
   if (opts.forDownload) sanitizeDocument(out);
   // What was cut or scrubbed is unreachable now; the copier had already
   // copied it (an attachment's bytes, a stray page), so drop it from the file.
-  if (stray.size > 0 || opts.forDownload) collectGarbage(out);
+  if (stray.size > 0 || prunedForm || opts.forDownload) collectGarbage(out);
 
   return out.save();
 }
@@ -123,4 +135,141 @@ export async function shownPageSize(
   const { width, height } = crop ?? page.getCropBox();
   const turn = (((page.getRotation().angle + extra) % 360) + 360) % 360;
   return turn % 180 === 0 ? { width, height } : { width: height, height: width };
+}
+
+/**
+ * Give the new document the form its pages' fields belong to.
+ *
+ * `copyPages` copies a page's field widgets (and, through `/Parent`, their
+ * fields) but not the document's `/AcroForm`, which is what makes them a form:
+ * without it the fields are inert drawings, and a value typed after Organise
+ * had nowhere to go. The form is rebuilt from the fields the kept pages show.
+ * A field's widgets on pages left out are dropped from it.
+ *
+ * Merged files each bring their own form defaults. The first one's `/DA` and
+ * `/Q` become the form's; a field from another file whose defaults differ gets
+ * its file's own, written onto it. Every file's `/DR` resources are merged (a
+ * name already taken keeps the first), and `/NeedAppearances` holds if any
+ * file asked for it.
+ *
+ * `pageSources[i]` is the document page `i` of `out` was copied from.
+ * Returns whether anything was dropped (so it can be collected).
+ */
+function rebuildForm(out: PDFDocument, pageSources: PDFDocument[]): boolean {
+  const ctx = out.context;
+  const look = (o: PDFObject | undefined) => (o instanceof PDFRef ? ctx.lookup(o) : o);
+  const KIDS = PDFName.of("Kids");
+  const PARENT = PDFName.of("Parent");
+
+  // The widgets the kept pages show, and the file each came from.
+  const widgets = new Map<PDFRef, PDFDocument>();
+  out.getPages().forEach((page, i) => {
+    const annots = look(page.node.get(PDFName.of("Annots")));
+    if (!(annots instanceof PDFArray)) return;
+    for (let j = 0; j < annots.size(); j++) {
+      const ref = annots.get(j);
+      const a = look(ref);
+      if (ref instanceof PDFRef && a instanceof PDFDict && a.get(PDFName.of("Subtype")) === PDFName.of("Widget")) {
+        if (!widgets.has(ref)) widgets.set(ref, pageSources[i]);
+      }
+    }
+  });
+  if (widgets.size === 0) return false;
+
+  // Their top-level fields, in page order, each with its file.
+  const roots: PDFRef[] = [];
+  const rootSource = new Map<PDFRef, PDFDocument>();
+  for (const [w, src] of widgets) {
+    let ref = w;
+    const seen = new Set<PDFRef>([ref]);
+    for (;;) {
+      const up = (look(ref) as PDFDict).get(PARENT);
+      if (!(up instanceof PDFRef) || seen.has(up) || !(look(up) instanceof PDFDict)) break;
+      seen.add(up);
+      ref = up;
+    }
+    if (!rootSource.has(ref)) {
+      rootSource.set(ref, src);
+      roots.push(ref);
+    }
+  }
+
+  // Drop the widgets (and then empty fields) the plan left behind.
+  let pruned = false;
+  const keep = (ref: PDFRef, depth: number): boolean => {
+    if (widgets.has(ref)) return true;
+    const node = look(ref);
+    if (!(node instanceof PDFDict) || depth > 32) return false;
+    const kids = look(node.get(KIDS));
+    if (!(kids instanceof PDFArray)) return false; // a widget on no kept page
+    for (let i = kids.size() - 1; i >= 0; i--) {
+      const k = kids.get(i);
+      if (!(k instanceof PDFRef) || !keep(k, depth + 1)) {
+        kids.remove(i);
+        pruned = true;
+      }
+    }
+    return kids.size() > 0;
+  };
+  const fields = roots.filter((r) => keep(r, 0));
+  if (fields.length === 0) return pruned;
+
+  const acro = ctx.obj({ Fields: ctx.obj(fields) }) as PDFDict;
+  // Each source file's form, in the order its fields first appear.
+  const forms = new Map<PDFDocument, { dict: PDFDict; copier: PDFObjectCopier }>();
+  for (const r of fields) {
+    const src = rootSource.get(r)!;
+    if (forms.has(src)) continue;
+    const f = src.catalog.lookup(PDFName.of("AcroForm"));
+    if (f instanceof PDFDict) forms.set(src, { dict: f, copier: PDFObjectCopier.for(src.context, ctx) });
+  }
+  const DA = PDFName.of("DA");
+  const Q = PDFName.of("Q");
+  const DR = PDFName.of("DR");
+  const NEED = PDFName.of("NeedAppearances");
+  const same = (a: PDFObject | undefined, b: PDFObject | undefined) => String(a) === String(b);
+  const first = [...forms.values()][0];
+  if (first) {
+    for (const key of [DA, Q]) {
+      const v = first.dict.get(key);
+      if (v !== undefined) acro.set(key, first.copier.copy(v));
+    }
+  }
+  // Resources: every file's, by category; a name already taken keeps the first.
+  const dr = ctx.obj({}) as PDFDict;
+  let anyDr = false;
+  let need = false;
+  for (const { dict, copier } of forms.values()) {
+    if (dict.lookup(NEED) === PDFBool.True) need = true;
+    const res = dict.lookup(DR);
+    if (!(res instanceof PDFDict)) continue;
+    anyDr = true;
+    for (const [cat, val] of res.entries()) {
+      const group = res.context.lookup(val);
+      if (group instanceof PDFDict) {
+        const had = dr.lookup(cat);
+        const into = had instanceof PDFDict ? had : (ctx.obj({}) as PDFDict);
+        if (into !== had) dr.set(cat, into);
+        for (const [name, item] of group.entries()) if (!into.has(name)) into.set(name, copier.copy(item));
+      } else if (!dr.has(cat)) {
+        dr.set(cat, copier.copy(val));
+      }
+    }
+  }
+  if (anyDr) acro.set(DR, dr);
+  if (need) acro.set(NEED, PDFBool.True);
+  // A field from a later file whose form defaults differ carries its own.
+  for (const r of fields) {
+    const own = forms.get(rootSource.get(r)!);
+    if (!own || own === first) continue;
+    const node = look(r) as PDFDict;
+    for (const key of [DA, Q]) {
+      const v = own.dict.get(key);
+      if (v !== undefined && !node.has(key) && !same(own.dict.lookup(key), first?.dict.lookup(key))) {
+        node.set(key, own.copier.copy(v));
+      }
+    }
+  }
+  out.catalog.set(PDFName.of("AcroForm"), ctx.register(acro));
+  return pruned;
 }

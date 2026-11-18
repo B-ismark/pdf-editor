@@ -183,6 +183,34 @@ type-checking can't see, and each exists because it broke once:
   own password-opened file warns as Ctrl+S does; a file named "-edited" is
   offered "… copy", never its own name; an already-open file picked with
   another is said to be open — but never over why the other didn't open.
+- `forms.spec.ts` — Package 8d, on the `form` fixture (one field of every
+  kind; a dropdown whose stored values differ from its shown text, and
+  pdf-lib's numbered radio on-states). Read back with upstream pdf-lib: every
+  kind fills, a limit stops typing, the radio is saved as the option it stands
+  for and the dropdown as its stored value, and the file stays a form by
+  default. Flatten prints the answers onto the page (pdf.js text) and leaves no
+  fields. Greek can't be drawn by the standard font: that field stays fillable
+  with `/NeedAppearances`, the user is told, and no "?????" reaches the page.
+  The choice undoes. The review's findings each have a test: the fields
+  don't block text or boxes around them, Backspace in a field never deletes the
+  selected box, radios are named "size: option 2 of 3" and arrow keys move the
+  choice, each click is its own undo step and a field put back is no change,
+  a box or radio keeps the file's own look and `/DA`. On `formEdge`: an
+  editable dropdown shows its own value and is named by its `/TU`, a single
+  list starts empty, of two buttons with one export value the clicked one is
+  chosen, flattening skips a hidden field and a signature and keeps a list
+  with Greek options and a comb field it can't lay out fillable (both named),
+  a redacted page's picture shows the answers as they are now (a cleared field
+  blank, the newly chosen radio dotted, the old one not, a `\r` value on two
+  lines, a long answer wrapped — with 20,000 unbroken characters after it,
+  which mustn't stall the export — and a list scrolled to its chosen last
+  option) and, flattening, reports nothing as staying
+  fillable; a non-editable dropdown's own unlisted value is drawn (kept and
+  flattened) and it stays non-editable; a locked field is read-only, a UTF-8-named radio
+  is saved as the button clicked, a field in a `/Parent` loop or under an
+  untitled parent gets its value, a clicked field gives the keyboard back to
+  a selected box, Organise keeps the form, and merging two forms keeps the
+  second's `/NeedAppearances`, `/DR` font and `/DA`.
 - `crop.spec.ts` — Package 8b. A page whose CropBox starts at 100,200: the
   heading's overlay sits on its glyphs (not off the page), an edit is redrawn
   at the run's own user-space position, and a link drawn 20 points in from

@@ -31,7 +31,7 @@ import { dragState, startPointerDrag, toLocal } from "../hooks/useDrag";
 import { isMarkTool } from "./DrawToolbar";
 import { useGuides } from "../hooks/useSnap";
 import { annotationBox, intersects, linkBox, redactionBox, stampBox, textBoxBox, type Box } from "../pdf/bbox";
-import type { LinkAnnot, PageNumberOptions, Stamp, WatermarkOptions } from "../pdf/types";
+import type { FormValue, LinkAnnot, PageNumberOptions, Stamp, WatermarkOptions } from "../pdf/types";
 import type { FindMatch } from "../pdf/find";
 import { LinkItem } from "./LinkItem";
 import { placeCaretEnd } from "../caret";
@@ -62,7 +62,7 @@ interface Props {
   annotations: Annotation[];
   stamps: Stamp[];
   links: LinkAnnot[];
-  formValues: Record<string, string | boolean>;
+  formValues: Record<string, FormValue>;
   /** Document-wide finishing layers, previewed live (drawn for real at export). */
   pageNumbers: PageNumberOptions | null;
   watermark: WatermarkOptions | null;
@@ -97,7 +97,7 @@ interface Props {
   onAddTextBox: (pageIndex: number, x: number, y: number, rotation: number) => void;
   onAddRedaction: (pageIndex: number, x: number, y: number, width: number, height: number, cover?: boolean) => void;
   onAddLink: (pageIndex: number, x: number, y: number, width: number, height: number) => void;
-  onChangeFormValue: (name: string, value: string | boolean) => void;
+  onChangeFormValue: (name: string, value: FormValue, typing?: boolean) => void;
   /** Report the ids enclosed by a marquee drag on this page. */
   onMarquee: (ids: string[], additive: boolean) => void;
   /** Shift every object in the multi-selection by (dx, dy) in PDF units. The

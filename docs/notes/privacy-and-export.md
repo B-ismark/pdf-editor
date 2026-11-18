@@ -217,3 +217,91 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
 - **Download via `src/download.ts`.** It attaches the anchor before clicking and
   defers `revokeObjectURL`; revoking synchronously races the browser's fetch of
   the blob and cancels downloads on Firefox/Safari.
+- **Forms (`formFill.ts`).** Every field kind is filled in the preview
+  (`FormFieldLayer`) and written by `applyForm`, called from the exporter.
+  The default is **keep fillable**; `DocState.formFlatten` (set from the
+  Document panel's Form section, undoable) flattens. The traps, each with a
+  spec in `forms.spec`:
+  - **Stored value vs shown text.** pdf.js reports a choice by its export value
+    and a radio button by its on-state; pdf-lib's `select` takes a dropdown's
+    *shown* text and writes it as `/V`, and picks a radio by its `/Opt` export
+    value (the last match, when two buttons share one). `applyForm` translates
+    choices both ways (`optionText`) and, once the look is drawn, puts the
+    export value back in `/V` (`storeChoiceValues`); a radio is set by the
+    button's own on-state name (`acroField.setValue`), never by `select`.
+  - **pdf-lib replaces looks it needn't.** `defaultUpdateAppearances` redraws a
+    checkbox's tick and a radio's dot in its own style and rewrites every
+    field's `/DA` to name a font the form's `/DR` lacks (`/dummy__noop` for
+    buttons). A box or radio is redrawn only when a widget has no look at all;
+    `/DA` on the field and its widgets is saved and put back (`keepLooks`).
+  - **The standard font doesn't throw on a missing glyph** — the fork draws
+    "?" instead. `drawable` checks each character first; a field it can't draw
+    keeps its value, gets `/NeedAppearances`, and when flattening is *kept
+    fillable* and reported (`onFormKept` → "“name” stays fillable", up to
+    three named), never flattened as "?????". Any other failure to draw a
+    look (a comb field holding more than its boxes) is kept and reported the
+    same way: whatever wasn't drawn is never flattened. The note is sent once
+    pages are settled, naming only fields still in the file — one on a
+    redacted or deleted page didn't stay anything.
+  - **A value no option holds.** A list's `select` throws on one, so a list
+    drops it (`keptChoices`; a redacted page's picture still lists it, as the
+    preview does); a dropdown's `select` takes it by making the
+    field editable, so it's drawn as the preview shows it and the editable
+    flag put back. `/V` is written from the same kept values the look drew. A list's look draws *every* option, so all of them
+    are checked, not just the chosen one. Signatures and push buttons are
+    never touched, reported or flattened. The test for "can the standard
+    font draw this?" is `standardText.drawable`, shared with the exporter's
+    `sanitize`: other text has such characters folded or left out, while a
+    form answer with one stays fillable, whole.
+  - **Flattening per field.** `PDFForm.flatten` does every field or none; a
+    field that must stay is skipped by copying its per-widget step
+    (`flattenField`, which calls pdf-lib's private `findWidgetPage` /
+    `findWidgetAppearanceRef` / `flattenWidgetOntoPage`). If the library
+    renames them, `forms.spec`'s flatten tests fail. An untouched field without
+    a normal appearance is drawn before flattening, or it would flatten to
+    nothing (a choice from its stored values, so it shows option text). A
+    hidden widget (`/F` Hidden or NoView) is not painted; its field still goes.
+  - **Names are pdf.js's.** The preview keys values by pdf.js's field name,
+    which skips an ancestor with no `/T`; pdf-lib's `getName` writes
+    "undefined." there, so `applyForm` builds names itself (`fieldKey`). A
+    radio's on-state is matched as pdf-lib decodes it *or* as PDFDocEncoding
+    (`pdfDocText`) — pdf.js's reading, so a UTF-8 Cyrillic name still matches.
+  - **`/Parent` loops hang pdf-lib.** Its `getFields` / `getName` recurse up
+    `/Parent` with no guard. `breakParentCycles` cuts each loop before
+    `getForm`, walking from widgets first so the link cut is the one pdf.js
+    stops at and the name stays the preview's. (Two widgets on different
+    members of one loop can still get different names from pdf.js; a loop
+    through `/Kids` makes pdf-lib's read fail, caught, and the form goes out
+    as it came.)
+  - **Organise drops the form.** `copyPages` copies the widgets and fields but
+    not `/AcroForm`; `pageOps.rebuildForm` gives the rebuilt file one from the
+    kept pages' widgets, dropping widgets on pages left out. `/DA` and `/Q`
+    come from the first source; `/DR` merges every source's by category (first
+    name wins — two files' different `/F1` fonts resolve to the first's when a
+    viewer redraws); `/NeedAppearances` is set if any source had it; and a later
+    source's root field that leaned on its own form's different `/DA` or `/Q`
+    gets it written onto itself. Two merged files with same-named fields stay
+    two fields of one name.
+  - **Known limits, not handled:** a checkbox with several on-states (only
+    "on" or "off" is offered); a widget whose appearance `/BBox` isn't at the
+    origin flattens offset (pdf-lib's placement); a field name in
+    PDFDocEncoding that pdf.js and pdf-lib decode differently won't match.
+  The preview controls are opaque: the canvas beneath shows the field as the
+  file came, and a changed value mustn't sit over the old one. They take the
+  pointer only themselves (the layer doesn't), so text and boxes around them
+  stay reachable. Fields on a redacted (rasterised) page stop being fields:
+  the raster is drawn *without* the form (`renderPageToCanvas(…,
+  withoutForms)`), so the file's original answers aren't baked in, and then
+  `drawRasterForm` paints the answers *as they are now* — a tick, a dot, the
+  text (broken at `\r` or `\n` and wrapped to the box, at the preview's
+  `fieldFontSize`; at most the lines the box shows, found by halving, so a
+  huge unbroken value can't stall the export), a list with its options and
+  the chosen ones marked, scrolled as Chromium scrolls the preview's list
+  (just far enough that the first chosen shows, at the bottom) —
+  before the redaction boxes go on, so a box over a field still covers it. A
+  field pdf.js paints into the canvas itself even in forms mode (`painted`:
+  read-only text, a widget locked with its contents) is left as the canvas
+  drew it; a locked one is read-only in the preview too. (One with no look of
+  its own and no `/NeedAppearances` is painted by neither: blank, a known
+  limit; so is a wrap that cuts inside a word and splits an emoji.) Clicking out of a field onto the page
+  blurs it, so Delete reaches the selected box rather than the field.

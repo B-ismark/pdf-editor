@@ -19,6 +19,7 @@ import { PageView, type AnnotSpec } from "./components/PageView";
 import { translateAnnotation } from "./components/AnnotationLayer";
 import { PropertiesPanel } from "./components/PropertiesPanel";
 import { DocumentPanel } from "./components/DocumentPanel";
+import { fieldValue, hasValue, sameValue } from "./components/FormFieldLayer";
 import { DrawToolbar, SUBTOOLS } from "./components/DrawToolbar";
 import { SelectionBar } from "./components/SelectionBar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -49,7 +50,7 @@ const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(n
 const DELIVERY_VERB: Record<Delivery["kind"], string> = { download: "Download", save: "Save", "save-as": "Save", share: "Share" };
 import { onStrayBack, pushHistory, unwindHistory, type HistoryEntry } from "./hooks/useModal";
 import { plural } from "./plural";
-import type { PageNumberOptions, PageRef, WatermarkOptions } from "./pdf/types";
+import type { FormField, FormValue, PageNumberOptions, PageRef, WatermarkOptions } from "./pdf/types";
 import { useHistory } from "./hooks/useHistory";
 import { useCustomPattern } from "./hooks/useCustomPattern";
 import { EMPTY_DOC, aModalIsOpen, toAB, type EditorHandle, type LiveDoc, type OpenDoc, type SavedMark, type Status } from "./workspace";
@@ -115,7 +116,24 @@ type NavKey = Tool | "sign";
 // `[]` / `{}` literals here would be a new object on every render, which defeats
 // the memo on PageView and re-renders every page of the document per keystroke.
 const NO_LINKS: LinkAnnot[] = [];
-const NO_FORM_VALUES: Record<string, string | boolean> = {};
+const NO_FORM_VALUES: Record<string, FormValue> = {};
+
+/** What to say when fields chosen to be flattened stayed a form: their look
+ * couldn't be drawn (text the built-in font lacks, a layout it can't do).
+ * Named, so the user knows which to check — up to three, then a count. */
+function keptFillableNote(names: string[]): string {
+  if (names.length === 0) return "";
+  const shown = names.slice(0, 3).map((n) => `“${n}”`);
+  const rest = names.length - shown.length;
+  const list =
+    rest > 0
+      ? `${shown.join(", ")} and ${plural(rest, "other")}`
+      : shown.length > 1
+        ? `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}`
+        : shown[0];
+  const one = names.length === 1;
+  return ` ${list} ${one ? "stays" : "stay"} fillable — ${one ? "it" : "they"} couldn't be drawn into the page.`;
+}
 
 /** What a page with nothing of a kind on it gets: one shared identity each, so
  * its props stay referentially equal and the memo'd `PageView` skips it. */
@@ -202,13 +220,15 @@ const TOOL_SHORTCUT: Record<NavKey, string> = {
   link: "L",
 };
 
-/** True when focus is in a text-entry context, so single-key shortcuts and
- * arrow-nudge must not hijack the keystroke. */
+/** True when focus is in a text-entry context — or on any form field, whose
+ * keys (arrows between radio buttons, Space to tick) are its own — so
+ * single-key shortcuts, Delete and arrow-nudge must not hijack the keystroke. */
 function isTypingTarget(): boolean {
   const el = document.activeElement as HTMLElement | null;
   if (!el) return false;
   return (
     el.isContentEditable ||
+    !!el.closest(".formlayer") ||
     el.tagName === "INPUT" ||
     el.tagName === "TEXTAREA" ||
     el.tagName === "SELECT"
@@ -408,6 +428,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   const { edits, textBoxes, redactions, annotations, stamps } = docHistory.state;
   const links = docHistory.state.links ?? NO_LINKS;
   const formValues = docHistory.state.formValues ?? NO_FORM_VALUES;
+  const formFlatten = !!docHistory.state.formFlatten;
   const pageNumbers = docHistory.state.pageNumbers ?? null;
   const watermark = docHistory.state.watermark ?? null;
   // The pages as shown: plan order, each with its total turn. Every view that
@@ -429,6 +450,22 @@ export const DocumentEditor = memo(function DocumentEditor({
       }),
     [shown],
   );
+  // Every field in the file, by name — the first widget of each, which holds
+  // the value the file came with.
+  const formFieldsByName = useMemo(() => {
+    const byName = new Map<string, FormField>();
+    if (pdf) for (const p of pdf.pages) for (const f of p.fields) if (!byName.has(f.name)) byName.set(f.name, f);
+    return byName;
+  }, [pdf]);
+  // The form, as the Inspector describes it: fields by name (a radio group is
+  // one field however many buttons it has), and how many hold a value.
+  const formFacts = useMemo(() => {
+    const byName = new Map<string, FormField>();
+    for (const p of shown) for (const f of p.fields) if (!byName.has(f.name)) byName.set(f.name, f);
+    let filled = 0;
+    for (const f of byName.values()) if (hasValue(fieldValue(f, formValues))) filled++;
+    return { fields: byName.size, filled };
+  }, [shown, formValues]);
   /** Apply a page plan (reorder, turn, delete) as one undoable edit. Stored
    * only when it changes something, so an arrangement put back by hand reads as
    * the document as loaded. The sidebar and the grid both come through here. */
@@ -565,6 +602,21 @@ export const DocumentEditor = memo(function DocumentEditor({
 
   const vp = useViewport(fitRef.current);
   const { fitWidth, pageWidthPts } = vp.fit;
+  // A form box or radio keeps focus after a click, and keys go to it (Space
+  // ticks, arrows move the choice). Selecting something else on the page
+  // mostly prevents the pointer's default, which would have moved focus — so
+  // hand focus back here, or Delete and arrow-nudge would still go to the box.
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el?.closest(".formlayer")) return;
+      if (e.target instanceof Node && el.contains(e.target)) return;
+      el.blur();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    return () => document.removeEventListener("pointerdown", onDown, true);
+  }, []);
+
   useEffect(() => {
     if (fitWidth > 0 && pageWidthPts > 0) fitRef.current = { fitWidth, pageWidthPts };
   }, [fitRef, fitWidth, pageWidthPts]);
@@ -633,7 +685,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     [textBoxes, redactions, annotations, stamps, links, shownBySource],
   );
   const changeCount =
-    editedFragmentCount + shippedOverlays + Object.keys(formValues).length +
+    editedFragmentCount + shippedOverlays + Object.keys(formValues).length + (formFlatten ? 1 : 0) +
     (pageNumbers ? 1 : 0) + (watermark ? 1 : 0) + (planned ? 1 : 0) + baked;
   const isSaved = savedMark != null && savedMark.doc === docHistory.state && savedMark.baked === baked;
   /** Work that only exists in this window: what the leave/close prompts guard. */
@@ -966,13 +1018,13 @@ export const DocumentEditor = memo(function DocumentEditor({
     const { exportPdf } = await import("./pdf/exporter");
     let leftOut = "";
     const out = await exportPdf(pdf!, {
-      edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, pages: planned,
+      edits, textBoxes, redactions, annotations, stamps, links, formValues, formFlatten, pageNumbers, watermark, losslessRaster, pages: planned,
       onDropped: (chars) => (leftOut = leftOutNote(chars)),
     });
     return { buf: toAB(out), leftOut };
     // `losslessRaster` is read for the export, so it has to be a dependency —
     // otherwise this captures whatever it was when `pdf` last changed.
-  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, planned]);
+  }, [pdf, edits, textBoxes, redactions, annotations, stamps, links, formValues, formFlatten, pageNumbers, watermark, losslessRaster, planned]);
 
   // Page numbers and watermark are document-wide layers stored in DocState and
   // drawn at export time (see exporter.ts). Setting them is a normal, undoable
@@ -1354,13 +1406,30 @@ export const DocumentEditor = memo(function DocumentEditor({
     [doc],
   );
 
+  // Typing in a field is one undo step per field, like typing anywhere; a
+  // click (a box ticked, a button or option chosen) is a step of its own. A
+  // value put back to how the file came is no longer a change.
   const onChangeFormValue = useCallback(
-    (name: string, value: string | boolean) => {
+    (name: string, value: FormValue, typing = false) => {
+      const field = formFieldsByName.get(name);
       doc.set(
-        (d) => ({ ...d, formValues: { ...(d.formValues ?? {}), [name]: value } }),
-        `form-${name}`,
+        (d) => {
+          const values = d.formValues ?? {};
+          const now = name in values ? values[name] : field?.defaultValue;
+          if (field && sameValue(now, value)) return d;
+          const next = { ...values };
+          if (field && sameValue(field.defaultValue, value)) delete next[name];
+          else next[name] = value;
+          return { ...d, formValues: Object.keys(next).length > 0 ? next : undefined };
+        },
+        typing ? `form-${name}` : undefined,
       );
     },
+    [doc, formFieldsByName],
+  );
+
+  const setFormFlatten = useCallback(
+    (on: boolean) => doc.set((d) => ({ ...d, formFlatten: on || undefined })),
     [doc],
   );
 
@@ -2169,7 +2238,8 @@ export const DocumentEditor = memo(function DocumentEditor({
       }
       if (
         (selection?.kind === "redaction" || selection?.kind === "stamp" || selection?.kind === "link") &&
-        (e.key === "Delete" || e.key === "Backspace")
+        (e.key === "Delete" || e.key === "Backspace") &&
+        !isTypingTarget()
       ) {
         e.preventDefault();
         onDelete();
@@ -2179,7 +2249,8 @@ export const DocumentEditor = memo(function DocumentEditor({
       if (
         selection?.kind === "annotation" &&
         e.key === "Delete" &&
-        selectedAnnotation?.kind !== "note"
+        selectedAnnotation?.kind !== "note" &&
+        !isTypingTarget()
       ) {
         e.preventDefault();
         onDelete();
@@ -2323,8 +2394,8 @@ export const DocumentEditor = memo(function DocumentEditor({
 
   /** What the exporter is given: the document as it stands. */
   const exportInput = useCallback(
-    (password?: string) => ({ edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, pages: planned, password }),
-    [edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, planned],
+    (password?: string) => ({ edits, textBoxes, redactions, annotations, stamps, links, formValues, formFlatten, pageNumbers, watermark, losslessRaster, pages: planned, password }),
+    [edits, textBoxes, redactions, annotations, stamps, links, formValues, formFlatten, pageNumbers, watermark, losslessRaster, planned],
   );
 
   const runExport = useCallback(async () => {
@@ -2343,11 +2414,18 @@ export const DocumentEditor = memo(function DocumentEditor({
     let leftOut = "";
     try {
       const { exportPdf } = await import("./pdf/exporter");
+      // Fields that were to be flattened but couldn't be drawn stay a form.
+      let kept: string[] = [];
       const out = await exportPdf(
         pdf,
-        { ...exportInput(password), onDropped: (chars) => (leftOut = leftOutNote(chars)) },
+        {
+          ...exportInput(password),
+          onFormKept: (names: string[]) => (kept = names),
+          onDropped: (chars) => (leftOut = leftOutNote(chars)),
+        },
         (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`),
       );
+      const formNote = keptFillableNote(kept);
       const editedName = fileName.replace(/\.pdf$/i, "") + "-edited.pdf";
       if (to.kind === "save" || to.kind === "save-as") {
         const target = to.target;
@@ -2356,7 +2434,7 @@ export const DocumentEditor = memo(function DocumentEditor({
         onSaved(activeId, { ...mark, inPlace: true }, to.kind === "save-as" ? { handle: target, fileName: target.name } : undefined);
         setStatus("ready");
         // Over a locked file, the user agreed to this before it was built.
-        setMessage(`Saved to ${target.name}.${flattened}${leftOut}${to.kind === "save-as" ? noPassword : ""}`);
+        setMessage(`Saved to ${target.name}.${flattened}${leftOut}${formNote}${to.kind === "save-as" ? noPassword : ""}`);
         return;
       }
       if (to.kind === "share") {
@@ -2369,7 +2447,7 @@ export const DocumentEditor = memo(function DocumentEditor({
         } else if (shared === "shared") {
           // Not marked saved: a share target ("Copy", a message draft) may
           // keep nothing, so the work still needs saving somewhere.
-          setMessage(`Shared ${editedName}.${flattened}${leftOut}${noPassword}`);
+          setMessage(`Shared ${editedName}.${flattened}${leftOut}${formNote}${noPassword}`);
         } else setMessage("Not shared.");
         return;
       }
@@ -2379,6 +2457,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       setMessage(
         (redactions.length > 0 ? "Downloaded — redacted pages were flattened to images." : "Downloaded edited PDF.") +
           leftOut +
+          formNote +
           (password ? " It opens only with the password you set." : noPassword),
       );
     } catch (err) {
@@ -2943,6 +3022,8 @@ export const DocumentEditor = memo(function DocumentEditor({
       pageNumbers={pageNumbers}
       watermark={watermark}
       lossless={losslessRaster}
+      form={formFacts.fields > 0 ? { ...formFacts, flatten: formFlatten } : null}
+      onFormFlatten={setFormFlatten}
       busy={busy}
       onEditNumbers={() => setFinishTab("numbers")}
       onEditWatermark={() => setFinishTab("watermark")}

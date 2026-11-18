@@ -71,12 +71,13 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
       });
     });
 
-    // AcroForm widgets → editable form fields (text + checkbox only).
+    // AcroForm widgets → editable form fields. Push buttons and signature
+    // fields aren't filled in, so they aren't offered.
     const fields: FormField[] = [];
     try {
       const annots = await page.getAnnotations();
       annots.forEach((a: Record<string, unknown>, k: number) => {
-        if (a.subtype !== "Widget") return;
+        if (a.subtype !== "Widget" || a.hidden) return;
         const ft = a.fieldType as string | undefined;
         const rect = a.rect as number[] | undefined;
         if (!rect || rect.length < 4) return;
@@ -85,12 +86,49 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
         const width = Math.abs(rect[2] - rect[0]);
         const height = Math.abs(rect[3] - rect[1]);
         const name = (a.fieldName as string) || `field-${p}-${k}`;
-        const base = { id: `${p}:field:${k}`, name, pageIndex: p, rect: { x, y, width, height }, readOnly: !!a.readOnly };
+        const label = typeof a.alternativeText === "string" ? a.alternativeText.trim() : "";
+        const base = {
+          id: `${p}:field:${k}`,
+          name,
+          pageIndex: p,
+          rect: { x, y, width, height },
+          // Locked along with its contents (`/F` Locked + LockedContents):
+          // no viewer lets it change, and pdf.js paints it into the canvas.
+          readOnly: !!a.readOnly || !!a.noHTML,
+          ...(a.noHTML || a.hasOwnCanvas ? { painted: true } : {}),
+          ...(label ? { label } : {}),
+        };
         if (ft === "Tx") {
-          fields.push({ ...base, type: "text", defaultValue: String(a.fieldValue ?? ""), multiline: !!a.multiLine });
+          const maxLen = typeof a.maxLen === "number" && a.maxLen > 0 ? a.maxLen : undefined;
+          fields.push({
+            ...base,
+            type: "text",
+            defaultValue: String(a.fieldValue ?? ""),
+            ...(a.multiLine ? { multiline: true } : {}),
+            ...(maxLen ? { maxLength: maxLen } : {}),
+          });
         } else if (ft === "Btn" && a.checkBox) {
           const on = a.fieldValue != null && a.fieldValue !== "Off" && a.fieldValue !== false;
           fields.push({ ...base, type: "checkbox", defaultValue: on });
+        } else if (ft === "Btn" && a.radioButton && typeof a.buttonValue === "string") {
+          const v = typeof a.fieldValue === "string" && a.fieldValue !== "Off" ? a.fieldValue : "";
+          fields.push({ ...base, type: "radio", defaultValue: v, onValue: a.buttonValue });
+        } else if (ft === "Ch" && Array.isArray(a.options)) {
+          const options = (a.options as { exportValue?: unknown; displayValue?: unknown }[]).map((o) => {
+            const value = String(o.exportValue ?? o.displayValue ?? "");
+            return { value, label: String(o.displayValue ?? value) };
+          });
+          const raw = a.fieldValue;
+          const chosen = (Array.isArray(raw) ? raw : raw == null || raw === "" ? [] : [raw]).map(String);
+          const multi = !a.combo && !!a.multiSelect;
+          fields.push({
+            ...base,
+            type: "choice",
+            options,
+            defaultValue: multi ? chosen : (chosen[0] ?? ""),
+            ...(a.combo ? { combo: true } : {}),
+            ...(multi ? { multiSelect: true } : {}),
+          });
         }
       });
     } catch {
@@ -233,6 +271,10 @@ export async function renderPageToCanvas(
    * own `/Rotate`). Pass 0 for the page's unturned user space — what anything
    * drawing overlay objects onto the raster needs. */
   rotation?: number,
+  /** Leave form fields out. A redacted page's raster is drawn from the file as
+   * it came, so its fields would show the values the file came with — a value
+   * the user cleared would be baked into the image. */
+  withoutForms = false,
 ): Promise<HTMLCanvasElement> {
   const aborted = () => new DOMException("Render abandoned", "AbortError");
   if (signal?.aborted) throw aborted();
@@ -251,7 +293,12 @@ export async function renderPageToCanvas(
   canvas.height = Math.ceil(viewport.height);
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not get 2D canvas context");
-  const task = page.render({ canvasContext: ctx, viewport });
+  const task = page.render({
+    canvasContext: ctx,
+    viewport,
+    // ENABLE_FORMS: fields are left to an HTML layer — here, to nothing.
+    ...(withoutForms ? { annotationMode: pdfjsLib.AnnotationMode.ENABLE_FORMS } : {}),
+  });
   const stop = () => task.cancel();
   signal?.addEventListener("abort", stop, { once: true });
   try {

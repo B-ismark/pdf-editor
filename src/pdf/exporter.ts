@@ -1,4 +1,4 @@
-import { LineCapStyle, PDFArray, PDFCatalog, PDFCheckBox, PDFDict, PDFDocument, PDFHexString, PDFInvalidObject, PDFName, PDFPage, PDFPageLeaf, PDFPageTree, PDFRef, PDFStream, PDFString, PDFTextField, StandardFonts, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb, type PDFFont } from "@cantoo/pdf-lib";
+import { LineCapStyle, PDFArray, PDFCatalog,  PDFDict, PDFDocument, PDFHexString, PDFInvalidObject, PDFName, PDFPage, PDFPageLeaf, PDFPageTree, PDFRef, PDFStream, PDFString,  StandardFonts, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb, type PDFFont } from "@cantoo/pdf-lib";
 import { fitScale, roomAfter } from "./lineFit";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
@@ -31,6 +31,7 @@ import {
 } from "./fragmentColors";
 import { loadJpegEncoder, type JpegEncoder } from "./jpeg";
 import { yieldToUI } from "./yield";
+import { applyForm, formFieldNames } from "./formFill";
 import {
   DEFAULT_STYLE,
   TEXTBOX_LINE_HEIGHT,
@@ -41,10 +42,13 @@ import {
   resolveFragmentStyle,
   standardFontKey,
 } from "./style";
+import { chosenValues, fieldFontSize, fieldValue, shownLines } from "./formValue";
 import { annotationPaintOrder, isBoxAnnotation } from "./types";
 import type {
   Annotation,
   Edits,
+  FormField,
+  FormValue,
   FragmentFont,
   LinkAnnot,
   LoadedPdf,
@@ -94,7 +98,11 @@ export interface ExportInput {
   stamps: Stamp[];
   links?: LinkAnnot[];
   /** Filled AcroForm values keyed by field name. */
-  formValues?: Record<string, string | boolean>;
+  formValues?: Record<string, FormValue>;
+  /** Flatten the form into the page instead of keeping it fillable. */
+  formFlatten?: boolean;
+  /** Told the fields that were to be flattened but had to stay fillable. */
+  onFormKept?: (names: string[]) => void;
   /** Document-wide page numbering, drawn on every output page. */
   pageNumbers?: PageNumberOptions | null;
   /** Document-wide diagonal watermark, drawn on every output page. */
@@ -154,28 +162,6 @@ function drawWatermark(page: PDFPage, font: PDFFont, opts: WatermarkOptions, fra
     opacity: opts.opacity,
     rotate: degrees(opts.angle),
   });
-}
-
-/** Fill the source document's AcroForm from user values and flatten it, so the
- * filled appearances bake into the page content that gets copied out. */
-function fillAndFlattenForm(src: PDFDocument, formValues: Record<string, string | boolean>, dropped: Set<string>): void {
-  if (Object.keys(formValues).length === 0) return;
-  try {
-    const form = src.getForm();
-    for (const field of form.getFields()) {
-      const name = field.getName();
-      if (!(name in formValues)) continue;
-      const v = formValues[name];
-      if (field instanceof PDFTextField) {
-        // Its appearance is drawn in the form's default font, a standard one
-        // (asked for only here: asking embeds it).
-        field.setText(typeof v === "string" ? sanitize(v, form.getDefaultFont(), dropped) : "");
-      } else if (field instanceof PDFCheckBox) (v ? field.check() : field.uncheck());
-    }
-    form.flatten();
-  } catch {
-    /* No form, or a field type/font we can't flatten — leave as-is. */
-  }
 }
 
 /** Attach clickable URI link annotations to a page (works on vector and
@@ -499,7 +485,6 @@ export async function exportPdf(
   // preview showed at *i*. On a malformed tree they differ, and the raster
   // would replace the wrong page.
   alignPageTree(out, loaded.pages.map((p) => p.ref));
-  fillAndFlattenForm(out, formValues, dropped);
   // The finished page for each source page, by source index: the original, or
   // the raster that replaces it. Put in plan order once, at the end.
   const finished: PDFPage[] = out.getPages();
@@ -518,6 +503,11 @@ export async function exportPdf(
   };
 
   const helv = await getFont("Helvetica");
+  // Before any page is copied or rasterised: a flattened field is page
+  // content from here on.
+  // The fields that stayed a form are reported once the pages are settled: one
+  // on a redacted or deleted page didn't stay anything.
+  const form = applyForm(out, formValues, !!input.formFlatten, helv);
   const wmFont = watermark ? await getFont("HelveticaBold") : null;
 
   // When any existing text is edited, spin up the source-font embedder so the
@@ -585,7 +575,7 @@ export async function exportPdf(
 
     if (needsRaster) {
       const oldRef = finished[i].ref;
-      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, pageEdited, await getJpegEncoder());
+      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, pageEdited, await getJpegEncoder(), formValues);
       finished[i] = rasterPage;
       replaced.set(oldRef, rasterPage.ref);
       applyPageLayers(rasterPage, seen, { x: 0, y: 0 });
@@ -734,6 +724,11 @@ export async function exportPdf(
     retitleOutlinesInto(out, new Set(replaced.values()));
     dropStructureTree(out);
   }
+  if (form.keptFillable.length > 0) {
+    const left = formFieldNames(out);
+    const kept = form.keptFillable.filter((n) => left.has(n));
+    if (kept.length > 0) input.onFormKept?.(kept);
+  }
   // Privacy: strip metadata / timestamps / active content before handing the
   // file back (the app never uploads, so the download is the only thing that
   // leaves the device — it should carry nothing identifying).
@@ -772,6 +767,127 @@ export async function exportPdf(
   return bytes;
 }
 
+/** One line of a multi-line answer, broken at spaces (or inside a word too
+ * long for a line) to fit `room` — as the preview's text box wraps it. Stops
+ * after `max` lines: the box shows no more, and a huge unbroken value (a
+ * pasted link, a malformed file) mustn't stall the export measuring it. */
+function wrapLine(ctx: CanvasRenderingContext2D, text: string, room: number, max: number): string[] {
+  const fits = (t: string) => ctx.measureText(t).width <= room;
+  if (text === "" || fits(text)) return [text];
+  const out: string[] = [];
+  let rest = text;
+  while (rest !== "" && out.length < max) {
+    if (fits(rest)) {
+      out.push(rest);
+      break;
+    }
+    // The longest start that fits, found by halving (at least one character).
+    let lo = 1;
+    let hi = rest.length;
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (fits(rest.slice(0, mid).trimEnd())) lo = mid;
+      else hi = mid - 1;
+    }
+    // Back to the last space in it, when there is one — even an indent at the
+    // very start, which then stands as a line of its own, as the preview has it.
+    const space = rest.slice(0, lo + 1).search(/\s\S*$/);
+    const cut = space >= 0 ? space + 1 : lo;
+    out.push(rest.slice(0, cut).trimEnd());
+    rest = rest.slice(cut).replace(/^\s+/, "");
+  }
+  return out;
+}
+
+/**
+ * A redacted page becomes a picture and loses its fields; their answers are
+ * drawn into it as the preview shows them, in the preview's Helvetica-like
+ * face, so the page still says what the form said. Redaction covers are
+ * painted after, over whatever they cover. A field pdf.js paints into the
+ * canvas itself (`painted`: read-only text, a locked widget) isn't drawn again.
+ */
+function drawRasterForm(
+  ctx: CanvasRenderingContext2D,
+  fields: FormField[],
+  values: Record<string, FormValue>,
+  H: number,
+  S: number,
+): void {
+  for (const f of fields) {
+    const v = fieldValue(f, values);
+    const { x, y, width, height } = f.rect;
+    const top = (H - (y + height)) * S;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x * S, top, width * S, height * S);
+    ctx.clip();
+    ctx.fillStyle = "#000000";
+    ctx.strokeStyle = "#000000";
+    if (f.type === "checkbox" || f.type === "radio") {
+      const on = f.type === "checkbox" ? v === true : typeof v === "string" && v !== "" && v === f.onValue;
+      if (on) {
+        const side = Math.min(width, height) * S;
+        const cx = (x + width / 2) * S;
+        const cy = top + (height * S) / 2;
+        if (f.type === "radio") {
+          ctx.beginPath();
+          ctx.arc(cx, cy, side * 0.25, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.lineWidth = Math.max(1, side * 0.12);
+          ctx.beginPath();
+          ctx.moveTo(cx - side * 0.3, cy);
+          ctx.lineTo(cx - side * 0.08, cy + side * 0.25);
+          ctx.lineTo(cx + side * 0.32, cy - side * 0.28);
+          ctx.stroke();
+        }
+      }
+    } else if (!f.painted) {
+      // pdf.js already painted the ones it paints itself (read-only text, a
+      // locked widget) — with a value that can't have changed.
+      const size = fieldFontSize(height);
+      const lineH = size * 1.15;
+      ctx.font = `${size * S}px Helvetica, Arial, sans-serif`;
+      ctx.textBaseline = "alphabetic";
+      const left = (x + 2) * S;
+      if (f.type === "choice" && !f.combo) {
+        // A list shows every option, the chosen ones marked — as the preview
+        // and pdf-lib's own look do. A value no option holds is listed last.
+        const chosen = chosenValues(v);
+        const options = f.options ?? [];
+        const extra = chosen.filter((c) => !options.some((o) => o.value === c)).map((c) => ({ value: c, label: c }));
+        const all = [...options, ...extra];
+        // Scrolled as the preview's list is: just far enough that the first
+        // chosen option shows, at the bottom, never past the last option.
+        const rows = Math.max(1, Math.floor((height - 2) / lineH));
+        const first = all.findIndex((o) => chosen.includes(o.value));
+        const start = first >= rows ? Math.max(0, Math.min(first - rows + 1, all.length - rows)) : 0;
+        all.slice(start, start + rows + 1).forEach((o, i) => {
+          const rowTop = top + (2 + lineH * i) * S;
+          if (chosen.includes(o.value)) {
+            ctx.fillStyle = "#99c1da";
+            ctx.fillRect(x * S, rowTop, width * S, lineH * S);
+            ctx.fillStyle = "#000000";
+          }
+          ctx.fillText(o.label, left, rowTop + size * S);
+        });
+      } else {
+        const room = (width - 4) * S;
+        const rows = Math.max(1, Math.ceil(height / lineH));
+        // A dropdown shows its first chosen option, as the preview does.
+        const lines = f.multiline
+          ? shownLines(f, v).flatMap((l) => wrapLine(ctx, l, room, rows)).slice(0, rows)
+          : shownLines(f, v).slice(0, 1);
+        lines.forEach((line, i) => {
+          const base = f.multiline ? top + (2 + size + lineH * i) * S : top + ((height + size * 0.7) / 2) * S;
+          ctx.fillText(line, left, base);
+        });
+      }
+    }
+    ctx.restore();
+  }
+}
+
 /** Render a page to an image with edits, text boxes, and redactions baked in,
  * then add it to the output document as a full-page image. */
 async function rasterisePage(
@@ -789,12 +905,15 @@ async function rasterisePage(
    * copies of the same predicate is how one of them ends up out of date. */
   pageEdited: boolean,
   encodeJpeg: JpegEncoder | null,
+  /** The form's answers: the page is drawn without its fields, and they go
+   * back on as the preview shows them — under the redactions. */
+  formValues: Record<string, FormValue> = {},
 ): Promise<PDFPage> {
   const pageData = loaded.pages[pageIndex];
   const H = pageData.viewBox.height;
   // In user space (no turn): every overlay object is stored there, and the
   // page's turn is put back on the replacement as `/Rotate` below.
-  const canvas = await renderPageToCanvas(loaded.bytes, pageIndex, REDACT_SCALE, undefined, 0);
+  const canvas = await renderPageToCanvas(loaded.bytes, pageIndex, REDACT_SCALE, undefined, 0, true);
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not get 2D canvas context");
   const S = REDACT_SCALE;
@@ -884,6 +1003,9 @@ async function rasterisePage(
 
   // New text boxes.
   for (const box of boxes) drawText(box.text, box.x, box.y, box.style, null, box.rotation ?? 0);
+
+  // The form's answers, as they are now (the raster was drawn without them).
+  drawRasterForm(ctx, pageData.fields, formValues, H, S);
 
   // Annotations sit above content but below redactions.
   drawRasterAnnots(ctx, annots, H, S);

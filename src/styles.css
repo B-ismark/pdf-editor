@@ -1033,6 +1033,7 @@ body {
   cursor: pointer;
 }
 .docpanel__toggle > span { display: flex; flex-direction: column; gap: 2px; }
+.docpanel__formcount { margin: 0 0 4px; }
 /* The collapsed edge: icon only. It used to carry a label set sideways with
    `writing-mode: vertical-rl`, which is slow to read, can't be scanned at a
    glance, and only repeated what the icon said. */
@@ -1435,17 +1436,25 @@ body {
 .whiteout--preview { position: absolute; background: rgba(255, 255, 255, 0.85); border: 1px dashed var(--primary); pointer-events: none; }
 
 /* ============ Form fields ============ */
-.formlayer { position: absolute; inset: 0; z-index: 3; }
+.formlayer { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
 .formfield {
   position: absolute;
   box-sizing: border-box;
   border: 1px solid color-mix(in srgb, #1a73e8 60%, transparent);
-  background: color-mix(in srgb, #1a73e8 8%, transparent);
+  /* Opaque: the page beneath shows the field as the file came, and a value
+     changed here must not sit over the old one. */
+  background: color-mix(in srgb, #1a73e8 8%, #fff);
   border-radius: 2px;
   color: #111;
   font-family: var(--font-plain);
 }
 .formfield--text { padding: 0 3px; outline: none; }
+.formfield--multi { padding: 2px 3px; resize: none; line-height: 1.2; overflow: auto; }
+.formfield--choice { padding: 0 2px; outline: none; cursor: pointer; }
+.formfield--choice:focus { border-color: var(--primary); }
+.formfield--list { overflow-y: auto; }
+.formfield--radio { border-radius: 50%; }
+.formfield__dot { display: block; border-radius: 50%; background: currentColor; }
 .formfield--text:focus { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 10%, #fff); }
 .formfield--check {
   display: grid;
@@ -1454,7 +1463,7 @@ body {
   color: #1a73e8;
   padding: 0;
 }
-.formfield--check.formfield--on { background: color-mix(in srgb, #1a73e8 18%, transparent); }
+.formfield--check.formfield--on { background: color-mix(in srgb, #1a73e8 18%, #fff); }
 .formfield:disabled { opacity: 0.6; cursor: default; }
 
 /* ============ Marquee + multi-select ============ */

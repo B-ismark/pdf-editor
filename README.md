@@ -45,6 +45,13 @@ and is **mobile- and tablet-first**:
 - **Fill & Sign** — create a signature by drawing, typing (script font), or
   uploading an image, then tap to place it; insert any image the same way.
   Stamps are draggable and resizable.
+- **Fill in forms** — every kind of form field (text, multi-line, checkbox,
+  radio buttons, dropdown, list) is filled in place, with the file's own
+  character limits. The Document panel says how many are filled and lets you
+  choose how the form leaves: **Keep fillable** (the default — still a form,
+  with your answers in it) or **Flatten into the page** (the answers become
+  part of the page, like print). The choice is undoable and saved with the
+  document.
 - **Redact** — the *Redact* tool draws a solid box over a region and truly
   removes the underlying content on export (see below).
 - **OCR a scan** — *OCR — recognise text* reads an image-only PDF and adds an
@@ -304,6 +311,13 @@ A pragmatic, client-side editor — worth knowing where the seams are:
   picker or chose with Save as… — not one you dragged in — and only while the
   tab is open: a restored session saves as a new file. A file opened with a
   password is saved back *without* it, after a warning.
+- **Form answers are drawn in Helvetica.** A field you fill gets a new look in
+  the standard font, whatever the form used. An answer it can't draw (Greek,
+  Cyrillic, Chinese…) is still saved, and the file asks the reader to draw it;
+  such a field can't be flattened, so it stays fillable and the app says so.
+  On a page you redact, the form becomes part of the picture: your current
+  answers are printed into it (in a plain style, not the form's own) and the
+  fields stop being fillable.
 - **Printing is at 150 dpi.** The pages are drawn as pictures for the print
   dialog, as browsers' own PDF viewers do — sharp on paper, but text in a
   "Save as PDF" from the print dialog isn't selectable. Download for that.
