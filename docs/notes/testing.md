@@ -201,7 +201,10 @@ type-checking can't see, and each exists because it broke once:
   chosen, flattening skips a hidden field and a signature and keeps a list
   with Greek options and a comb field it can't lay out fillable (both named),
   a redacted page's picture shows the answers as they are now (a cleared field
-  blank, the newly chosen radio dotted, the old one not), a UTF-8-named radio
+  blank, the newly chosen radio dotted, the old one not, a `\r` value on two
+  lines, a long answer wrapped) and, flattening, reports nothing as staying
+  fillable; a non-editable dropdown's own unlisted value is drawn (kept and
+  flattened) and it stays non-editable; a locked field is read-only, a UTF-8-named radio
   is saved as the button clicked, a field in a `/Parent` loop or under an
   untitled parent gets its value, a clicked field gives the keyboard back to
   a selected box, Organise keeps the form, and merging two forms keeps the

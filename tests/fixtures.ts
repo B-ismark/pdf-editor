@@ -1,4 +1,4 @@
-import { PDFBool, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFString, StandardFonts, degrees, rgb } from "pdf-lib";
+import { PDFBool, PDFDict, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFRawStream, PDFRef, PDFString, StandardFonts, degrees, rgb } from "pdf-lib";
 import { chromium } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import fontkit from "@pdf-lib/fontkit";
@@ -1280,6 +1280,15 @@ export const FORM_EDGE = {
   /** A comb text field holding more than its boxes (`/MaxLen` 2, value
    * "ABCDE"): pdf-lib can't lay it out, so it can't be flattened. */
   comb: { name: "comb", rect: [40, 140, 140, 22], value: "ABCDE", maxLength: 2 },
+  /** A dropdown that takes no typing, holding a value none of its options
+   * has, with no look: flattened, it must still show the value. */
+  legacy: { name: "legacy", rect: [40, 100, 140, 22], options: ["Alpha", "Beta"], value: "Gamma" },
+  /** A multi-line field whose value breaks lines the PDF way (`\r`). */
+  notes: { name: "notes", rect: [40, 40, 200, 50], value: "First line\rSecond line" },
+  /** An empty multi-line field, for a long answer that must wrap. */
+  essay: { name: "essay", rect: [300, 85, 160, 50] },
+  /** A text field locked along with its contents (`/F` 4+128+512). */
+  locked: { name: "locked", rect: [300, 340, 160, 22], value: "Fixed" },
   /** The form's own defaults, unlike pdf-lib's: Times, and asks viewers to draw. */
   da: "/TiRo 0 Tf 0 g",
 };
@@ -1381,6 +1390,31 @@ async function formEdgePdf(): Promise<Uint8Array> {
   // No look of its own, so flattening has to draw one — and can't.
   for (const w of comb.acroField.getWidgets()) w.dict.delete(PDFName.of("AP"));
   form.markFieldAsClean(comb.ref);
+
+  const legacy = form.createDropdown(E.legacy.name);
+  legacy.addOptions(E.legacy.options);
+  legacy.addToPage(page, at(E.legacy.rect));
+  legacy.acroField.dict.set(PDFName.of("V"), PDFString.of(E.legacy.value));
+  for (const w of legacy.acroField.getWidgets()) w.dict.delete(PDFName.of("AP"));
+  form.markFieldAsClean(legacy.ref);
+
+  const notes = form.createTextField(E.notes.name);
+  notes.enableMultiline();
+  notes.addToPage(page, at(E.notes.rect));
+  notes.acroField.dict.set(PDFName.of("V"), PDFString.of(E.notes.value));
+  form.markFieldAsClean(notes.ref);
+
+  const essay = form.createTextField(E.essay.name);
+  essay.enableMultiline();
+  essay.addToPage(page, at(E.essay.rect));
+  form.markFieldAsClean(essay.ref);
+
+  const locked = form.createTextField(E.locked.name);
+  locked.setText(E.locked.value);
+  locked.addToPage(page, at(E.locked.rect));
+  locked.updateAppearances(font);
+  for (const w of locked.acroField.getWidgets()) w.dict.set(PDFName.of("F"), PDFNumber.of(4 | 128 | 512));
+  form.markFieldAsClean(locked.ref);
 
   // The form's defaults: Times, in its resources, and drawn by the viewer.
   const times = doc.context.register(doc.context.obj({ Type: "Font", Subtype: "Type1", BaseFont: "Times-Roman" }));

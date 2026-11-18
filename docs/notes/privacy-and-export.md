@@ -240,7 +240,13 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     fillable* and reported (`onFormKept` → "“name” stays fillable", up to
     three named), never flattened as "?????". Any other failure to draw a
     look (a comb field holding more than its boxes) is kept and reported the
-    same way: whatever wasn't drawn is never flattened. A list's look draws *every* option, so all of them
+    same way: whatever wasn't drawn is never flattened. The note is sent once
+    pages are settled, naming only fields still in the file — one on a
+    redacted or deleted page didn't stay anything.
+  - **A value no option holds.** A list's `select` throws on one, so a list
+    drops it (`keptChoices`); a dropdown's `select` takes it by making the
+    field editable, so it's drawn as the preview shows it and the editable
+    flag put back. `/V` is written from the same kept values the look drew. A list's look draws *every* option, so all of them
     are checked, not just the chosen one. Signatures and push buttons are
     never touched, reported or flattened. (The exporter's own `sanitize` relies on the same
     throw, so it writes "?" where it means to drop a character.)
@@ -260,12 +266,16 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   - **`/Parent` loops hang pdf-lib.** Its `getFields` / `getName` recurse up
     `/Parent` with no guard. `breakParentCycles` cuts each loop before
     `getForm`, walking from widgets first so the link cut is the one pdf.js
-    stops at and the name stays the preview's.
+    stops at and the name stays the preview's. (Two widgets on different
+    members of one loop can still get different names from pdf.js; a loop
+    through `/Kids` makes pdf-lib's read fail, caught, and the form goes out
+    as it came.)
   - **Organise drops the form.** `copyPages` copies the widgets and fields but
     not `/AcroForm`; `pageOps.rebuildForm` gives the rebuilt file one from the
     kept pages' widgets, dropping widgets on pages left out. `/DA` and `/Q`
     come from the first source; `/DR` merges every source's by category (first
-    name wins); `/NeedAppearances` is set if any source had it; and a later
+    name wins — two files' different `/F1` fonts resolve to the first's when a
+    viewer redraws); `/NeedAppearances` is set if any source had it; and a later
     source's root field that leaned on its own form's different `/DA` or `/Q`
     gets it written onto itself. Two merged files with same-named fields stay
     two fields of one name.
@@ -280,7 +290,10 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   the raster is drawn *without* the form (`renderPageToCanvas(…,
   withoutForms)`), so the file's original answers aren't baked in, and then
   `drawRasterForm` paints the answers *as they are now* — a tick, a dot, the
-  text — before the redaction boxes go on, so a box over a field still
-  covers it. A read-only text field is left as the canvas drew it (pdf.js
-  paints those even in forms mode). Clicking out of a field onto the page
+  text (broken at `\r` or `\n` and wrapped to the box, at the preview's
+  `fieldFontSize`), a list with every option and the chosen ones marked —
+  before the redaction boxes go on, so a box over a field still covers it. A
+  field pdf.js paints into the canvas itself even in forms mode (`painted`:
+  read-only text, a widget locked with its contents) is left as the canvas
+  drew it; a locked one is read-only in the preview too. Clicking out of a field onto the page
   blurs it, so Delete reaches the selected box rather than the field.

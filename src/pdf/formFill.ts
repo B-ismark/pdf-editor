@@ -8,6 +8,7 @@ import {
   PDFBool,
   PDFHexString,
   PDFNumber,
+  PDFArray,
   PDFDict,
   PDFRef,
   PDFString,
@@ -166,16 +167,25 @@ function setValue(field: PDFField, v: FormValue): void {
       field.acroField.setValue(on);
     }
   } else if (field instanceof PDFDropdown || field instanceof PDFOptionList) {
-    // A value that isn't one of the options (left from an older version of
-    // the file) is dropped, unless the dropdown takes typed values: pdf-lib
-    // would throw and lose the whole choice.
-    const typed = field instanceof PDFDropdown && field.isEditable();
-    const chosen = (Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : [])
-      .filter((x) => typed || hasOption(field, x))
-      .map((x) => optionText(field, x));
+    const chosen = keptChoices(field, v).map((x) => optionText(field, x));
     if (chosen.length === 0) field.clear();
-    else field.select(chosen.length === 1 ? chosen[0] : chosen);
+    else if (field instanceof PDFDropdown) {
+      // A value no option holds (the preview shows it as it is) is drawn as
+      // it is too. pdf-lib's `select` takes it by making the dropdown
+      // editable; it isn't, so that's put back.
+      const editable = field.isEditable();
+      field.select(chosen[0]);
+      if (!editable) field.disableEditing();
+    } else field.select(chosen.length === 1 ? chosen[0] : chosen);
   }
+}
+
+/** The values a dropdown or list will hold: a list's `select` throws on a
+ * value none of its options has (left from an older version of the file), so
+ * a list drops it; a dropdown keeps it. */
+function keptChoices(field: PDFDropdown | PDFOptionList, v: FormValue): string[] {
+  const chosen = Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : [];
+  return field instanceof PDFOptionList ? chosen.filter((x) => hasOption(field, x)) : chosen.slice(0, 1);
 }
 
 function hasOption(field: PDFDropdown | PDFOptionList, value: string): boolean {
@@ -194,7 +204,8 @@ function optionText(field: PDFDropdown | PDFOptionList, value: string): string {
  * stores, which pdf-lib's `select` writes as their shown text instead. */
 function storeChoiceValues(field: PDFField, v: FormValue): void {
   if (!(field instanceof PDFDropdown || field instanceof PDFOptionList)) return;
-  const chosen = Array.isArray(v) ? v : typeof v === "string" && v !== "" ? [v] : [];
+  // The same values the look was drawn with.
+  const chosen = keptChoices(field, v);
   if (chosen.length === 0) return;
   const stored = chosen.map((x) => PDFHexString.fromText(x));
   field.acroField.dict.set(PDFName.of("V"), stored.length === 1 ? stored[0] : field.acroField.dict.context.obj(stored));
@@ -284,6 +295,27 @@ function flattenField(form: PDFForm, field: PDFField): void {
   } catch {
     /* already gone */
   }
+}
+
+/** Every field name the file's form still has, as pdf.js names them: what a
+ * "stays fillable" note may name once pages have been redacted or deleted. */
+export function formFieldNames(doc: PDFDocument): Set<string> {
+  const names = new Set<string>();
+  const seen = new Set<PDFDict>();
+  const acro = doc.catalog.lookup(PDFName.of("AcroForm"));
+  const walk = (o: unknown) => {
+    const d = o instanceof PDFRef ? doc.context.lookup(o) : o;
+    if (!(d instanceof PDFDict) || seen.has(d)) return;
+    seen.add(d);
+    names.add(fieldKey(d));
+    const kids = d.lookup(PDFName.of("Kids"));
+    if (kids instanceof PDFArray) kids.asArray().forEach(walk);
+  };
+  if (acro instanceof PDFDict) {
+    const fields = acro.lookup(PDFName.of("Fields"));
+    if (fields instanceof PDFArray) fields.asArray().forEach(walk);
+  }
+  return names;
 }
 
 /** A field's full name as pdf.js builds it: each ancestor's `/T`, skipping any

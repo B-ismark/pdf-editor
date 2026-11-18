@@ -30,7 +30,7 @@ import {
 } from "./fragmentColors";
 import { loadJpegEncoder, type JpegEncoder } from "./jpeg";
 import { yieldToUI } from "./yield";
-import { applyForm } from "./formFill";
+import { applyForm, formFieldNames } from "./formFill";
 import {
   DEFAULT_STYLE,
   TEXTBOX_LINE_HEIGHT,
@@ -41,7 +41,7 @@ import {
   resolveFragmentStyle,
   standardFontKey,
 } from "./style";
-import { fieldValue, shownLines } from "./formValue";
+import { chosenValues, fieldFontSize, fieldValue, shownLines } from "./formValue";
 import { annotationPaintOrder, isBoxAnnotation } from "./types";
 import type {
   Annotation,
@@ -512,8 +512,9 @@ export async function exportPdf(
   const helv = await getFont("Helvetica");
   // Before any page is copied or rasterised: a flattened field is page
   // content from here on.
+  // The fields that stayed a form are reported once the pages are settled: one
+  // on a redacted or deleted page didn't stay anything.
   const form = applyForm(out, formValues, !!input.formFlatten, helv);
-  if (form.keptFillable.length > 0) input.onFormKept?.(form.keptFillable);
   const wmFont = watermark ? await getFont("HelveticaBold") : null;
 
   // When any existing text is edited, spin up the source-font embedder so the
@@ -726,6 +727,11 @@ export async function exportPdf(
     retitleOutlinesInto(out, new Set(replaced.values()));
     dropStructureTree(out);
   }
+  if (form.keptFillable.length > 0) {
+    const left = formFieldNames(out);
+    const kept = form.keptFillable.filter((n) => left.has(n));
+    if (kept.length > 0) input.onFormKept?.(kept);
+  }
   // Privacy: strip metadata / timestamps / active content before handing the
   // file back (the app never uploads, so the download is the only thing that
   // leaves the device — it should carry nothing identifying).
@@ -762,14 +768,38 @@ export async function exportPdf(
   return out.save({ updateFieldAppearances: false });
 }
 
-/** Render a page to an image with edits, text boxes, and redactions baked in,
- * then add it to the output document as a full-page image. */
+/** One line of a multi-line answer, broken at spaces (or inside a word too
+ * long for a line) to fit `room` — as the preview's text box wraps it. */
+function wrapLine(ctx: CanvasRenderingContext2D, text: string, room: number): string[] {
+  if (text === "" || ctx.measureText(text).width <= room) return [text];
+  const out: string[] = [];
+  let line = "";
+  for (const word of text.split(/(?<=\s)/)) {
+    const next = line + word;
+    if (ctx.measureText(next.trimEnd()).width <= room) {
+      line = next;
+      continue;
+    }
+    if (line) out.push(line.trimEnd());
+    line = word;
+    // A word wider than the line: broken where it runs out.
+    while (ctx.measureText(line.trimEnd()).width > room && line.length > 1) {
+      let cut = line.length - 1;
+      while (cut > 1 && ctx.measureText(line.slice(0, cut)).width > room) cut--;
+      out.push(line.slice(0, cut));
+      line = line.slice(cut);
+    }
+  }
+  if (line.trimEnd()) out.push(line.trimEnd());
+  return out;
+}
+
 /**
  * A redacted page becomes a picture and loses its fields; their answers are
  * drawn into it as the preview shows them, in the preview's Helvetica-like
  * face, so the page still says what the form said. Redaction covers are
- * painted after, over whatever they cover. A read-only text field isn't drawn:
- * pdf.js paints those onto the canvas itself even without forms.
+ * painted after, over whatever they cover. A field pdf.js paints into the
+ * canvas itself (`painted`: read-only text, a locked widget) isn't drawn again.
  */
 function drawRasterForm(
   ctx: CanvasRenderingContext2D,
@@ -807,21 +837,44 @@ function drawRasterForm(
           ctx.stroke();
         }
       }
-    } else if (!(f.type === "text" && f.readOnly)) {
-      const lines = shownLines(f, v);
-      const size = f.multiline || (f.type === "choice" && !f.combo) ? Math.min(12, height * 0.6) : Math.max(6, Math.min(14, height * 0.6));
+    } else if (!f.painted) {
+      // pdf.js already painted the ones it paints itself (read-only text, a
+      // locked widget) — with a value that can't have changed.
+      const size = fieldFontSize(height);
+      const lineH = size * 1.15;
       ctx.font = `${size * S}px Helvetica, Arial, sans-serif`;
       ctx.textBaseline = "alphabetic";
-      const stacked = lines.length > 1 || f.multiline || (f.type === "choice" && !f.combo);
-      lines.forEach((line, i) => {
-        const base = stacked ? top + (2 + size * (i + 1) * 1.15) * S : top + ((height + size * 0.7) / 2) * S;
-        ctx.fillText(line, (x + 2) * S, base);
-      });
+      const left = (x + 2) * S;
+      if (f.type === "choice" && !f.combo) {
+        // A list shows every option, the chosen ones marked — as the preview
+        // and pdf-lib's own look do. A value no option holds is listed last.
+        const chosen = chosenValues(v);
+        const options = f.options ?? [];
+        const extra = chosen.filter((c) => !options.some((o) => o.value === c)).map((c) => ({ value: c, label: c }));
+        [...options, ...extra].forEach((o, i) => {
+          const rowTop = top + (2 + lineH * i) * S;
+          if (chosen.includes(o.value)) {
+            ctx.fillStyle = "#99c1da";
+            ctx.fillRect(x * S, rowTop, width * S, lineH * S);
+            ctx.fillStyle = "#000000";
+          }
+          ctx.fillText(o.label, left, rowTop + size * S);
+        });
+      } else {
+        const room = (width - 4) * S;
+        const lines = f.multiline ? shownLines(f, v).flatMap((l) => wrapLine(ctx, l, room)) : shownLines(f, v);
+        lines.forEach((line, i) => {
+          const base = f.multiline ? top + (2 + size + lineH * i) * S : top + ((height + size * 0.7) / 2) * S;
+          ctx.fillText(line, left, base);
+        });
+      }
     }
     ctx.restore();
   }
 }
 
+/** Render a page to an image with edits, text boxes, and redactions baked in,
+ * then add it to the output document as a full-page image. */
 async function rasterisePage(
   out: PDFDocument,
   loaded: LoadedPdf,

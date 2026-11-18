@@ -88,6 +88,9 @@ export interface FormField {
   /** Initial value from the source PDF. */
   defaultValue: FormValue;
   readOnly?: boolean;
+  /** pdf.js paints this field into the page canvas itself, even with forms
+   * on (a read-only text field; a widget locked with its contents). */
+  painted?: boolean;
   /** The field's label for people (its tooltip, `/TU`), when the file gives
    * one: the name is often machine-made (`topmostSubform[0].f1_01[0]`). */
   label?: string;

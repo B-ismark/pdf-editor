@@ -92,7 +92,10 @@ export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
           name,
           pageIndex: p,
           rect: { x, y, width, height },
-          readOnly: !!a.readOnly,
+          // Locked along with its contents (`/F` Locked + LockedContents):
+          // no viewer lets it change, and pdf.js paints it into the canvas.
+          readOnly: !!a.readOnly || !!a.noHTML,
+          ...(a.noHTML || a.hasOwnCanvas ? { painted: true } : {}),
           ...(label ? { label } : {}),
         };
         if (ft === "Tx") {

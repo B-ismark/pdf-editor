@@ -1,6 +1,6 @@
 import { Icon } from "./Icon";
 import type { FormField, FormValue } from "../pdf/types";
-import { fieldValue } from "../pdf/formValue";
+import { fieldFontSize, fieldValue } from "../pdf/formValue";
 
 export { fieldValue, hasValue, sameValue } from "../pdf/formValue";
 
@@ -47,7 +47,7 @@ export function FormFieldLayer({ fields, scale, pageHeight, values, active, onCh
           height: `${height}px`,
           pointerEvents: active ? ("auto" as const) : ("none" as const),
         };
-        const font = `${Math.max(8, Math.min(16, height * 0.6))}px`;
+        const font = `${fieldFontSize(height)}px`;
         const value = fieldValue(f, values);
         const stop = (e: React.PointerEvent) => e.stopPropagation();
         const label = f.label ?? f.name;

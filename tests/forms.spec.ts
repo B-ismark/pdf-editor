@@ -254,6 +254,7 @@ test.describe("what the file keeps", () => {
     expect(form.getOptionList(E.script.name).getSelected()).toEqual(["English"]);
     const [text] = await pageTexts(out, [1]);
     expect(text).toContain(E.city.value);
+    expect(text, "a dropdown's value that isn't an option is printed, as the preview showed it").toContain(E.legacy.value);
     expect(text, "a hidden field is never printed").not.toContain(E.secret.value);
     expect(text, "never drawn as the font's stand-in").not.toContain("????");
     expectClean(w);
@@ -264,6 +265,11 @@ test.describe("what the file keeps", () => {
     // The file says "Tamale"; cleared here. No answer was given; the third chosen.
     await page.getByRole("combobox", { name: E.city.tip }).selectOption("");
     await page.getByRole("radio", { name: `${E.answer.name}: option 3 of 3`, exact: true }).click();
+    // Longer than a line of the box: it wraps, in the preview and the picture.
+    await field(page, E.essay.name).fill("A long answer that runs well past the edge of its box");
+    // Flattening: fields that couldn't be flattened are on this page, which
+    // becomes a picture — nothing "stays fillable" to report.
+    await formPanel(page).getByRole("radio", { name: "Flatten into the page" }).check();
     const box = (await page.locator(".page").first().boundingBox())!;
     // Over the heading only, nowhere near the fields.
     await pickTool(page, "Redact");
@@ -288,6 +294,28 @@ test.describe("what the file keeps", () => {
     expect(await dark(E.city.rect), `no "${E.city.value}": the answer was cleared`).toBe(0);
     expect(await dark([160, E.answer.y, 16, 16]), "the button chosen is drawn chosen").toBeGreaterThan(0);
     expect(await dark([40, E.answer.y, 16, 16]), "and the others not").toBe(0);
+    // The bottom half of each multi-line box: its second line.
+    const second = (r: number[]) => [r[0], r[1], r[2], r[3] * 0.48];
+    expect(await dark(second(E.notes.rect)), "a \\r in the file's value breaks the line").toBeGreaterThan(0);
+    expect(await dark(second(E.essay.rect)), "a long answer wraps").toBeGreaterThan(0);
+    await expect(page.locator(".snackbar__msg").filter({ hasText: "fillable" })).toHaveCount(0);
+  });
+
+  test("a dropdown's own value is drawn as itself; a locked field can't be changed", async ({ page }) => {
+    await open(page, (await fixtures()).formEdge);
+    await expect(field(page, E.locked.name)).toHaveAttribute("readonly", "");
+    const legacy = field(page, E.legacy.name);
+    await expect(legacy).toHaveValue(E.legacy.value);
+    await legacy.selectOption(E.legacy.options[1]);
+    await legacy.selectOption(E.legacy.value);
+    const doc = await PDFDocument.load(await download(page));
+    const dd = doc.getForm().getDropdown(E.legacy.name);
+    expect(dd.isEditable(), "still takes no typing").toBe(false);
+    const ap = dd.acroField.getWidgets()[0].dict.lookup(PDFName.of("AP"), PDFDict);
+    const look = ap.lookup(PDFName.of("N"), PDFRawStream);
+    const ops = Buffer.from(decodePDFRawStream(look).decode()).toString("latin1");
+    const hex = Buffer.from(E.legacy.value, "latin1").toString("hex").toUpperCase();
+    expect(ops.toUpperCase(), "its look shows the value the file holds").toContain(hex);
   });
 
   test("a radio button named in UTF-8 bytes is still the one saved", async ({ page }) => {
