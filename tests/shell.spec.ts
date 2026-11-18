@@ -904,6 +904,69 @@ test.describe("command registry", () => {
     await page.keyboard.press("Escape");
   });
 
+  /** Two pen strokes on the first page, then a marquee round both. */
+  async function groupOfTwo(page: Page) {
+    await pickSubTool(page, "Pen");
+    const box = (await page.locator(".page").first().boundingBox())!;
+    for (const [x, y] of [[80, 200], [140, 260]]) {
+      await page.mouse.move(box.x + x, box.y + y);
+      await page.mouse.down();
+      await page.mouse.move(box.x + x + 100, box.y + y + 10, { steps: 8 });
+      await page.mouse.up();
+      await page.waitForTimeout(150);
+    }
+    await pickTool(page, "Select");
+    await page.mouse.move(box.x + 40, box.y + 170);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 300, box.y + 300, { steps: 12 });
+    await page.mouse.up();
+    await expect(page.locator(".multisel")).toHaveCount(2);
+  }
+  const strokes = (page: Page) => page.locator(".page .annot-svg polyline[stroke]:not([stroke='transparent'])");
+
+  test("a shortcut the palette shows is one the app honours", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    await groupOfTwo(page);
+
+    // "Duplicate · Ctrl+D" on a group: the key does what the row says, and the
+    // browser doesn't get it (it offered to bookmark the page).
+    await page.keyboard.press("Control+k");
+    await expect((await paletteRow(page, "duplicate", "Duplicate")).locator(".cmdk__hint")).toHaveText("Ctrl+D");
+    await page.keyboard.press("Escape");
+    // Backing out of the palette leaves the selection it was opened over.
+    await expect(page.locator(".multisel")).toHaveCount(2);
+    const prevented = page.evaluate(
+      () => new Promise<boolean>((done) => window.addEventListener("keydown", (e) => setTimeout(() => done(e.defaultPrevented)), { once: true })),
+    );
+    await page.keyboard.press("Control+d");
+    expect(await prevented, "Ctrl+D reached the browser").toBe(true);
+    await expect(strokes(page)).toHaveCount(4);
+
+    // A text box keeps Del for its text, so Delete offers no Del there.
+    await page.keyboard.press("Escape");
+    await pickTool(page, "Add text");
+    const box = (await page.locator(".page").first().boundingBox())!;
+    await page.mouse.click(box.x + 150, box.y + 420);
+    await expect(page.locator(".props__title")).toHaveText("Text box");
+    await page.keyboard.press("Control+k");
+    await expect((await paletteRow(page, "delete", "Delete")).locator(".cmdk__hint")).not.toHaveText("Del");
+    await page.keyboard.press("Escape");
+  });
+
+  test("a Draw sub-tool picked from the palette behaves as picked from the strip, and isn't marked as a dialog", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    await page.keyboard.press("Control+k");
+    await expect((await paletteRow(page, "tool-draw", "Draw")).locator(".opens-mark")).toHaveCount(0);
+    await expect((await paletteRow(page, "goto", "Go to page")).locator(".opens-mark")).toHaveCount(0);
+    await (await paletteRow(page, "draw-arrow", "Arrow")).click();
+    await expect(page.locator('.tooldock__btn[aria-label="Draw"]')).toHaveAttribute("aria-pressed", "true");
+    // The strip stands down so the page is there to draw on, and says which.
+    await expect(page.locator(".drawbar--closed")).toHaveCount(1);
+    await expect(page.locator(".drawbar__handle")).toContainText("Arrow");
+  });
+
   test("the ⋯ menu says where to find everything: Search commands opens the palette", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await open(page, (await fixtures()).sample);

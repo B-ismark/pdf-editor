@@ -109,7 +109,9 @@ export function CommandPalette({ commands, onClose }: Props) {
   }, [active]);
 
   const runAt = (i: number) => {
-    const cmd = results[i];
+    // The list can shrink under the highlight while open (a file starts being
+    // made and the exports go), so Enter runs the last row rather than nothing.
+    const cmd = results[Math.min(i, results.length - 1)];
     if (!cmd) return;
     onClose();
     cmd.run();
@@ -144,6 +146,10 @@ export function CommandPalette({ commands, onClose }: Props) {
                 runAt(active);
               } else if (e.key === "Escape") {
                 e.preventDefault();
+                // Backing out of the palette is all this Escape does. Let
+                // through, the editor's own Escape cleared the selection the
+                // palette's Selection commands were about to act on.
+                e.stopPropagation();
                 onClose();
               }
             }}
@@ -160,7 +166,6 @@ export function CommandPalette({ commands, onClose }: Props) {
               role="option"
               aria-selected={i === active}
               aria-checked={c.checked}
-              aria-haspopup={c.opens === "dialog" ? "dialog" : undefined}
               onPointerEnter={() => setActive(i)}
               onClick={() => runAt(i)}
             >
@@ -169,7 +174,9 @@ export function CommandPalette({ commands, onClose }: Props) {
               {c.value && <span className="cmdk__value label-medium">{c.value}</span>}
               {c.checked && <Icon name="check" size={16} className="cmdk__check" />}
               <span className="cmdk__hint label-medium">{c.shortcut ?? GROUP_LABEL[c.group]}</span>
-              {c.opens && <Icon name="opens_dialog" size={16} className="opens-mark" />}
+              {/* The dialog mark is for dialogs only: Draw opens a toolbar,
+                  which the dock marks its own way. */}
+              {c.opens === "dialog" && <Icon name="opens_dialog" size={16} className="opens-mark" />}
             </button>
           ))}
         </div>

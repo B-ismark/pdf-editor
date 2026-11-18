@@ -1878,6 +1878,15 @@ export const DocumentEditor = memo(function DocumentEditor({
         redo();
         return;
       }
+      // Ctrl/⌘+D on a group selection duplicates the group, as its multibar
+      // button and the palette's "Duplicate · Ctrl+D" do. The single-object
+      // handler above leaves it alone (a group has no single `selection`), and
+      // without this the browser took the key and offered to bookmark the page.
+      if (mod && key === "d" && multi.length > 0 && !isTypingTarget()) {
+        e.preventDefault();
+        duplicateMulti();
+        return;
+      }
       if (mod && key === "f") {
         e.preventDefault();
         openFind();
@@ -2054,6 +2063,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     multi,
     clearMulti,
     deleteMulti,
+    duplicateMulti,
     moveMulti,
     arrangeSelection,
     canArrange,
@@ -2130,6 +2140,12 @@ export const DocumentEditor = memo(function DocumentEditor({
   // the list reads as the full inventory.
   const single = selection && selection.kind !== "fragment" ? selection : null;
   const multiOn = multi.length >= 2;
+  const delByKey =
+    multiOn ||
+    single?.kind === "redaction" ||
+    single?.kind === "stamp" ||
+    single?.kind === "link" ||
+    (single?.kind === "annotation" && selectedAnnotation?.kind !== "note");
   const commands: Command[] = [
     ...TOOLS.map((t): Command => ({
       id: `tool-${t.key}`,
@@ -2146,15 +2162,20 @@ export const DocumentEditor = memo(function DocumentEditor({
       label: t.label,
       icon: t.icon,
       keywords: "draw annotate markup",
+      // As picking it in the strip does: the sub-tool is set and the strip
+      // stands down, so the page is there to draw on.
       run: () => {
         setDrawTool(t.key);
         if (tool !== "draw") pickTool("draw");
-        else setDrawbarOpen(true);
+        setDrawbarOpen(false);
       },
     })),
 
     { id: "duplicate", group: "selection", label: "Duplicate", icon: "duplicate", shortcut: "Ctrl+D", keywords: "copy clone", hidden: !single && !multiOn, run: () => (multiOn ? duplicateMulti() : duplicateSelection()) },
-    { id: "delete", group: "selection", label: "Delete", icon: "delete", shortcut: "Del", keywords: "remove", hidden: !single && !multiOn, run: () => (multiOn ? deleteMulti() : onDelete()) },
+    // Del is only shown where the key does it: text boxes and notes keep it
+    // for their own text (see the key handler), so for them the command has no
+    // shortcut rather than one that does nothing.
+    { id: "delete", group: "selection", label: "Delete", icon: "delete", shortcut: delByKey ? "Del" : undefined, keywords: "remove", hidden: !single && !multiOn, run: () => (multiOn ? deleteMulti() : onDelete()) },
     { id: "front", group: "selection", label: "Bring to front", icon: "bring_front", shortcut: "]", keywords: "arrange order stack raise", hidden: !canArrange, run: () => arrangeSelection("front") },
     { id: "back", group: "selection", label: "Send to back", icon: "send_back", shortcut: "[", keywords: "arrange order stack lower", hidden: !canArrange, run: () => arrangeSelection("back") },
     ...([
@@ -2169,15 +2190,15 @@ export const DocumentEditor = memo(function DocumentEditor({
     })),
     { id: "distribute-h", group: "selection", label: "Distribute horizontally", icon: "distribute_h", keywords: "space evenly", hidden: multi.length < 3, run: () => distributeMulti("h") },
     { id: "distribute-v", group: "selection", label: "Distribute vertically", icon: "distribute_v", keywords: "space evenly", hidden: multi.length < 3, run: () => distributeMulti("v") },
-    { id: "deselect", group: "selection", label: "Clear selection", icon: "close", shortcut: "Esc", keywords: "deselect none", hidden: !selection && !multiOn, run: () => { setMulti([]); setSelection(null); } },
+    { id: "deselect", group: "selection", label: "Clear selection", icon: "deselect", shortcut: "Esc", keywords: "deselect none", hidden: !selection && !multiOn, run: () => { setMulti([]); setSelection(null); } },
 
     { id: "undo", group: "edit", label: "Undo", icon: "undo", shortcut: "Ctrl+Z", hidden: !docHistory.canUndo, run: undo },
     { id: "redo", group: "edit", label: "Redo", icon: "redo", shortcut: "Ctrl+Shift+Z", hidden: !docHistory.canRedo, run: redo },
 
     { id: "find", group: "navigate", label: "Find in document", icon: "search", shortcut: "Ctrl+F", keywords: "search", run: openFind },
-    { id: "find-next", group: "navigate", label: "Next match", icon: "chevron_down", shortcut: "Enter", keywords: "find search", hidden: matches.length === 0, run: nextMatch },
-    { id: "find-prev", group: "navigate", label: "Previous match", icon: "chevron_up", shortcut: "Shift+Enter", keywords: "find search", hidden: matches.length === 0, run: prevMatch },
-    { id: "goto", group: "navigate", label: "Go to page…", icon: "go_to_page", keywords: "jump page number", opens: "dialog", hidden: !pdf || shown.length < 2, run: openPageJump },
+    { id: "find-next", group: "navigate", label: "Next match", icon: "chevron_down", keywords: "find search", hidden: matches.length === 0, run: nextMatch },
+    { id: "find-prev", group: "navigate", label: "Previous match", icon: "chevron_up", keywords: "find search", hidden: matches.length === 0, run: prevMatch },
+    { id: "goto", group: "navigate", label: "Go to page…", icon: "go_to_page", keywords: "jump page number", hidden: !pdf || shown.length < 2, run: openPageJump },
 
     { id: "pages", group: "view", label: navOpen ? "Hide pages" : "Show pages", icon: navOpen ? "panel_close" : "panel_open", keywords: "thumbnails sidebar", run: () => setNavOpen((v) => !v) },
     { id: "panel", group: "view", label: inspectorOpen ? "Hide panel" : "Show panel", icon: "sliders", keywords: "inspector properties", hidden: !isWide, run: () => setInspectorOpen(!inspectorOpen) },

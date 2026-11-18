@@ -11,6 +11,7 @@ import {
   ArrowDownToLine,
   ArrowUpRight,
   MoveHorizontal,
+  SquareDashed,
   BadgeCheck,
   BringToFront,
   Check,
@@ -211,6 +212,8 @@ const MAP: Record<string, LucideIcon> = {
   command: Command,
   /** Zoom back to the page's width (the zoom pill's percentage, "Fit to width"). */
   fit_width: MoveHorizontal,
+  /** Drop the selection ("Clear selection"); `close` is for closing things. */
+  deselect: SquareDashed,
   /** The properties/inspector panel. */
   sliders: SlidersHorizontal,
   /** Stateful pair for the page rail toggle, so the icon reports the outcome. */
