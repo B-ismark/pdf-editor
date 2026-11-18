@@ -65,7 +65,7 @@ Two constraints, both implemented:
   neither codec can be picked up front. It also means turning this on cannot
   make any page larger than it was.
 - **Lossless stays reachable.** JPEG rings around text, and a redacted page is
-  often evidence. *Lossless redacted pages* (`pref.losslessRaster`, ⋯ menu)
+  often evidence. *Lossless redacted pages* (`pref.losslessRaster`, ⋯ menu and the Inspector)
   skips the JPEG encode entirely. A full quality slider was not added: the
   compress dialog already owns quality-vs-size, and a second control for it
   here would be a worse version of that one.

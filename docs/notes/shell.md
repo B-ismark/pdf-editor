@@ -43,26 +43,36 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   positioned pseudo-element paints *above* the icon, which shipped once as an
   empty grey disc. `tests/shell.spec.ts` covers both ends.
 
-- **The Inspector has two named tabs, not one surface with two moods.** It used to
-  swap between the document actions and the selection's properties with nothing to
-  say it had, so clicking the page made Compress/Watermark/OCR vanish with no way
-  back. Selecting moves to Properties (that's what the click asked for);
-  deselecting deliberately does *not* move back, or the panel would flip on every
-  stray click. **A stamp is the exception**: stamps are edited on the canvas and
-  have no controls in this panel, so moving there for one traded every document
-  action for "Nothing selected" — clicking your own signature emptied the panel.
-  `onSelect` skips the move for stamps (the selection-change effect already keyed
-  on `panelSelection`, which is stamp-aware), and Properties names an image and
-  says where to edit it rather than claiming nothing is selected.
-  The tab strip is a *roving* tabstop, which means the arrow keys move focus and
-  not just `aria-selected`: the unselected tab is `tabIndex={-1}`, so changing
-  the selection alone leaves the keyboard on a control outside the tab order —
-  the next Tab jumps somewhere unrelated and Space acts on the wrong tab. Focus
-  moves synchronously, not in a `requestAnimationFrame`, because the next
-  keystroke has to land on the tab this one moved to. The document actions also live in the ⋯ menu — deliberately, since
-  on a phone the panel is a selection-driven sheet and the palette needs a
-  keyboard — so the two must keep the *same* groups, order, names and icons; they
-  both read from `docActions` and `DOC_GROUPS`.
+- **The Inspector has one job: describe.** With something selected it shows
+  that thing's properties; with nothing selected, the *document's* properties
+  (`DocumentPanel.tsx`): file, page count, page size (named paper where it
+  matches, "Mixed · N sizes" otherwise), whether the text is searchable (with
+  "Recognise text (OCR)" when some pages have none), the every-page layers —
+  page numbers and watermark, each with its state, Add/Edit (opens the Finish
+  dialog) and Remove (an undoable edit) — and the lossless-redaction export
+  setting. Deselecting (Escape, or a click on empty page) is the way back.
+  It used to be two tabs, Document (a list of actions) and Properties, because
+  swapping a list of *commands* out from under the user on every click lost
+  them. That reason went away when the commands moved to where they act: outputs
+  to Export, page work to the Pages sidebar, the rest to the ⋯ menu and the
+  palette. What swaps out now is a description, which is what Figma and every
+  design tool does with nothing selected. A stamp still counts as a selection:
+  it has no controls here, so the panel names it "Image" and says how it is
+  edited on the canvas. Both views carry "Hide panel" in their heading, which is
+  sticky so it stays reachable in a long panel. Every title is an `h2`, so
+  heading navigation finds the panel whatever it shows; a marquee of several
+  objects gets its own short panel ("2 objects selected"), not the document's.
+  "Lossless redacted pages" is an *app* setting (`pref.losslessRaster`, every
+  export on the device), so it lives with the other settings in the ⋯ menu at
+  every width and in the palette; the Inspector mirrors it under "Export setting ·
+  this device", labelled and described as such, because it changes what this
+  file exports. OCR from the panel reads only shown pages with no text of their
+  own (a second, recognised copy over real text doubles every word) and marks
+  each page it read (`PageData.ocrRead`), so the offer goes once nothing is left
+  — a page OCR *failed* on stays offered. The Text fact never says "scanned": a
+  blank or vector-only page has no text either. The document actions also live in the
+  ⋯ menu — on a phone the panel is a selection-driven sheet and the palette
+  needs a keyboard — read from `docActions` and `DOC_GROUPS`.
 - **Download is a split button; Export holds every output.** Actions that make
   a file and leave the document alone (Compress, Sign with certificate, Export
   as images, Export text, and Download all with several tabs) are
@@ -102,23 +112,9 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   for softening a shape the app already has and unsafe for anything that means
   something. The split is enforced by `shape.spec.ts` and is the reason the two
   look different in the source: the squircle pass is one `@supports` block of
-  pure enhancement, while the Inspector's joint — the concave fillets that tie
-  the selected tab to the panel, which is the only thing saying *which tab this
-  panel belongs to* — is drawn with a `radial-gradient` mask instead. Masking
-  the paint rather than the box costs nothing there because the fillets carry no
-  border and no shadow; on a surface with elevation it would clip the shadow at
-  the joint, which is the one thing the mask path can't do.
-  **The joint hangs off the tab button itself** (`::before` / `::after`), not off
-  a measured position, so there is no `ResizeObserver`, nothing to recompute on a
-  font-size change, and nothing to fall out of sync. If you ever move it to a
-  dock that floats free of its anchor, that stops being true and you inherit the
-  whole stale-dependency problem the `PageView` memo note (`rendering.md`) describes.
-  The tab strip is deliberately a shade *different* from the panel
-  (`--surface-container` against `--surface-container-low`) — the joint is
-  invisible if they match, and the fillets must stay the panel's colour.
-  This replaced the underline indicator; the old note about a filled pill
-  reading as a toggle still holds, which is why the selected tab is a *joined
-  tab* rather than a floating pill.
+  pure enhancement. Anything that needs a cut corner to say something has to be
+  masked (a `radial-gradient` mask renders everywhere), never `corner-shape`d.
+  (The Inspector's joined tab was the one such case; it went with the tabs.)
 - **`corner-shape` never touches the document.** Not `.page`, not
   `.page__canvas`, not `.page__overlay`, not the thumbnails. Every pixel inside a
   page is a claim about what `exporter.ts` will write, and a corner the exported
@@ -134,7 +130,7 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
 - **"This opens something" is declared on the data, not the call site.** An
   action that opens a dialog carries `opens: "dialog"` on `docActions`; a tool
   that opens a toolbar or dialog carries `opens` on `TOOLS`. Three surfaces
-  render the same doc actions — the Inspector, the ⋯ menu, the command palette —
+  render the same doc actions — the ⋯ menu, the Export menu, the command palette —
   and deciding per call site is exactly how they drifted apart last time.
   The visible mark is decorative in both cases; the fact reaches assistive tech
   through `aria-haspopup="dialog"` or, for the drawbar, `aria-expanded` +

@@ -18,6 +18,7 @@ import {
 import { PageView, type AnnotSpec } from "./components/PageView";
 import { translateAnnotation } from "./components/AnnotationLayer";
 import { PropertiesPanel } from "./components/PropertiesPanel";
+import { DocumentPanel } from "./components/DocumentPanel";
 import { DrawToolbar } from "./components/DrawToolbar";
 import { SelectionBar } from "./components/SelectionBar";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -105,7 +106,7 @@ const pageItems = <T,>(map: Map<number, T[]>, pageIndex: number): T[] =>
   map.get(pageIndex) ?? NO_ITEMS;
 
 /** A document/finishing action rendered identically across the overflow menu,
- * the Inspector's document panel, and the command palette — one definition, so
+ * the Export menu, and the command palette — one definition, so
  * the three surfaces can't drift apart. */
 interface DocAction {
   id: string;
@@ -173,13 +174,6 @@ function menuKeys(
 }
 
 const EXPORT_GROUP: { key: DocAction["group"]; label: string } = { key: "export", label: "Export" };
-
-/** The Inspector's two jobs, each with its own tab. */
-type PanelTab = "document" | "properties";
-const PANEL_TABS: { key: PanelTab; label: string; icon: string }[] = [
-  { key: "document", label: "Document", icon: "picture_as_pdf" },
-  { key: "properties", label: "Properties", icon: "sliders" },
-];
 
 const TOOLS: { key: NavKey; label: string; icon: string; opens?: "toolbar" | "dialog" }[] = [
   { key: "select", label: "Select", icon: "select_tool" },
@@ -424,6 +418,17 @@ export const DocumentEditor = memo(function DocumentEditor({
   const plan = useMemo(() => (pdf ? resolvePlan(planned, pdf.pages.length) : []), [pdf, planned]);
   const shown = useMemo(() => (pdf ? shownPages(pdf.pages, plan) : []), [pdf, plan]);
   const shownBySource = useMemo(() => new Map(shown.map((p) => [p.pageIndex, p])), [shown]);
+  // What the Inspector says about the document with nothing selected.
+  const pageFacts = useMemo(
+    () =>
+      shown.map((p) => {
+        const { width, height } = shownSize(p);
+        let ocr = 0;
+        for (const f of p.fragments) if (f.id.startsWith("ocr:")) ocr++;
+        return { width, height, text: p.fragments.length - ocr, ocr, ocrRead: !!p.ocrRead };
+      }),
+    [shown],
+  );
   /** Apply a page plan (reorder, turn, delete) as one undoable edit. Stored
    * only when it changes something, so an arrangement put back by hand reads as
    * the document as loaded. The sidebar and the grid both come through here. */
@@ -482,7 +487,6 @@ export const DocumentEditor = memo(function DocumentEditor({
   // The zoom pill's page chip is a number field (go to page).
   const [pageJumpOpen, setPageJumpOpen] = useState(false);
   const [multi, setMulti] = useState<string[]>([]);
-  const [panelTab, setPanelTab] = useState<PanelTab>("document");
   const [compressOpen, setCompressOpen] = useState(false);
   const [signCertOpen, setSignCertOpen] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -512,47 +516,6 @@ export const DocumentEditor = memo(function DocumentEditor({
     theme.mode === "light" ? "Light" : theme.mode === "dark" ? "Dark" : "System";
   const themeLabel = `${themeName} theme`;
 
-  // Selecting something moves the panel to Properties — that is what you asked
-  // for by selecting. Deselecting does *not* move it back: the panel would then
-  // flip on every click into empty space, and Properties has a real empty state
-  // for exactly this. One tab switch per intent, none per accident.
-  //
-  // This covers the paths that don't go through `onSelect` above — adding a text
-  // box, a redaction or a link all select the new object so it can be styled
-  // straight away, and Find selects its match. `onSelect` handles the one case
-  // this can't see: re-clicking what is already selected.
-  const selectedKey = panelSelection ? `${panelSelection.kind}-${panelSelection.id}` : null;
-  useEffect(() => {
-    if (selectedKey) setPanelTab("properties");
-  }, [selectedKey]);
-
-  /** Roving focus across the panel tabs (WAI-ARIA tabs pattern).
-   *
-   * "Roving" is the whole point: the unselected tabs are `tabIndex={-1}`, so
-   * moving the selection without moving focus leaves the keyboard on a button
-   * that is no longer in the tab order — the next Tab jumps somewhere
-   * unrelated, and Space/Enter act on a tab that isn't the selected one. The
-   * focus call is what makes this the pattern rather than a lookalike. */
-  const onPanelTabKeyDown = useCallback((e: ReactKeyboardEvent<HTMLElement>) => {
-    const delta = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    if (!delta && e.key !== "Home" && e.key !== "End") return;
-    e.preventDefault();
-    const list = e.currentTarget.closest("[role=tablist]") ?? document;
-    const i = PANEL_TABS.findIndex((t) => t.key === panelTab);
-    const next =
-      e.key === "Home"
-        ? 0
-        : e.key === "End"
-          ? PANEL_TABS.length - 1
-          : (i + delta + PANEL_TABS.length) % PANEL_TABS.length;
-    const key = PANEL_TABS[next].key;
-    setPanelTab(key);
-    // Now, not after a frame: the next keystroke has to land on the tab this one
-    // moved to. Focusing it while React has yet to flip `tabIndex` to 0 is fine
-    // — `focus()` doesn't consult the tab order, and the attribute lands in the
-    // same commit as `aria-selected`.
-    list.querySelector<HTMLElement>(`#panel-tab-${key}`)?.focus();
-  }, [panelTab]);
 
   // Per-page buckets. Each page keeps the same bucket object until something on
   // *that* page changes, so typing on one page re-renders only that page.
@@ -984,10 +947,22 @@ export const DocumentEditor = memo(function DocumentEditor({
     setStatus("working");
     setMessage("Reading text (OCR)…");
     try {
+      // Only pages with no text of their own: OCR on a page that already has
+      // a text layer lays a second copy of every word over the first.
+      // And only pages still in the document: one deleted in the page plan
+      // isn't shown, so reading it is work (and a progress count) for nothing.
+      const unread = pdf.pages.filter(
+        (pg) => shownBySource.has(pg.pageIndex) && !pg.fragments.some((f) => !f.id.startsWith("ocr:")),
+      );
+      if (unread.length === 0) {
+        setStatus("ready");
+        setMessage("Every page already has text — nothing to recognise.");
+        return;
+      }
       const { ocrPages } = await import("./pdf/ocr");
       const { perPage, pagesFailed } = await ocrPages(
         pdf.bytes,
-        pdf.pages,
+        unread,
         (p, t) =>
           setMessage(p === 0 ? "Starting OCR engine…" : `Reading text… page ${p}/${t}`),
         ctrl.signal,
@@ -996,12 +971,16 @@ export const DocumentEditor = memo(function DocumentEditor({
         { cacheEngine: autosaveOn },
       );
       let added = 0;
+      // Pages OCR actually read (with or without words). One that failed isn't
+      // marked, so the Inspector goes on offering it.
+      const read = new Set(perPage.keys());
       const pages = pdf.pages.map((pg) => {
+        if (!read.has(pg.pageIndex)) return pg;
         const extra = perPage.get(pg.pageIndex) ?? [];
         added += extra.length;
         // Replace any prior OCR layer so re-running doesn't duplicate words.
         const kept = pg.fragments.filter((f) => !f.id.startsWith("ocr:"));
-        return { ...pg, fragments: [...kept, ...extra] };
+        return { ...pg, fragments: [...kept, ...extra], ocrRead: true };
       });
       // Into the document that was read, even if another is in front by now:
       // the pages are that file's, not whichever tab finished first.
@@ -1042,7 +1021,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     // `autosaveOn` is read for `cacheEngine`, so it has to be a dependency —
     // without it the callback keeps whatever value was current when `pdf` last
     // changed, and OCR goes on caching the engine after the switch is off.
-  }, [pdf, autosaveOn]);
+  }, [pdf, autosaveOn, shownBySource]);
 
   const exportImages = useCallback(async () => {
     if (!pdf) return;
@@ -1078,7 +1057,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   }, [pdf, bakeCurrent, fileName, downloadBytes]);
 
   // Single source of truth for the document/finishing actions. The overflow
-  // menu, the document panel, and the command palette all render from this —
+  // menu, the Export menu and the command palette all render from this —
   // add an action once and every surface picks it up.
   const docActions = useMemo<DocAction[]>(
     () => [
@@ -1359,18 +1338,6 @@ export const DocumentEditor = memo(function DocumentEditor({
     setEditingId(null);
     setSheetOpen(false);
     setSelection(sel);
-    // Clicking a thing on the page asks to see that thing — including when it is
-    // already the selection. The effect below can't cover that case, because the
-    // selection didn't change; without this, re-clicking the selected element
-    // while reading the Document tab did nothing at all. `onSelect(null)`
-    // (clicking empty space) deliberately doesn't move the panel.
-    //
-    // A stamp is the exception, and the effect below already knows it: stamps
-    // are edited on the canvas and have no panel controls, so moving to
-    // Properties for one replaced every document action with an empty state —
-    // clicking your own signature made Compress/Watermark/OCR vanish and showed
-    // nothing in their place.
-    if (sel && sel.kind !== "stamp") setPanelTab("properties");
   }, []);
 
   /** Enter text-edit mode for the current selection (mobile): make it editable,
@@ -2345,11 +2312,9 @@ export const DocumentEditor = memo(function DocumentEditor({
               <>
                 <div className="menu__scrim" onClick={() => setMenuOpen(false)} />
                 <div className="menu__list" role="menu" ref={menuListRef} onKeyDown={onMenuKeyDown}>
-                  {/* Same groups, same order, same names as the Inspector's
-                      Document tab. They were only separated by hairlines here,
-                      so the menu read as one 13-item wall while the panel showed
-                      three short lists — the same commands, twice, filed
-                      differently. */}
+                  {/* Labelled groups, in the order the command palette files
+                      them. They were only separated by hairlines here, so the
+                      menu read as one 13-item wall. */}
                   {(compact ? [EXPORT_GROUP, ...DOC_GROUPS] : DOC_GROUPS).map((grp, gi) => (
                     <Fragment key={grp.key}>
                       {gi > 0 && <div className="menu__divider" />}
@@ -2425,6 +2390,10 @@ export const DocumentEditor = memo(function DocumentEditor({
                     <Icon name="save_local" size={18} /> Save session on this device
                     {autosaveOn && <Icon name="check" size={16} className="menu__check" />}
                   </button>
+                  {/* An app setting, like the three above: it applies to every
+                      document exported on this device, so it lives here on
+                      every screen size. The Inspector repeats it beside the
+                      document facts, labelled as a device setting. */}
                   <button
                     className="menu__item"
                     onClick={() => { setMenuOpen(false); setLosslessRaster((v) => !v); }}
@@ -2459,6 +2428,12 @@ export const DocumentEditor = memo(function DocumentEditor({
     </header>
   );
 
+  const hidePanel = (
+    <button className="icon-btn icon-btn--sm" onClick={() => setInspectorOpen(false)} aria-label="Hide panel" data-tip="Hide panel">
+      <Icon name="chevron_right" size={18} />
+    </button>
+  );
+
   const propertiesPanel = (
     <PropertiesPanel
       selection={panelSelection}
@@ -2476,42 +2451,43 @@ export const DocumentEditor = memo(function DocumentEditor({
       onDelete={onDelete}
       onReset={onResetStyle}
       onClose={() => (compact ? setSheetOpen(false) : setSelection(null))}
+      headerAction={compact ? undefined : hidePanel}
     />
   );
 
-  // Document-wide actions. No heading of its own — the panel's "Document" tab
-  // names it, and a tab plus an identical title underneath is the same word
-  // twice.
-  const documentPanel = (
+  // Several objects selected (a marquee): they share no one set of
+  // properties, so the panel says what is selected and where the actions are,
+  // rather than falling back to the document as if nothing were.
+  const multiPanel = (
     <div className="props">
-      <div className="doclist">
-        {DOC_GROUPS.map((grp) => (
-          <Fragment key={grp.key}>
-            <span className="doclist__label label-medium">{grp.label}</span>
-            {docActions
-              .filter((a) => a.group === grp.key)
-              .map((a) => (
-                <button
-                  key={a.id}
-                  className="doclist__item"
-                  aria-haspopup={a.opens ? "dialog" : undefined}
-                  onClick={a.run}
-                >
-                  <Icon name={a.icon} size={18} />
-                  <span className="doclist__itemlabel">{a.label}</span>
-                  {a.opens && <Icon name="opens_dialog" size={16} className="opens-mark" />}
-                </button>
-              ))}
-          </Fragment>
-        ))}
+      <div className="props__header">
+        <h2 className="props__title title-medium">{multi.length} objects selected</h2>
+        {hidePanel}
       </div>
-      {/* The tab's tail was ~300px of empty surface on any normal window. The
-          product's one real claim belongs somewhere calm and permanent, and this
-          is the only place in the editor that had room for it. */}
-      <p className="doclist__note body-small">
-        Every action here runs in this browser. Your file is never uploaded.
+      <p className="props__empty body-medium">
+        Move them together by dragging, or use the bar above the page to arrange, duplicate or delete them. Select
+        one to change its properties.
       </p>
     </div>
+  );
+
+  // Nothing selected: the document's own properties. See DocumentPanel.
+  const documentPanel = (
+    <DocumentPanel
+      fileName={fileName}
+      pages={pageFacts}
+      pageNumbers={pageNumbers}
+      watermark={watermark}
+      lossless={losslessRaster}
+      busy={busy}
+      onEditNumbers={() => setFinishTab("numbers")}
+      onEditWatermark={() => setFinishTab("watermark")}
+      onClearNumbers={clearNumbers}
+      onClearWatermark={clearWatermark}
+      onOcr={runOcr}
+      onLossless={setLosslessRaster}
+      headerAction={hidePanel}
+    />
   );
 
 
@@ -2795,55 +2771,18 @@ export const DocumentEditor = memo(function DocumentEditor({
         </div>
 
         {/* Adaptive Inspector. Desktop: a persistent right column that
-            collapses to an edge tab; never empty (properties when something is
-            selected, document/finishing actions otherwise). Mobile: keeps the
+            collapses to an edge tab; never empty (the selection's properties,
+            or the document's own when nothing is selected). Mobile: keeps the
             on-demand bottom sheet driven by the contextual SelectionBar. */}
         {isWide ? (
           inspectorOpen ? (
-            <aside className="inspector">
-              {/* Two tabs, not one surface wearing two hats. This panel used to
-                  swap between a list of document actions and the properties of
-                  the selection with nothing to say it had — so the controls you
-                  came for vanished the moment you clicked the page, and the ones
-                  that replaced them looked like they had always been there.
-                  Naming both states makes the switch legible and, more to the
-                  point, reversible: you can read a fragment's properties and
-                  still get back to Compress without deselecting. */}
-              <div className="inspector__tabs">
-                <div className="inspector__tablist" role="tablist" aria-label="Panel">
-                  {PANEL_TABS.map((t) => (
-                    <button
-                      key={t.key}
-                      id={`panel-tab-${t.key}`}
-                      role="tab"
-                      className={`inspector__tabbtn${panelTab === t.key ? " inspector__tabbtn--on" : ""}`}
-                      aria-selected={panelTab === t.key}
-                      aria-controls="panel-body"
-                      tabIndex={panelTab === t.key ? 0 : -1}
-                      onClick={() => setPanelTab(t.key)}
-                      onKeyDown={onPanelTabKeyDown}
-                    >
-                      <Icon name={t.icon} size={16} />
-                      <span className="label-large">{t.label}</span>
-                    </button>
-                  ))}
-                </div>
-                <button
-                  className="icon-btn icon-btn--sm"
-                  onClick={() => setInspectorOpen(false)}
-                  aria-label="Hide panel"
-                  data-tip="Hide panel"
-                >
-                  <Icon name="chevron_right" size={18} />
-                </button>
-              </div>
-              <div
-                id="panel-body"
-                role="tabpanel"
-                aria-labelledby={`panel-tab-${panelTab}`}
-              >
-                {panelTab === "document" ? documentPanel : propertiesPanel}
-              </div>
+            <aside className="inspector" aria-label={selection || multi.length >= 2 ? "Properties" : "Document"}>
+              {/* One job: describe what is selected, or the document when
+                  nothing is. It used to be two tabs (document actions /
+                  properties); the actions now live where they act — Export,
+                  the Pages sidebar, the ⋯ menu — so there is nothing left to
+                  switch between, and deselecting is the way back. */}
+              {selection ? propertiesPanel : multi.length >= 2 ? multiPanel : documentPanel}
             </aside>
           ) : (
             <button
@@ -2967,6 +2906,13 @@ export const DocumentEditor = memo(function DocumentEditor({
               { id: "redo", label: "Redo", hint: "Ctrl+Shift+Z", icon: "redo", disabled: !docHistory.canRedo, run: redo },
               // Document/finishing actions come from the shared source of truth.
               ...docActions.map((a) => ({ id: a.id, label: a.label, icon: a.icon, keywords: a.keywords, opens: a.opens, run: a.run })),
+              {
+                id: "lossless",
+                label: losslessRaster ? "Turn off lossless redacted pages" : "Turn on lossless redacted pages",
+                icon: "lossless",
+                keywords: "redaction quality bit-exact png export setting",
+                run: () => setLosslessRaster((v) => !v),
+              },
               { id: "dim", label: dimPages ? "Undim pages" : "Dim pages", icon: "contrast", run: () => setDimPages((v) => !v) },
               { id: "theme", label: `Theme: ${themeLabel}`, icon: themeIcon, keywords: "dark light system", run: theme.cycle },
               { id: "download", label: "Download PDF", hint: "", icon: "download", run: download },

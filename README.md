@@ -111,7 +111,8 @@ Everything runs locally with the [File API]; the PDF never leaves your machine.
      survives, redacted content is genuinely gone — there is no hidden text
      layer to recover. The raster ships as whichever of JPEG and PNG comes out
      smaller, which on a scan is several times less than lossless alone;
-     *Lossless redacted pages* in the ⋯ menu forces PNG for anyone who needs
+     *Lossless redacted pages* (an app setting: the ⋯ menu, or the Inspector
+     with nothing selected) forces PNG for anyone who needs
      the image bit-exact.
 
 ## Getting started

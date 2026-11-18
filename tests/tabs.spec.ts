@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFileSync } from "node:fs";
 import { fixtures } from "./fixtures";
-import { open, watch, seedStore, docRecord, EMPTY } from "./helpers";
+import { open, watch, seedStore, docRecord, EMPTY, openOrganise } from "./helpers";
 
 /**
  * Several documents open at once, one tab each.
@@ -178,7 +178,7 @@ test.describe("document tabs", () => {
     // pages into the dropped one — under its name.
     const f = await fixtures();
     await open(page, f.sample);
-    await page.getByRole("button", { name: /Organise pages/ }).first().click();
+    await openOrganise(page);
     await page.waitForSelector(".organize");
     const bytes = [...readFileSync(f.typeset)];
     await page.evaluate((bytes) => {
@@ -194,7 +194,7 @@ test.describe("document tabs", () => {
   test("an organised document is still unsaved work", async ({ page }) => {
     const f = await fixtures();
     await open(page, f.sample);
-    await page.getByRole("button", { name: /Organise pages/ }).first().click();
+    await openOrganise(page);
     await page.locator('.organize [aria-label="Rotate"]').first().click();
     await page.locator(".organize .btn--filled").click();
     await expect(page.locator(".organize")).toHaveCount(0);

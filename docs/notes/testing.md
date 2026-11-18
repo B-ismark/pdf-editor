@@ -68,7 +68,7 @@ type-checking can't see, and each exists because it broke once:
 - `shell.spec.ts` — the app bar fits its own controls at 360/390/430px with the
   primary action at full size and, on a pointer, sized to the bar it sits in with
   the ⋯ menu carrying a visible container, the overflow menu ends inside the
-  window and every row is one line, the Inspector names both of its jobs and keeps them reachable,
+  window and every row is one line, the Inspector describes the document with nothing selected (facts, page numbers/watermark set and removed from it, OCR offered on a scan and only for pages without text, gone once read, focus kept after Remove and after OCR, sizes that differ only in orientation counted as one, lossless as an app setting in ⋯/palette mirrored in the panel, a marquee not shown as the document) and the selection otherwise, with "Hide panel" in both,
   a tooltip on an edge control stays on screen, and counts read as English; the
   Export split button's caret opens every output (and only it lists them; Download
   all joins with several tabs), keyboard-operable, and on a phone Export heads
@@ -82,14 +82,12 @@ type-checking can't see, and each exists because it broke once:
   angle the overlay drew, a mark survives its page being rasterised for
   redaction, and the tool's gesture hint is un-occluded while a ghost of the mark
   follows the cursor;
-- `affordance.spec.ts` — the Inspector, the ⋯ menu and the command palette mark
+- `affordance.spec.ts` — the ⋯ menu, the Export menu and the command palette mark
   the *same* set of actions as opening something, an action that acts
   immediately carries no mark, and a tool that opens something declares which
   kind (`aria-expanded` for a disclosure, `aria-haspopup` for a dialog);
-- `shape.spec.ts` — the selected tab's joint is masked rather than
-  `corner-shape`d (so it renders off Chromium), the fillets are painted in the
-  panel's colour and not the strip's, shape follows the selection, and no
-  chrome geometry reaches `.page` / `.page__canvas` / the thumbnails;
+- `shape.spec.ts` — no chrome geometry (`corner-shape`) reaches `.page` /
+  `.page__canvas` / the thumbnails;
 - `fragment.spec.ts` — an edit's overlay text (and a text box's) starts at
   exactly the x the exporter draws it at, with no horizontal padding anywhere in
   the chain, and a selected fragment is marked by rules above and below rather

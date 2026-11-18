@@ -1,6 +1,10 @@
 import { test, expect, type Page } from "@playwright/test";
+import { readFileSync, writeFileSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { PDFDocument, StandardFonts } from "pdf-lib";
 import { fixtures } from "./fixtures";
-import { open, watch, expectClean, pickTool, dragOnPage } from "./helpers";
+import { open, watch, expectClean, pickTool, pickSubTool, dragOnPage, openOrganise } from "./helpers";
 
 /**
  * The app shell — app bar, page rail, Inspector, overflow menu.
@@ -11,6 +15,31 @@ import { open, watch, expectClean, pickTool, dragOnPage } from "./helpers";
  * 14px wide, a menu whose last group was painted past the bottom of the window, a
  * panel that swapped its contents without saying so.
  */
+
+/** True when `npm run setup-ocr` has been run, so OCR can actually execute. */
+async function ocrReady(page: Page): Promise<boolean> {
+  await page.goto("/");
+  return page.evaluate(async () => {
+    try {
+      const res = await fetch("./tessdata/eng.traineddata.gz", { method: "HEAD" });
+      return res.ok && !(res.headers.get("content-type") ?? "").includes("text/html");
+    } catch {
+      return false;
+    }
+  });
+}
+
+/** The first page of each file, in order, as one new PDF on disk. */
+async function merge(paths: string[]): Promise<string> {
+  const out = await PDFDocument.create();
+  for (const p of paths) {
+    const src = await PDFDocument.load(readFileSync(p));
+    out.addPage((await out.copyPages(src, [0]))[0]);
+  }
+  const path = join(mkdtempSync(join(tmpdir(), "inspector-")), "merged.pdf");
+  writeFileSync(path, await out.save());
+  return path;
+}
 
 /** Widths and content-widths of the app bar's children. */
 function barMetrics(page: Page) {
@@ -151,75 +180,294 @@ const PNG_SQUARE = Buffer.from(
 );
 
 test.describe("inspector", () => {
-  test("names both of its jobs, and selecting something does not lose the other", async ({
-    page,
-  }) => {
+  test("with nothing selected it describes the document; selecting swaps in the selection", async ({ page }) => {
     const w = watch(page);
     await page.setViewportSize({ width: 1280, height: 860 });
     await open(page, (await fixtures()).sample);
+    const panel = page.locator("aside.inspector");
 
-    const tabs = page.locator(".inspector__tabbtn");
-    await expect(tabs).toHaveCount(2);
-    await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
-    await expect(page.locator(".doclist__item").first()).toBeVisible();
+    // One job, no tabs to choose between.
+    await expect(page.getByRole("tab")).toHaveCount(0);
+    await expect(panel).toHaveAccessibleName("Document");
+    await expect(panel.locator(".props__title")).toHaveText("Document");
+    const fact = (name: string) => panel.locator(".docpanel__fact", { has: page.locator(`dt:text-is("${name}")`) }).locator("dd");
+    await expect(fact("File")).toHaveText("sample.pdf");
+    await expect(fact("Pages")).toHaveText("12");
+    await expect(fact("Page size")).toHaveText("A4 · 210 × 297 mm");
+    await expect(fact("Text")).toContainText("Searchable on every page");
+    // Commands live where they act, not here.
+    await expect(panel.getByRole("button", { name: /Compress|Organise|Copy all text/ })).toHaveCount(0);
 
-    // Clicking the page used to replace the document actions with the selection's
-    // properties, with nothing anywhere to say the surface had changed identity —
-    // and no way back without deselecting.
     await page.locator(".fragment").first().click();
-    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
-    await expect(page.locator(".props__section").first()).toBeVisible();
+    await expect(panel).toHaveAccessibleName("Properties");
+    await expect(panel.locator(".props__title")).toHaveText("Text");
+    await expect(panel.locator(".props__section").first()).toBeVisible();
 
-    await tabs.nth(0).click();
-    await expect(page.locator(".doclist__item").first()).toBeVisible();
-    // Still selected — switching tabs reads the panel, it doesn't edit the page.
-    await expect(page.locator(".fragment__cover--sel")).toHaveCount(1);
-
-    // The Properties empty state shipped unreachable: with nothing selected the
-    // panel showed the document actions instead, so the one text explaining how
-    // to get properties only appeared once you no longer needed it.
-    await tabs.nth(1).click();
+    // Deselecting is the way back.
+    await page.locator(".fragment").first().blur();
     await page.keyboard.press("Escape");
-    await expect(page.locator(".props__empty")).toContainText(/Nothing selected/);
-
+    await expect(panel.locator(".props__title")).toHaveText("Document");
     expectClean(w);
   });
 
-  test("tabs are keyboard-operable, and focus travels with the selection", async ({ page }) => {
+  test("page numbers and watermark are set, shown and removed from here, and undo", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await open(page, (await fixtures()).sample);
-    const tabs = page.locator(".inspector__tabbtn");
-    await tabs.nth(0).focus();
-    await page.keyboard.press("ArrowRight");
-    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
-    await page.keyboard.press("ArrowRight"); // wraps
-    await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
-    await page.keyboard.press("End");
-    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
+    const panel = page.locator("aside.inspector");
+    const layer = (name: string) => panel.locator(".docpanel__layer", { hasText: name });
+    await expect(layer("Page numbers")).toContainText("Off");
 
-    // The unselected tab is `tabIndex={-1}`, so a selection that moves without
-    // focus leaves the keyboard parked on a control that is no longer in the tab
-    // order: the next Tab jumps somewhere unrelated and Space acts on the wrong
-    // tab. "Roving" is the focus moving, not just `aria-selected`.
-    const focused = await page.evaluate(() => document.activeElement?.id ?? "");
-    expect(focused, "focus stayed on the tab that is no longer selected").toBe(
-      "panel-tab-properties",
-    );
-    const tabIndex = await page.evaluate(
-      () => (document.activeElement as HTMLElement | null)?.tabIndex,
-    );
-    expect(tabIndex, "focus is on a control outside the tab order").toBe(0);
+    await panel.getByRole("button", { name: "Add page numbers" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.locator(".btn--filled").click();
+    await expect(dialog).toHaveCount(0);
+    await expect(layer("Page numbers")).toContainText("Bottom centre · from 1");
+    await expect(panel.getByRole("button", { name: "Edit page numbers" })).toBeVisible();
+
+    await panel.getByRole("button", { name: "Remove page numbers" }).click();
+    await expect(layer("Page numbers")).toContainText("Off");
+    // The button that had focus is gone; focus lands on the one replacing it,
+    // not on the page body.
+    await expect(panel.getByRole("button", { name: "Add page numbers" })).toBeFocused();
+    await page.keyboard.press("Control+z");
+    await expect(layer("Page numbers")).toContainText("Bottom centre");
+
+    // The watermark opens the same dialog on its own tab.
+    await panel.getByRole("button", { name: "Add watermark" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(layer("Watermark")).toContainText("Off");
   });
 
-  test("clicking an image keeps the document actions, and says what it is", async ({ page }) => {
+  test("a scanned document offers to recognise its text", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).scanned);
+    const panel = page.locator("aside.inspector");
+    await expect(panel.locator(".docpanel__fact", { hasText: "Text" })).toContainText("No text layer");
+    // Never "scanned": a blank or vector-only page has no text either.
+    await expect(panel.locator(".docpanel__fact", { hasText: "Text" })).not.toContainText(/scan/i);
+    await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toBeVisible();
+  });
+
+  test("lossless is an app setting: one switch, in the ⋯ menu on every screen and mirrored in the Inspector", async ({ browser }) => {
+    const desk = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+    await open(desk, (await fixtures()).sample);
+    const box = desk.getByRole("checkbox", { name: /Lossless redacted pages/ });
+    await expect(box).not.toBeChecked();
+    // Says what it is: a device-wide setting, not this file's.
+    await expect(box).toHaveAccessibleDescription(/every document you export on this device/);
+    await expect(desk.locator("#docpanel-device")).toContainText("this device");
+    await box.check();
+    // Reachable on a desktop from the ⋯ menu too (the Inspector can be hidden),
+    // and it is the same switch.
+    await desk.getByRole("button", { name: "More actions" }).click();
+    const item = desk.getByRole("menuitemcheckbox", { name: /Lossless/ });
+    await expect(item).toHaveAttribute("aria-checked", "true");
+    await item.click();
+    await expect(box).not.toBeChecked();
+    // And from the command palette.
+    await desk.keyboard.press("Control+k");
+    await desk.keyboard.type("lossless");
+    await desk.getByRole("option", { name: /Turn on lossless redacted pages/ }).click();
+    await expect(box).toBeChecked();
+    await desk.close();
+
+    const ctx = await browser.newContext({ viewport: { width: 360, height: 780 }, isMobile: true, hasTouch: true });
+    const phone = await ctx.newPage();
+    await open(phone, (await fixtures()).sample);
+    await phone.getByRole("button", { name: "More actions" }).click();
+    await expect(phone.getByRole("menuitemcheckbox", { name: /Lossless/ })).toHaveCount(1);
+    await ctx.close();
+  });
+
+  test("pages that differ only in orientation are one size, and a one-page file reads in the singular", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    doc.addPage([595.28, 841.89]).drawText("Portrait page", { x: 72, y: 700, size: 14, font });
+    doc.addPage([841.89, 595.28]).drawText("Landscape page", { x: 72, y: 500, size: 14, font });
+    const dir = mkdtempSync(join(tmpdir(), "inspector-"));
+    const turned = join(dir, "turned.pdf");
+    writeFileSync(turned, await doc.save());
+    await open(page, turned);
+    const panel = page.locator("aside.inspector");
+    const fact = (name: string) => panel.locator(".docpanel__fact", { has: page.locator(`dt:text-is("${name}")`) }).locator("dd");
+    await expect(fact("Page size")).toHaveText("A4, portrait and landscape · 210 × 297 mm");
+
+    // Pages a point or two apart are one size, and all-portrait says nothing
+    // about landscape — named paper or not.
+    const near = async (sizes: [number, number][]) => {
+      const d = await PDFDocument.create();
+      for (const sz of sizes) d.addPage(sz);
+      const path = join(dir, `near-${sizes.map((x) => x.join("x")).join("-")}.pdf`);
+      writeFileSync(path, await d.save());
+      await page.setInputFiles('input[accept="application/pdf,.pdf"]', path);
+      await expect(fact("Pages")).toHaveText(String(sizes.length));
+    };
+    await near([[595, 842], [597.6, 842]]);
+    await expect(fact("Page size")).toHaveText("A4 · 210 × 297 mm");
+    await near([[568.06, 800], [568.63, 800], [569, 801]]);
+    await expect(fact("Page size")).toHaveText("200 × 282 mm");
+
+    await page.setInputFiles('input[accept="application/pdf,.pdf"]', (await fixtures()).typeset);
+    await expect(fact("Pages")).toHaveText("1");
+    await expect(fact("Text")).toHaveText("Searchable");
+  });
+
+  test("the Document heading is a heading, and the file name has a tooltip rather than a native title", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    const panel = page.locator("aside.inspector");
+    await expect(panel.getByRole("heading", { level: 2, name: "Document" })).toBeVisible();
+    const file = panel.locator(".docpanel__file");
+    await expect(file).toHaveAttribute("data-tip", "sample.pdf");
+    await expect(file).not.toHaveAttribute("title", /./);
+    // The privacy note lines up with every other row.
+    const [note, facts] = await Promise.all([
+      panel.locator(".docpanel__note").boundingBox(),
+      panel.locator(".docpanel__facts").boundingBox(),
+    ]);
+    expect(Math.abs(note!.x - facts!.x)).toBeLessThan(1);
+    expect(Math.abs(note!.width - facts!.width)).toBeLessThan(1);
+  });
+
+  test("focus moving up a long panel stops below the sticky heading", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 500 });
+    await open(page, (await fixtures()).sample);
+    await pickTool(page, "Add text");
+    const box = (await page.locator(".page").first().boundingBox())!;
+    await page.mouse.click(box.x + 150, box.y + 200);
+    await expect(page.locator(".props__title")).toHaveText("Text box");
+    const inspector = page.locator("aside.inspector");
+    const controls = inspector.locator("button:visible, input:visible, select:visible");
+    // Start at the bottom, then walk focus up through every control.
+    await controls.last().focus();
+    const n = await controls.count();
+    for (let i = 0; i < n - 1; i++) {
+      await page.keyboard.press("Shift+Tab");
+      const inside = await inspector.evaluate((el) => el.contains(document.activeElement));
+      if (!inside) break;
+      const [header, focused] = await Promise.all([
+        inspector.locator(".props__header").boundingBox(),
+        page.evaluate(() => {
+          const r = document.activeElement!.getBoundingClientRect();
+          return { top: r.top, sticky: !!document.activeElement!.closest(".props__header") };
+        }),
+      ]);
+      if (focused.sticky) continue;
+      expect(focused.top).toBeGreaterThanOrEqual(header!.y + header!.height - 0.5);
+    }
+  });
+
+  test("OCR reads only shown pages without text, keeps focus, and stops being offered once it has", async ({ page }) => {
+    test.slow();
+    await page.setViewportSize({ width: 1280, height: 860 });
+    test.skip(!(await ocrReady(page)), "OCR assets not installed (npm run setup-ocr)");
+    const f = await fixtures();
+    // A scan, a page with its own text, and a second scan.
+    const mixed = await merge([f.scanned, f.typeset, f.scanned]);
+    await open(page, mixed);
+    const panel = page.locator("aside.inspector");
+    const textPage = page.locator(".page").nth(1);
+    const before = await textPage.locator(".fragment").count();
+    expect(before).toBeGreaterThan(0);
+
+    // The second scan is deleted: OCR has no business reading it.
+    await openOrganise(page);
+    const org = page.locator(".organize");
+    await org.locator(".pcard").nth(2).locator('[aria-label="Delete page"]').click();
+    await org.locator(".btn--filled").click();
+    await expect(page.locator(".page")).toHaveCount(2);
+
+    // From the keyboard, so focus is what's being checked.
+    await panel.getByRole("button", { name: "Recognise text (OCR)" }).focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".snackbar__msg")).toContainText(/OCR added \d+ words/, { timeout: 180_000 });
+    // Page 2 keeps its own text and gains no second, recognised copy of it.
+    await expect(textPage.locator(".fragment")).toHaveCount(before);
+    await expect(textPage.locator('.fragment[data-id^="ocr:"]')).toHaveCount(0);
+    // Nothing left to read: the offer goes, and focus goes to the panel's
+    // heading rather than falling to the page body.
+    await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toHaveCount(0);
+    await expect(panel.getByRole("heading", { name: "Document" })).toBeFocused();
+
+    // The deleted page comes back unread, so the offer comes back with it.
+    await page.keyboard.press("Control+z");
+    await expect(page.locator(".page")).toHaveCount(3);
+    await expect(page.locator(".page").nth(2).locator('.fragment[data-id^="ocr:"]')).toHaveCount(0);
+    await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toBeVisible();
+  });
+
+  test("a page OCR couldn't read stays offered; a page OCR found nothing on says so", async ({ page }) => {
+    test.slow();
+    await page.setViewportSize({ width: 1280, height: 860 });
+    test.skip(!(await ocrReady(page)), "OCR assets not installed (npm run setup-ocr)");
+    // The engine is handed an unreadable image for the second page it reads.
+    await page.addInitScript(() => {
+      const post = Worker.prototype.postMessage;
+      let n = 0;
+      Worker.prototype.postMessage = function (this: Worker, msg: unknown, ...rest: unknown[]) {
+        const m = msg as { action?: string; payload?: Record<string, unknown> } | null;
+        if (m && m.action === "recognize" && ++n === 2) {
+          msg = { ...m, payload: { ...m.payload, image: "data:image/png;base64,AAAA" } };
+        }
+        return (post as (...a: unknown[]) => void).call(this, msg, ...rest);
+      } as typeof Worker.prototype.postMessage;
+    });
+    const f = await fixtures();
+    await open(page, await merge([f.scanned, f.scanned]));
+    const panel = page.locator("aside.inspector");
+    const fact = panel.locator(".docpanel__fact", { has: page.locator('dt:text-is("Text")') });
+    await panel.getByRole("button", { name: "Recognise text (OCR)" }).click();
+    await expect(page.locator(".snackbar__msg")).toContainText("couldn't be read", { timeout: 180_000 });
+    await expect(fact).toContainText("Searchable on 1 of 2 pages");
+    await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toBeVisible();
+
+    // A blank page: OCR runs, finds nothing, and the panel says so — not
+    // "no text layer", as if OCR were still worth a try.
+    const blank = await PDFDocument.create();
+    blank.addPage([595.28, 841.89]);
+    const path = join(mkdtempSync(join(tmpdir(), "inspector-")), "blank.pdf");
+    writeFileSync(path, await blank.save());
+    await page.setInputFiles('input[accept="application/pdf,.pdf"]', path);
+    await expect(fact).toContainText("No text layer");
+    await panel.getByRole("button", { name: "Recognise text (OCR)" }).click();
+    await expect(page.locator(".snackbar__msg")).toContainText("No recognisable text found", { timeout: 180_000 });
+    await expect(fact.locator("dd")).toHaveText("No text found, even by OCR");
+    await expect(panel.getByRole("button", { name: "Recognise text (OCR)" })).toHaveCount(0);
+  });
+
+  test("several objects selected is a selection, not the document, and every panel title is a heading", async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    const panel = page.locator("aside.inspector");
+    await pickSubTool(page, "Pen");
+    const box = (await page.locator(".page").first().boundingBox())!;
+    for (const y of [200, 260]) {
+      await page.mouse.move(box.x + 80, box.y + y);
+      await page.mouse.down();
+      await page.mouse.move(box.x + 200, box.y + y + 16, { steps: 8 });
+      await page.mouse.up();
+    }
+    await pickTool(page, "Select");
+    await page.mouse.move(box.x + 40, box.y + 170);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 280, box.y + 300, { steps: 12 });
+    await page.mouse.up();
+    await expect(page.locator(".multisel")).toHaveCount(2);
+    await expect(panel).toHaveAccessibleName("Properties");
+    await expect(panel.getByRole("heading", { level: 2 })).toHaveText("2 objects selected");
+
+    await page.keyboard.press("Escape");
+    await page.locator(".fragment").first().click();
+    await expect(panel.getByRole("heading", { level: 2 })).toHaveText("Text");
+  });
+
+  test("clicking an image says what it is", async ({ page }) => {
     const w = watch(page);
     await page.setViewportSize({ width: 1280, height: 860 });
     await open(page, (await fixtures()).sample);
-
-    // A stamp has no controls in this panel — it is edited on the canvas — so
-    // moving to Properties for one replaced every document action with "Nothing
-    // selected": clicking your own signature made Compress/Watermark/OCR vanish
-    // and put nothing in their place.
     await page.locator('[aria-label="More actions"]').click();
     await page.locator('[role="menuitem"]', { hasText: "Add image" }).click();
     await page.setInputFiles('input[accept="image/*"]', {
@@ -230,70 +478,41 @@ test.describe("inspector", () => {
     const box = (await page.locator(".page").first().boundingBox())!;
     await page.mouse.click(box.x + 120, box.y + 300);
     await expect(page.locator(".stamp")).toHaveCount(1);
-
-    const tabs = page.locator(".inspector__tabbtn");
     // Low-left of the stamp: the delete badge and the resize handle live on the
     // right-hand corners, and both are bigger than a small stamp's centre.
     const stamp = (await page.locator(".stamp").first().boundingBox())!;
     await page.mouse.click(stamp.x + 8, stamp.y + stamp.height - 8);
-    await expect(page.locator(".stamp")).toHaveCount(1);
-    await expect(tabs.nth(0), "selecting an image moved the panel off Document").toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    await expect(page.locator(".doclist__item").first()).toBeVisible();
-
-    // And if you were already reading Properties, it says which it is rather
-    // than claiming nothing is selected.
-    await tabs.nth(1).click();
+    await expect(page.locator(".props__title")).toHaveText("Image");
     await expect(page.locator(".props__empty")).toContainText(/edited on the page/);
-    await expect(page.locator(".props__title")).toContainText("Image");
     expectClean(w);
   });
 
-  test("re-clicking what is already selected comes back to Properties", async ({ page }) => {
-    // The auto-switch keys on the selection *changing*, so re-clicking the
-    // selected element while reading the Document tab did nothing at all — a
-    // dead end you could only leave by clicking the tab. `onSelect` now sets the
-    // tab directly, since clicking a thing asks to see that thing either way.
-    await page.setViewportSize({ width: 1280, height: 860 });
-    await open(page, (await fixtures()).sample);
-    const tabs = page.locator(".inspector__tabbtn");
-    const fragment = page.locator(".fragment").first();
-
-    await fragment.click();
-    await tabs.nth(0).click();
-    await expect(tabs.nth(0)).toHaveAttribute("aria-selected", "true");
-    await fragment.click();
-    await expect(tabs.nth(1)).toHaveAttribute("aria-selected", "true");
-  });
-
-  test("the tab is per document, not for the session", async ({ page }) => {
+  test("a new document starts on its own properties", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     const f = await fixtures();
     await open(page, f.sample);
     await page.locator(".fragment").first().click();
-    await expect(page.locator(".inspector__tabbtn").nth(1)).toHaveAttribute("aria-selected", "true");
-
-    // A fresh document has nothing selected, so a panel left on Properties would
-    // greet it with an empty state while its actions sat one silent click away.
-    // (Three file inputs exist once a document is open — the bare `input` selector
-    // picks the image one, which rejects a PDF without a word in the UI.)
+    await expect(page.locator(".props__title")).toHaveText("Text");
     await page.setInputFiles('input[accept="application/pdf,.pdf"]', f.typeset);
     await expect(page.locator(".snackbar__msg")).toContainText("1 page ·");
-    await expect(page.locator(".inspector__tabbtn").nth(0)).toHaveAttribute("aria-selected", "true");
+    await expect(page.locator(".props__title")).toHaveText("Document");
+    await expect(page.locator(".docpanel__fact", { hasText: "Pages" }).locator("dd")).toHaveText("1");
   });
 
-  test("collapses to an edge control with a readable name", async ({ page }) => {
+  test("collapses to an edge control with a readable name, from either view", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await open(page, (await fixtures()).sample);
-    await page.locator('.icon-btn[aria-label="Hide panel"]').click();
-    const tab = page.locator(".inspector__tab");
-    await expect(tab).toBeVisible();
-    // The label used to be a `writing-mode: vertical-rl` word on the edge.
+    const hide = page.getByRole("button", { name: "Hide panel" });
+    const show = page.locator(".inspector__tab");
+    await hide.click();
+    await expect(show).toBeVisible();
     await expect(page.locator(".inspector__tablabel")).toHaveCount(0);
-    await tab.click();
-    await expect(page.locator(".inspector__tabbtn")).toHaveCount(2);
+    await show.click();
+    await expect(page.locator(".props__title")).toHaveText("Document");
+    // The selection's view carries the same control.
+    await page.locator(".fragment").first().click();
+    await hide.click();
+    await expect(show).toBeVisible();
   });
 });
 
@@ -392,7 +611,7 @@ test.describe("Export split button", () => {
 
     // Each output has one home: not the ⋯ menu, not the Inspector.
     for (const label of OUTPUTS) {
-      await expect(page.locator(".doclist__item", { hasText: label })).toHaveCount(0);
+      await expect(page.locator("aside.inspector").getByRole("button", { name: label })).toHaveCount(0);
     }
     await page.getByRole("button", { name: "More actions" }).click();
     for (const label of OUTPUTS) {
