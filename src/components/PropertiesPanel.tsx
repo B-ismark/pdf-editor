@@ -4,9 +4,8 @@ import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
 import { isRejectedUrl } from "../pdf/url";
 import { segmentKey } from "../segmentKey";
-
-const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 import type { Annotation, FontKey, Selection, TextStyle } from "../pdf/types";
+import { IS_MAC } from "../platform";
 
 interface Props {
   selection: Selection;

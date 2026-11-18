@@ -45,8 +45,6 @@ type Delivery =
   | { kind: "save"; target: FileHandle }
   | { kind: "save-as"; target: FileHandle }
   | { kind: "share" };
-/** Apple keyboards: the document shortcuts are ⌘, never Ctrl. */
-const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
 
 const DELIVERY_VERB: Record<Delivery["kind"], string> = { download: "Download", save: "Save", "save-as": "Save", share: "Share" };
 import { onStrayBack, pushHistory, unwindHistory, type HistoryEntry } from "./hooks/useModal";
@@ -110,6 +108,7 @@ import type {
   TextStyle,
   Tool,
 } from "./pdf/types";
+import { IS_MAC } from "./platform";
 
 type NavKey = Tool | "sign";
 
