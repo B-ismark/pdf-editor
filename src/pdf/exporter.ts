@@ -2,6 +2,7 @@ import { LineCapStyle, PDFArray, PDFCatalog, PDFCheckBox, PDFDict, PDFDocument, 
 import { fitScale, roomAfter } from "./lineFit";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
+import { sanitize } from "./standardText";
 import { preparePassword } from "./password";
 import {
   assertNoStructureTree,
@@ -132,15 +133,16 @@ function drawPageNumber(page: PDFPage, font: PDFFont, label: string, opts: PageN
 
 /** Stamp a diagonal text watermark centred on a finished page. */
 function drawWatermark(page: PDFPage, font: PDFFont, opts: WatermarkOptions, frame: ViewFrame): void {
-  if (!opts.text.trim()) return;
+  const text = sanitize(opts.text, font);
+  if (!text.trim()) return;
   const c = hexToRgb(opts.color);
   const rad = (opts.angle * Math.PI) / 180;
-  const len = font.widthOfTextAtSize(opts.text, opts.size);
+  const len = font.widthOfTextAtSize(text, opts.size);
   const { width, height } = frame;
   // Start point so the text's midpoint lands at the page centre.
   const x = frame.x + width / 2 - (len / 2) * Math.cos(rad);
   const y = frame.y + height / 2 - (len / 2) * Math.sin(rad);
-  page.drawText(opts.text, {
+  page.drawText(text, {
     x,
     y,
     size: opts.size,
@@ -161,8 +163,11 @@ function fillAndFlattenForm(src: PDFDocument, formValues: Record<string, string 
       const name = field.getName();
       if (!(name in formValues)) continue;
       const v = formValues[name];
-      if (field instanceof PDFTextField) field.setText(typeof v === "string" ? v : "");
-      else if (field instanceof PDFCheckBox) (v ? field.check() : field.uncheck());
+      if (field instanceof PDFTextField) {
+        // Its appearance is drawn in the form's default font, a standard one
+        // (asked for only here: asking embeds it).
+        field.setText(typeof v === "string" ? sanitize(v, form.getDefaultFont()) : "");
+      } else if (field instanceof PDFCheckBox) (v ? field.check() : field.uncheck());
     }
     form.flatten();
   } catch {
@@ -451,20 +456,6 @@ function drawRasterAnnots(
     }
     if (rotate) ctx.restore();
   }
-}
-
-/** Drop characters the standard (WinAnsi) fonts cannot encode. */
-function sanitize(text: string, font: PDFFont): string {
-  let out = "";
-  for (const ch of text) {
-    try {
-      font.encodeText(ch);
-      out += ch;
-    } catch {
-      out += ch === "\t" ? "    " : "";
-    }
-  }
-  return out;
 }
 
 /**
