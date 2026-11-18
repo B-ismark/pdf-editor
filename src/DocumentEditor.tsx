@@ -73,6 +73,7 @@ const Organize = lazyPart(() => import("./components/Organize").then((m) => m.Or
 const SignatureDialog = lazyPart(() => import("./components/SignatureDialog").then((m) => m.SignatureDialog));
 const FinishDialog = lazyPart(() => import("./components/FinishDialog").then((m) => m.FinishDialog));
 const CompressDialog = lazyPart(() => import("./components/CompressDialog").then((m) => m.CompressDialog));
+const HiddenInfoDialog = lazyPart(() => import("./components/HiddenInfoDialog").then((m) => m.HiddenInfoDialog));
 const SignCertDialog = lazyPart(() => import("./components/SignCertDialog").then((m) => m.SignCertDialog));
 import type {
   Annotation,
@@ -480,6 +481,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   const [multi, setMulti] = useState<string[]>([]);
   const [compressOpen, setCompressOpen] = useState(false);
   const [signCertOpen, setSignCertOpen] = useState(false);
+  const [hiddenOpen, setHiddenOpen] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const menuListRef = useRef<HTMLDivElement>(null);
   // The Export menu, from the caret beside Download.
@@ -2206,6 +2208,28 @@ export const DocumentEditor = memo(function DocumentEditor({
     turnOfObject,
   ]);
 
+  // "Hidden information": the export's own clean-up, run on a copy, plus what
+  // it leaves in. Covered text is counted here, where the edits are: places an
+  // edit or a whiteout paints over text on a page that won't be flattened
+  // (a true redaction flattens the page, which really removes it).
+  const inspectHiddenInfo = useCallback(async () => {
+    if (!pdf) throw new Error("No document");
+    const { inspectHidden, hiddenRows } = await import("./pdf/hiddenInfo");
+    // A page ships its own content unless the plan deletes it or a true
+    // redaction flattens it to a picture: then nothing on it is "kept".
+    const kept = new Set(plan.map((p) => p.index));
+    const flattened = new Set(redactions.filter((r) => !r.cover).map((r) => r.pageIndex));
+    const stays = (i: number) => kept.has(i) && !flattened.has(i);
+    const info = await inspectHidden(pdf.bytes, stays);
+    // Whiteouts over text, by the same measure as the download warning.
+    let covered = findUnsafeCovers(pdf, redactions.filter((r) => stays(r.pageIndex)), planned).count;
+    for (const pg of pdf.pages) {
+      if (!stays(pg.pageIndex)) continue;
+      covered += pg.fragments.filter((f) => isFragmentModified(f, edits[f.id])).length;
+    }
+    return hiddenRows(info, covered);
+  }, [pdf, plan, planned, redactions, edits]);
+
   const runExport = useCallback(async () => {
     if (!pdf) return;
     const mark = markNow.current;
@@ -2345,6 +2369,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     { id: "image", group: "organise", label: "Add image", icon: "image", keywords: "picture photo stamp", opens: "dialog", run: () => imageInputRef.current?.click() },
     { id: "ocr", group: "text", label: "Recognise text (OCR)", icon: "scan_text", keywords: "scan searchable image ocr", run: () => void runOcr() },
     { id: "redact-patterns", group: "text", label: "Redact patterns", icon: "redact_patterns", keywords: "find search email phone card iban ssn date regex personal information pii privacy", opens: "dialog", run: openPatterns },
+    { id: "hidden-info", group: "text", label: "Hidden information", icon: "hidden_info", keywords: "metadata author properties privacy scrub remove clean attachments scripts javascript", opens: "dialog", run: () => { setSelection(null); setHiddenOpen(true); } },
     { id: "copytext", group: "text", label: "Copy all text", icon: "content_copy", keywords: "clipboard", run: () => void copyAllText() },
     { id: "numbers", group: "finish", label: "Page numbers", icon: "page_numbers", keywords: "pagination folio", opens: "dialog", run: () => { setSelection(null); setFinishTab("numbers"); } },
     { id: "watermark", group: "finish", label: "Watermark", icon: "watermark", keywords: "draft stamp", opens: "dialog", run: () => { setSelection(null); setFinishTab("watermark"); } },
@@ -3071,6 +3096,20 @@ export const DocumentEditor = memo(function DocumentEditor({
       {compressOpen && (
         <Suspense fallback={null}>
           <CompressDialog onEstimate={estimateCompress} onDownload={downloadCompress} onClose={() => setCompressOpen(false)} />
+        </Suspense>
+      )}
+
+      {hiddenOpen && (
+        <Suspense fallback={null}>
+          <HiddenInfoDialog
+            onInspect={inspectHiddenInfo}
+            busy={busy}
+            onDownload={() => {
+              setHiddenOpen(false);
+              void download();
+            }}
+            onClose={() => setHiddenOpen(false)}
+          />
         </Suspense>
       )}
 

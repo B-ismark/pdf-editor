@@ -2210,6 +2210,30 @@ body {
 .compress__estimate strong { color: var(--on-surface); font-variant-numeric: tabular-nums; }
 .compress__estimate-err { color: var(--error); }
 
+/* ============ Hidden information ============ */
+/* Two short lists; a long one (many properties, many attachments) scrolls
+   inside the dialog so Close and Download stay in reach. */
+.hidden__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: min(60vh, 520px);
+  overflow-y: auto;
+}
+.hidden__status { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--on-surface-variant); }
+.hidden__label { margin: 0 0 4px; color: var(--on-surface-variant); }
+.hidden__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.hidden__row { display: flex; align-items: flex-start; gap: 12px; padding: 8px 0; }
+.hidden__row > svg { color: var(--on-surface-variant); flex: none; margin-top: 2px; }
+.hidden__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+/* Values are the file's own text (an author, a file name): wrap anywhere. */
+.hidden__detail { color: var(--on-surface-variant); overflow-wrap: anywhere; }
+.hidden__none { margin: 0; }
+.hidden__facts { margin: 2px 0 0; display: grid; grid-template-columns: max-content 1fr; column-gap: 12px; row-gap: 2px; }
+.hidden__fact { display: contents; }
+.hidden__fact dt { color: var(--on-surface-variant); }
+.hidden__fact dd { margin: 0; color: var(--on-surface); overflow-wrap: anywhere; }
+
 /* ============ Confirm dialog ============ */
 .dialog--sm { width: min(400px, 100%); gap: 12px; }
 .confirm__msg { color: var(--on-surface-variant); margin: 0; }

@@ -1,4 +1,4 @@
-import { PDFDict, PDFDocument, PDFName, PDFRawStream, PDFRef, PDFString, StandardFonts, degrees, rgb } from "pdf-lib";
+import { PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFString, StandardFonts, degrees, rgb } from "pdf-lib";
 import { chromium } from "@playwright/test";
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import fontkit from "@pdf-lib/fontkit";
@@ -61,6 +61,8 @@ export interface Fixtures {
   personal: string;
   /** The hard cases for pattern redaction — see {@link TRICKY}. */
   tricky: string;
+  /** One page carrying every kind of hidden information — see {@link HIDDEN}. */
+  hidden: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
@@ -267,6 +269,7 @@ async function build(): Promise<Fixtures> {
     ligatures: write("ligatures.pdf", await ligaturesPdf()),
     personal: write("personal.pdf", await personalPdf()),
     tricky: write("tricky.pdf", await trickyPdf()),
+    hidden: write("hidden.pdf", await hiddenPdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -1106,4 +1109,74 @@ function concatBytes(parts: Uint8Array[]): Uint8Array {
     at += p.length;
   }
   return out;
+}
+
+/**
+ * Every kind of thing a PDF carries off the page, for the "Hidden information"
+ * report: properties (standard and a producer's own), an XMP packet, a file
+ * identifier, scripts (on open, in the name tree, on a page), attached files
+ * (in the name tree and as an annotation), links that launch a program or send
+ * form data, a producer's private data — all removed on export — and a signed
+ * comment and a switched-off layer with text on it, which stay.
+ */
+export const HIDDEN = {
+  body: "Visible body text",
+  author: "Carol Author",
+  creator: "SecretWriter 9",
+  company: "HIDDEN-CO-PRIVATE",
+  embedded: "salary.xlsx",
+  attached: "notes.txt",
+  reviewer: "Bob Reviewer",
+  layer: "Draft notes",
+  layerText: "HIDDEN-LAYER-TEXT",
+} as const;
+
+async function hiddenPdf(): Promise<Uint8Array> {
+  const H = HIDDEN;
+  const doc = await PDFDocument.create();
+  const ctx = doc.context;
+  const str = (t: string) => PDFString.of(t);
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const page = doc.addPage([595, 842]);
+  page.drawText(H.body, { x: 60, y: 760, size: 14, font });
+
+  // A layer that's switched off, with text on it.
+  const ocg = ctx.register(ctx.obj({ Type: "OCG", Name: str(H.layer) }));
+  doc.catalog.set(PDFName.of("OCProperties"), ctx.obj({ OCGs: [ocg], D: { Order: [ocg], OFF: [ocg] } }));
+  const fontName = page.node.newFontDictionary("FL", font.ref);
+  const props = ctx.obj({ L1: ocg });
+  (page.node.Resources() as PDFDict).set(PDFName.of("Properties"), props);
+  page.node.addContentStream(
+    ctx.register(ctx.flateStream(`/OC /L1 BDC BT /${fontName.decodeText()} 14 Tf 60 700 Td (${H.layerText}) Tj ET EMC`)),
+  );
+
+  const file = (name: string) =>
+    ctx.obj({ Type: "Filespec", F: str(name), UF: str(name), EF: { F: ctx.register(ctx.flateStream("secret,data", { Type: "EmbeddedFile" })) } });
+  doc.catalog.set(
+    PDFName.of("Names"),
+    ctx.obj({
+      JavaScript: { Names: [str("init"), { S: "JavaScript", JS: str("app.alert('names')") }] },
+      EmbeddedFiles: { Names: [str(H.embedded), file(H.embedded)] },
+    }),
+  );
+  doc.catalog.set(PDFName.of("OpenAction"), ctx.obj({ S: "JavaScript", JS: str("app.alert('open')") }));
+  doc.catalog.set(
+    PDFName.of("Metadata"),
+    ctx.register(ctx.stream(`<x:xmpmeta xmlns:x="adobe:ns:meta/"><dc:creator>${H.author}</dc:creator></x:xmpmeta>`, { Type: "Metadata", Subtype: "XML" })),
+  );
+
+  const annot = (o: Record<string, unknown>) => page.node.addAnnot(ctx.register(ctx.obj({ Type: "Annot", Border: [0, 0, 0], ...o } as never)));
+  annot({ Subtype: "FileAttachment", Rect: [400, 760, 420, 780], FS: file(H.attached), Contents: str("attached") });
+  annot({ Subtype: "Link", Rect: [60, 600, 200, 620], A: { S: "Launch", F: str("calc.exe") } });
+  annot({ Subtype: "Link", Rect: [60, 560, 200, 580], A: { S: "SubmitForm", F: { FS: "URL", F: str("https://example.com/collect") } } });
+  annot({ Subtype: "Text", Rect: [450, 760, 470, 780], T: str(H.reviewer), Contents: str("Check this figure") });
+  page.node.set(PDFName.of("AA"), ctx.obj({ O: { S: "JavaScript", JS: str("app.alert('page')") } }));
+  page.node.set(PDFName.of("PieceInfo"), ctx.obj({ SecretWriter: { Private: str(H.company) } }));
+
+  doc.setAuthor(H.author);
+  doc.setCreator(H.creator);
+  const info = ctx.lookup(ctx.trailerInfo.Info) as PDFDict;
+  info.set(PDFName.of("Company"), str(H.company));
+  ctx.trailerInfo.ID = ctx.obj([PDFHexString.of("00112233445566778899aabbccddeeff"), PDFHexString.of("00112233445566778899aabbccddeeff")]);
+  return doc.save({ useObjectStreams: false });
 }

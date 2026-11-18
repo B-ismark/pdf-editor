@@ -1,4 +1,4 @@
-import { PDFArray, PDFDict, PDFDocument, PDFName, PDFStream, PDFString, PDFHexString } from "@cantoo/pdf-lib";
+import { PDFArray, PDFDict, PDFDocument, PDFName, PDFNull, PDFStream, PDFString, PDFHexString } from "@cantoo/pdf-lib";
 import { isSafeExistingUri } from "./url";
 
 /**
@@ -56,12 +56,66 @@ const NAMES_KEEP = new Set(["Dests"]);
  * thread carries its own info dictionary). */
 const PAGE_DROP = ["AA", "PieceInfo", "Metadata", "LastModified", "AF", "B"];
 
+/**
+ * What {@link sanitizeDocument} took out, recorded where it takes it out, so the
+ * "Hidden information" report can't describe a different pass from the one the
+ * export runs (see `hiddenInfo.ts`).
+ */
+export interface ScrubReport {
+  /** The Info dictionary, entry by entry, as text. */
+  info: { key: string; value: string }[];
+  /** An XMP metadata packet on the catalog. */
+  xmp: boolean;
+  /** The file identifier in the trailer. */
+  fileId: boolean;
+  /** Something runs when the file opens: the catalog's `/AA`, or an
+   * `/OpenAction` that does more than show a page (a plain destination, which
+   * nearly every LaTeX file has, is not counted). */
+  autoRun: boolean;
+  /** Document-level scripts (the JavaScript name tree). */
+  scripts: number;
+  /** Trigger dictionaries (`/AA`) on pages, fields, annotations and bookmarks:
+   * things that run when you focus, type, open a page… */
+  triggers: number;
+  /** Actions taken off links, bookmarks and fields, by type (`JavaScript`,
+   * `Launch`, `SubmitForm`, an unsafe `URI`…). */
+  actions: Record<string, number>;
+  /** Embedded files, by name (the name tree and attachment annotations). */
+  attachments: string[];
+  /** Media, 3D and screen annotations. */
+  media: number;
+  /** An XFA form (a second, scriptable form alongside the visible one). */
+  xfa: boolean;
+  /** Pages, images and drawings carrying private data or their own metadata
+   * (each counted once, however many such entries it has). */
+  privateData: number;
+  /** Other catalog entries dropped (by name, e.g. `Threads`, `PieceInfo`). */
+  other: string[];
+}
+
+export const emptyScrubReport = (): ScrubReport => ({
+  info: [],
+  xmp: false,
+  fileId: false,
+  autoRun: false,
+  scripts: 0,
+  triggers: 0,
+  // No prototype: an action type is whatever name the file gives it, and a
+  // `/toString` or `/__proto__` must count like any other.
+  actions: Object.create(null) as Record<string, number>,
+  attachments: [],
+  media: 0,
+  xfa: false,
+  privateData: 0,
+  other: [],
+});
+
 /** Same idea for image and form XObjects, which carry their own copies. */
 const XOBJECT_DROP = ["PieceInfo", "Metadata", "LastModified", "AF"];
 
 /** Annotations that *are* a payload or a player rather than a mark on the page:
  * an attached file, embedded media, 3D (whose stream can carry JavaScript). */
-const ANNOT_DROP = new Set(["/FileAttachment", "/RichMedia", "/3D", "/Movie", "/Sound", "/Screen"]);
+export const ANNOT_DROP = new Set(["/FileAttachment", "/RichMedia", "/3D", "/Movie", "/Sound", "/Screen"]);
 
 /** `/Named` actions that only move around the document. Viewers also accept
  * menu items here (Print, SaveAs, …), which is not something a link should do. */
@@ -90,7 +144,7 @@ const DR_KEEP = new Set(["Font", "Encoding"]);
  * failing the whole export. Callers MUST save with `updateMetadata: false` so
  * pdf-lib doesn't re-stamp Producer/CreationDate/ModDate afterwards.
  */
-export function sanitizeDocument(doc: PDFDocument): void {
+export function sanitizeDocument(doc: PDFDocument, report: ScrubReport = emptyScrubReport()): ScrubReport {
   const ctx = doc.context;
   const catalog = doc.catalog;
   const deref = (obj: unknown) => (obj ? ctx.lookup(obj as never) : undefined);
@@ -105,18 +159,33 @@ export function sanitizeDocument(doc: PDFDocument): void {
     // exactly the identifying kind.
     const info = deref(ctx.trailerInfo.Info);
     if (info instanceof PDFDict) {
-      for (const key of info.keys()) info.delete(key);
+      for (const key of info.keys()) {
+        report.info.push({ key: key.decodeText(), value: textOf(deref(info.get(key))) });
+        info.delete(key);
+      }
     }
   } catch {
     /* no / malformed Info dict */
   }
   // The file identifier ties the copy to the original it was made from.
+  if ((ctx.trailerInfo as { ID?: unknown }).ID) report.fileId = true;
   delete (ctx.trailerInfo as { ID?: unknown }).ID;
 
   // 2) Remove the XMP metadata stream and any document-level auto-run/extra
   //    actions (OpenAction and AA are common JavaScript triggers).
   for (const key of catalog.keys()) {
-    if (!CATALOG_KEEP.has(key.decodeText())) catalog.delete(key);
+    const name = key.decodeText();
+    if (CATALOG_KEEP.has(name)) continue;
+    if (name === "Metadata") report.xmp = true;
+    else if (name === "AA") report.autoRun = true;
+    else if (name === "OpenAction") {
+      // A destination (`[page /Fit]`) or a safe GoTo only sets the opening view.
+      const open = deref(catalog.get(key));
+      if (!(open instanceof PDFArray) && !(open instanceof PDFDict && isSafeAction(open, deref))) report.autoRun = true;
+    } else if (name === "PieceInfo") report.privateData++;
+    else if (name === "AF") countFiles(deref(catalog.get(key)), deref, report);
+    else report.other.push(name);
+    catalog.delete(key);
   }
 
   // 3) Remove embedded JavaScript + embedded files from the Names tree, and XFA
@@ -125,7 +194,13 @@ export function sanitizeDocument(doc: PDFDocument): void {
     const names = deref(catalog.get(PDFName.of("Names")));
     if (names instanceof PDFDict) {
       for (const key of names.keys()) {
-        if (!NAMES_KEEP.has(key.decodeText())) names.delete(key);
+        const name = key.decodeText();
+        if (NAMES_KEEP.has(name)) continue;
+        const leaves = nameTreeLeaves(deref(names.get(key)), deref);
+        if (name === "JavaScript") report.scripts += leaves.length;
+        else if (name === "EmbeddedFiles") for (const [n, spec] of leaves) addFile(report, spec, deref, n);
+        else report.other.push(`Names/${name}`);
+        names.delete(key);
       }
     }
   } catch {
@@ -136,7 +211,11 @@ export function sanitizeDocument(doc: PDFDocument): void {
     if (acro instanceof PDFDict) {
       // XFA (active content) goes with everything else not on the list.
       for (const key of acro.keys()) {
-        if (!ACROFORM_KEEP.has(key.decodeText())) acro.delete(key);
+        const name = key.decodeText();
+        if (ACROFORM_KEEP.has(name)) continue;
+        if (name === "XFA") report.xfa = true;
+        else report.other.push(`AcroForm/${name}`);
+        acro.delete(key);
       }
       const dr = deref(acro.get(PDFName.of("DR")));
       if (dr instanceof PDFDict) {
@@ -154,7 +233,7 @@ export function sanitizeDocument(doc: PDFDocument): void {
           const node = deref(arr.get(i));
           if (!(node instanceof PDFDict) || seen.has(node)) continue;
           seen.add(node);
-          scrubActions(node, deref);
+          scrubActions(node, deref, report);
           walk(deref(node.get(PDFName.of("Kids"))), depth + 1);
         }
       };
@@ -174,7 +253,7 @@ export function sanitizeDocument(doc: PDFDocument): void {
       const item = deref(stack.pop());
       if (!(item instanceof PDFDict) || seen.has(item)) continue;
       seen.add(item);
-      scrubActions(item, deref);
+      scrubActions(item, deref, report);
       stack.push(item.get(PDFName.of("Next")), item.get(PDFName.of("First")));
     }
   } catch {
@@ -185,9 +264,23 @@ export function sanitizeDocument(doc: PDFDocument): void {
   //    isn't a plain link. Ordinary URI/GoTo links are preserved (and their
   //    URIs scheme-checked) so real links keep working.
   for (const page of doc.getPages()) {
+    let privateHere = false;
     for (const key of PAGE_DROP) {
       try {
-        page.node.delete(PDFName.of(key));
+        const name = PDFName.of(key);
+        const value = page.node.get(name);
+        if (value === undefined) continue;
+        const present = !(deref(value) === PDFNull);
+        if (!present) {
+          /* `/Key null` is the same as absent: drop it, report nothing */
+        } else if (key === "AA") report.triggers++;
+        else if (key === "AF") countFiles(deref(value), deref, report);
+        else if (key === "B") report.other.push("B");
+        else if (!privateHere) {
+          privateHere = true;
+          report.privateData++;
+        }
+        page.node.delete(name);
       } catch {
         /* ignore */
       }
@@ -207,11 +300,14 @@ export function sanitizeDocument(doc: PDFDocument): void {
         continue;
       }
       if (!(annot instanceof PDFDict)) continue;
-      if (ANNOT_DROP.has(String(annot.get(PDFName.of("Subtype"))))) {
+      const subtype = String(annot.get(PDFName.of("Subtype")));
+      if (ANNOT_DROP.has(subtype)) {
+        if (subtype === "/FileAttachment") addFile(report, deref(annot.get(PDFName.of("FS"))), deref, "Attachment");
+        else report.media++;
         annots.remove(i);
         continue;
       }
-      scrubActions(annot, deref);
+      scrubActions(annot, deref, report);
     }
   }
 
@@ -220,13 +316,84 @@ export function sanitizeDocument(doc: PDFDocument): void {
     if (!(obj instanceof PDFStream)) continue;
     const subtype = String(obj.dict.get(PDFName.of("Subtype")));
     if (subtype !== "/Image" && subtype !== "/Form") continue;
-    for (const key of XOBJECT_DROP) obj.dict.delete(PDFName.of(key));
+    let privateHere = false;
+    for (const key of XOBJECT_DROP) {
+      const name = PDFName.of(key);
+      const value = obj.dict.get(name);
+      if (value === undefined) continue;
+      if (deref(value) === PDFNull) {
+        /* same as absent */
+      } else if (key === "AF") countFiles(deref(value), deref, report);
+      else if (!privateHere) {
+        privateHere = true;
+        report.privateData++;
+      }
+      obj.dict.delete(name);
+    }
   }
+  return report;
+}
+
+/** A PDF string, name, number or date as plain text. */
+function textOf(v: unknown): string {
+  if (v instanceof PDFString || v instanceof PDFHexString) return v.decodeText();
+  if (v instanceof PDFName) return v.decodeText();
+  if (v === undefined || v === null) return "";
+  return String(v);
+}
+
+/** The file name a file specification gives (`/UF`, then `/F`). */
+function fileName(spec: unknown, deref: (obj: unknown) => unknown): string {
+  if (spec instanceof PDFString || spec instanceof PDFHexString) return spec.decodeText();
+  if (!(spec instanceof PDFDict)) return "";
+  return textOf(deref(spec.get(PDFName.of("UF")))) || textOf(deref(spec.get(PDFName.of("F"))));
+}
+
+/** File specifications already counted, per report: a PDF/A-3 or e-invoice
+ * (ZUGFeRD, Factur-X) names the same file from the catalog's `/AF` *and* the
+ * EmbeddedFiles tree, and that's one file. */
+const counted = new WeakMap<ScrubReport, Set<unknown>>();
+
+function addFile(report: ScrubReport, spec: unknown, deref: (obj: unknown) => unknown, fallback: string) {
+  if (spec instanceof PDFDict) {
+    let seen = counted.get(report);
+    if (!seen) counted.set(report, (seen = new Set()));
+    if (seen.has(spec)) return;
+    seen.add(spec);
+  }
+  report.attachments.push(fileName(spec, deref) || fallback);
+}
+
+/** Associated files (`/AF`, an array of file specifications). */
+function countFiles(arr: unknown, deref: (obj: unknown) => unknown, report: ScrubReport) {
+  if (!(arr instanceof PDFArray)) return;
+  for (let i = 0; i < arr.size(); i++) addFile(report, deref(arr.get(i)), deref, "Attachment");
+}
+
+/** A name tree's leaves as [key, value] pairs (with a cap, for a malformed
+ * tree that loops). */
+function nameTreeLeaves(root: unknown, deref: (obj: unknown) => unknown): [string, unknown][] {
+  const out: [string, unknown][] = [];
+  const seen = new Set<unknown>();
+  const stack = [root];
+  while (stack.length && seen.size < 10_000) {
+    const node = stack.pop();
+    if (!(node instanceof PDFDict) || seen.has(node)) continue;
+    seen.add(node);
+    const names = deref(node.get(PDFName.of("Names")));
+    if (names instanceof PDFArray) {
+      for (let i = 0; i + 1 < names.size(); i += 2) out.push([textOf(deref(names.get(i))), deref(names.get(i + 1))]);
+    }
+    const kids = deref(node.get(PDFName.of("Kids")));
+    if (kids instanceof PDFArray) for (let i = 0; i < kids.size(); i++) stack.push(deref(kids.get(i)));
+  }
+  return out;
 }
 
 /** Drop `/AA` outright and `/A` unless it's a plain, inert link. */
-function scrubActions(dict: PDFDict, deref: (obj: unknown) => unknown): void {
+function scrubActions(dict: PDFDict, deref: (obj: unknown) => unknown, report: ScrubReport): void {
   try {
+    if (dict.has(PDFName.of("AA"))) report.triggers++;
     dict.delete(PDFName.of("AA"));
   } catch {
     /* ignore */
@@ -234,11 +401,41 @@ function scrubActions(dict: PDFDict, deref: (obj: unknown) => unknown): void {
   try {
     const action = deref(dict.get(PDFName.of("A")));
     if (action !== undefined && !(action instanceof PDFDict && isSafeAction(action, deref))) {
+      const kind = action instanceof PDFDict ? unsafeKind(action, deref) : "Other";
+      report.actions[kind] = (Object.prototype.hasOwnProperty.call(report.actions, kind) ? report.actions[kind] : 0) + 1;
       dict.delete(PDFName.of("A"));
     }
   } catch {
     /* ignore */
   }
+}
+
+/** Why an action was refused: the type of the first link in its chain that
+ * isn't allowed ("JavaScript", "Launch"…), or "URI" for a link whose address
+ * isn't safe, or "Named" for a menu command. */
+function unsafeKind(action: PDFDict, deref: (obj: unknown) => unknown, depth = 0): string {
+  const s = action.get(PDFName.of("S"));
+  const name = s instanceof PDFName ? s.decodeText() : "Other";
+  if (depth > 8 || !ALLOWED_ACTIONS.has(`/${name}`)) return name;
+  if (!isSafeAction(shallow(action), deref)) return name;
+  const next = deref(action.get(PDFName.of("Next")));
+  const items = next instanceof PDFArray ? Array.from({ length: next.size() }, (_, i) => deref(next.get(i))) : [next];
+  for (const n of items) {
+    // A chain item that isn't an action at all is what `isSafeAction` refused.
+    if (!(n instanceof PDFDict)) {
+      if (n !== undefined) return "Other";
+      continue;
+    }
+    if (!isSafeAction(n, deref)) return unsafeKind(n, deref, depth + 1);
+  }
+  return name;
+}
+
+/** The action without its chain, to judge it on its own. */
+function shallow(action: PDFDict): PDFDict {
+  const copy = action.clone();
+  copy.delete(PDFName.of("Next"));
+  return copy;
 }
 
 /**
