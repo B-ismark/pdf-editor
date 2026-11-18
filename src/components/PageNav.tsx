@@ -12,6 +12,7 @@ import { scrollToPage, useActivePage } from "../hooks/useActivePage";
 import { Thumbnail } from "./Thumbnail";
 import { Icon } from "./Icon";
 import { OutlineTree } from "./OutlineTree";
+import { segmentKey } from "../segmentKey";
 import type { OutlineEntry } from "../pdf/outline";
 import { plural } from "../plural";
 import type { PageRef } from "../pdf/types";
@@ -429,11 +430,25 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose, outline = []
         </span>
       </div>
       {hasOutline && (
-        <div className="segmented segmented--compact pagenav__views" role="tablist" aria-label="Sidebar">
+        <div
+          className="segmented segmented--compact pagenav__views"
+          role="tablist"
+          aria-label="Sidebar"
+          onKeyDown={(e) => {
+            const views = ["pages", "outline"] as const;
+            const to = segmentKey(e.key, views.indexOf(view), 2);
+            if (to == null) return;
+            e.preventDefault();
+            onView?.(views[to]);
+            const tabs = e.currentTarget.querySelectorAll<HTMLElement>("[role=tab]");
+            tabs[to]?.focus();
+          }}
+        >
           {(["pages", "outline"] as const).map((v) => (
             <button
               key={v}
               role="tab"
+              tabIndex={view === v ? 0 : -1}
               id={`pagenav-tab-${v}`}
               aria-selected={view === v}
               aria-controls={v === "pages" ? "pagenav-pages" : "pagenav-outline"}

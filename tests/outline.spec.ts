@@ -3,6 +3,7 @@ import { PDFArray, PDFDict, PDFDocument, PDFName, PDFRef, PDFString } from "pdf-
 import { readFileSync } from "node:fs";
 import { fixtures, OUTLINED } from "./fixtures";
 import { open, watch, pickTool, dragOnPage, expectClean, pageTexts } from "./helpers";
+import { buildFromPlan, type PlanEntry } from "../src/pdf/pageOps";
 
 /**
  * 8e: a document's own bookmarks are a way around it, and a link can go to a
@@ -233,5 +234,110 @@ test.describe("a link to a page", () => {
     const doc = await PDFDocument.load(bytes);
     expect(linksOn(doc, 0), "the link opens the raster, not the page it replaced").toEqual([{ to: 1, uri: undefined }]);
     expect(OUTLINED.pages).toBe(doc.getPageCount());
+  });
+});
+
+/**
+ * Merge, Extract and Split rebuild the file with `copyPages`, which copies a
+ * page a link jumps to a second time, through the link, outside the page tree.
+ * That copy was cut as a stray, and the link with it — even when the page it
+ * goes to was kept. A link to a kept page must land on that page's copy.
+ */
+test.describe("a rebuild keeps links between kept pages", () => {
+  async function linked(): Promise<ArrayBuffer> {
+    const doc = await PDFDocument.create();
+    const [a, b, c] = [doc.addPage([300, 300]), doc.addPage([300, 300]), doc.addPage([300, 300])];
+    a.drawText("one", { x: 20, y: 200 });
+    b.drawText("two", { x: 20, y: 200 });
+    c.drawText("three", { x: 20, y: 200 });
+    const link = (from: typeof a, to: typeof a) =>
+      from.node.addAnnot(
+        doc.context.register(
+          doc.context.obj({ Type: "Annot", Subtype: "Link", Rect: [10, 10, 100, 40], Dest: [to.ref, PDFName.of("Fit")] }),
+        ),
+      );
+    link(a, b);
+    link(c, a);
+    const bytes = await doc.save();
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+  }
+  const plan = (...idx: number[]): PlanEntry[] => idx.map((index) => ({ sourceKey: "main", index, rotation: 0 }));
+
+  test("in order, reordered, and with the target left out", async () => {
+    const sources = new Map([["main", await linked()]]);
+    let doc = await PDFDocument.load(await buildFromPlan(plan(0, 1, 2), sources));
+    expect(linksOn(doc, 0), "page 1 → page 2").toEqual([{ to: 1, uri: undefined }]);
+    expect(linksOn(doc, 2), "page 3 → page 1").toEqual([{ to: 0, uri: undefined }]);
+
+    doc = await PDFDocument.load(await buildFromPlan(plan(2, 1, 0), sources));
+    expect(linksOn(doc, 2), "page 1, now last, → page 2, now second").toEqual([{ to: 1, uri: undefined }]);
+    expect(linksOn(doc, 0)).toEqual([{ to: 2, uri: undefined }]);
+
+    // Extract page 1 alone: its link's page isn't there, so the link goes —
+    // and no copy of page 2 is left in the file.
+    const bytes = await buildFromPlan(plan(0), sources);
+    doc = await PDFDocument.load(bytes);
+    expect(linksOn(doc, 0)).toEqual([]);
+    expect(Buffer.from(bytes).toString("latin1").match(/\/Type\s*\/Page\b/g)?.length).toBe(1);
+  });
+});
+
+test.describe("the link panel's controls", () => {
+  test("typing a page number that's too long doesn't move the link on the way", async ({ page }) => {
+    await open(page, (await fixtures()).outlined);
+    await pickTool(page, "Link");
+    await dragOnPage(page, { x: 80, y: 120 }, { x: 280, y: 165 });
+    await page.getByRole("radio", { name: "Page" }).click();
+    await page.fill("#link-page", "3");
+    await page.locator("#link-page").press("Enter");
+    await expect(page.locator(".linkbox")).toHaveAttribute("data-tip", "Page 3");
+    // "1" on the way to "12" (out of range): the link stays on page 3.
+    await page.fill("#link-page", "");
+    await page.locator("#link-page").pressSequentially("12");
+    await page.locator("#link-page").blur();
+    await expect(page.locator("#link-page")).toHaveValue("3");
+    await expect(page.locator(".linkbox")).toHaveAttribute("data-tip", "Page 3");
+    // A valid number takes on Enter or on leaving the field.
+    await page.fill("#link-page", "4");
+    await page.locator("#link-page").blur();
+    await expect(page.locator(".linkbox")).toHaveAttribute("data-tip", "Page 4");
+  });
+
+  test("the Goes to and Pages | Outline switches take arrow keys, one stop each", async ({ page }) => {
+    await open(page, (await fixtures()).outlined);
+    await pickTool(page, "Link");
+    await dragOnPage(page, { x: 80, y: 120 }, { x: 280, y: 165 });
+    const web = page.getByRole("radio", { name: "Web address" });
+    const pg = page.getByRole("radio", { name: "Page" });
+    await expect(web).toHaveAttribute("tabindex", "0");
+    await expect(pg).toHaveAttribute("tabindex", "-1");
+    await web.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(pg).toBeFocused();
+    await expect(pg).toHaveAttribute("aria-checked", "true");
+    await expect(page.locator("#link-page")).toBeVisible();
+    await page.keyboard.press("ArrowLeft");
+    await expect(web).toHaveAttribute("aria-checked", "true");
+
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Show pages" }).click();
+    const pagesTab = page.getByRole("tab", { name: "Pages" });
+    const outlineTab = page.getByRole("tab", { name: "Outline" });
+    await expect(outlineTab).toHaveAttribute("tabindex", "-1");
+    await pagesTab.focus();
+    await page.keyboard.press("ArrowRight");
+    await expect(outlineTab).toBeFocused();
+    await expect(tree(page)).toBeVisible();
+  });
+
+  test("closing a section by its arrow keeps focus in the tree", async ({ page }) => {
+    await open(page, (await fixtures()).outlined);
+    await showOutline(page);
+    await item(page, "Part one").focus();
+    await page.keyboard.press("ArrowRight");
+    await page.keyboard.press("ArrowRight");
+    await expect(item(page, "Section A")).toBeFocused();
+    await item(page, "Part one").locator(".outline__twisty").click();
+    await expect(item(page, "Part one")).toBeFocused();
   });
 });

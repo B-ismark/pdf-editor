@@ -1,5 +1,4 @@
 import { useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { Icon } from "./Icon";
 import type { OutlineEntry } from "../pdf/outline";
 
 interface Props {
@@ -123,16 +122,17 @@ export function OutlineTree({ entries, posOf, onGo }: Props) {
           >
             {has ? (
               <span
-                className={`outline__twisty${r.open ? " outline__twisty--open" : ""}`}
+                className={`outline__twisty outline__twisty--has${r.open ? " outline__twisty--open" : ""}`}
                 aria-hidden="true"
                 onClick={(e) => {
                   e.stopPropagation();
-                  setFocusKey(r.key);
+                  // Closing a section takes the rows inside it away: one of
+                  // them may have had focus, which would fall to the page.
+                  if (r.open && roving?.startsWith(`${r.key}.`)) focusRow(r.key);
+                  else setFocusKey(r.key);
                   toggle(r.key);
                 }}
-              >
-                <Icon name="chevron_right" size={16} />
-              </span>
+              />
             ) : (
               <span className="outline__twisty" aria-hidden="true" />
             )}

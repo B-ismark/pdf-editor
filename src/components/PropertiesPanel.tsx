@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
 import { isRejectedUrl } from "../pdf/url";
+import { segmentKey } from "../segmentKey";
 import type { Annotation, FontKey, Selection, TextStyle } from "../pdf/types";
 
 interface Props {
@@ -144,7 +145,20 @@ export function PropertiesPanel({
             <span className="field__label label-medium" id="link-target">
               Goes to
             </span>
-            <div className="segmented segmented--compact" role="radiogroup" aria-labelledby="link-target">
+            <div
+              className="segmented segmented--compact"
+              role="radiogroup"
+              aria-labelledby="link-target"
+              // A radio group is one tab stop; the arrows move the choice.
+              onKeyDown={(e) => {
+                const to = segmentKey(e.key, linkPage !== undefined ? 1 : 0, 2);
+                if (to == null) return;
+                e.preventDefault();
+                onChangeLinkPage?.(to === 1 ? (linkPage ?? 0) : undefined);
+                const btns = e.currentTarget.querySelectorAll<HTMLElement>("[role=radio]");
+                requestAnimationFrame(() => btns[to]?.focus());
+              }}
+            >
               {(["url", "page"] as const).map((k) => {
                 const on = (linkPage !== undefined) === (k === "page");
                 return (
@@ -152,6 +166,7 @@ export function PropertiesPanel({
                     key={k}
                     role="radio"
                     aria-checked={on}
+                    tabIndex={on ? 0 : -1}
                     className={`segmented__btn${on ? " segmented__btn--on" : ""}`}
                     onClick={() => !on && onChangeLinkPage?.(k === "page" ? 0 : undefined)}
                   >
@@ -366,7 +381,8 @@ export function PropertiesPanel({
 }
 
 /** The page a link goes to, by its number as the reader sees it. A draft while
- * typing: "1" on the way to "12" mustn't move the link to page 1 and back. */
+ * typing, taken on Enter or on leaving the field: "1" on the way to "12" (or
+ * to an out-of-range number) mustn't move the link anywhere. */
 function LinkPageField({ pos, count, onChange }: { pos: number | null; count: number; onChange: (pos: number) => void }) {
   const shown = pos == null ? "" : String(pos + 1);
   const [draft, setDraft] = useState(shown);
@@ -391,12 +407,15 @@ function LinkPageField({ pos, count, onChange }: { pos: number | null; count: nu
             value={draft}
             aria-invalid={out || gone || undefined}
             aria-describedby="link-page-note"
-            onChange={(e) => {
-              const t = e.target.value.replace(/[^0-9]/g, "");
-              setDraft(t);
-              commit(t);
+            onChange={(e) => setDraft(e.target.value.replace(/[^0-9]/g, ""))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") commit(draft);
+              else if (e.key === "Escape") setDraft(shown);
             }}
-            onBlur={() => setDraft(shown)}
+            onBlur={() => {
+              commit(draft);
+              setDraft(shown);
+            }}
           />
           <span className="body-medium">of {count}</span>
         </span>

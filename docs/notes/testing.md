@@ -295,7 +295,12 @@ type-checking can't see, and each exists because it broke once:
   isn't offered without bookmarks. A link to a page follows its page through a
   move into the file's `/Dest`, keeps its web address when switched back, is
   flagged and left out when its page is deleted, and lands on the raster when
-  its page is redacted after the link was written;
+  its page is redacted after the link was written. `buildFromPlan` (Merge,
+  Extract, Split) keeps links between kept pages, in or out of order, and cuts
+  one whose page was left out. The page field takes its number on Enter or
+  blur, so typing "12" in a 4-page document doesn't move the link to page 1;
+  both switches are one tab stop that arrows move; closing a section keeps
+  focus in the tree;
 - `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
   never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
   character WinAnsi can't encode instead of throwing, so `sanitize`

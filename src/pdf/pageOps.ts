@@ -12,7 +12,7 @@ import {
   type PDFPage,
 } from "@cantoo/pdf-lib";
 import { sanitizeDocument } from "./sanitize";
-import { collectGarbage, cutDeletedPages } from "./structure";
+import { collectGarbage, cutDeletedPages, retargetPageRefs } from "./structure";
 
 /** One page slot in an organize plan: which source document, which page in it,
  * and how much extra rotation the user applied (added to the page's own). */
@@ -97,20 +97,36 @@ export async function buildFromPlan(
     out.addPage(page);
   });
 
-  // The copier follows every reference on a page, so a link to a page the plan
-  // left out copies that page too (contents and all), reachable through the
-  // link. Cut it like a deleted page: the link goes, and nothing reaches it.
+  // The copier follows every reference on a page, so a link (or any other
+  // reference) to another page copies that page a second time, outside the
+  // tree — whether or not the plan kept it. The copier clones each page dict
+  // afresh but shares everything below it within one `copyPages` call, so a
+  // stray and the kept copy of the same source page hold the very same
+  // `/Contents`: such a stray is a twin, and what points at it is moved to the
+  // kept copy. Only a page the plan left out has no twin; it's cut like a
+  // deleted page — the link goes, and nothing reaches it.
   const inTree = new Set(out.getPages().map((p) => p.ref));
+  const byContents = new Map<unknown, PDFRef>();
+  for (const p of out.getPages()) {
+    const c = p.node.get(PDFName.of("Contents"));
+    if (c) byContents.set(c, p.ref);
+  }
+  const twins = new Map<PDFRef, PDFRef>();
   const stray = new Set<PDFRef>();
   for (const [ref, obj] of out.context.enumerateIndirectObjects()) {
-    if (obj instanceof PDFDict && obj.get(PDFName.of("Type")) === PDFName.of("Page") && !inTree.has(ref)) stray.add(ref);
+    if (!(obj instanceof PDFDict) || obj.get(PDFName.of("Type")) !== PDFName.of("Page") || inTree.has(ref)) continue;
+    const c = obj.get(PDFName.of("Contents"));
+    const twin = c ? byContents.get(c) : undefined;
+    if (twin) twins.set(ref, twin);
+    else stray.add(ref);
   }
+  if (twins.size > 0) retargetPageRefs(out, twins);
   if (stray.size > 0) cutDeletedPages(out, stray);
   const prunedForm = rebuildForm(out, plan.map((p) => docs.get(p.sourceKey)!));
   if (opts.forDownload) sanitizeDocument(out);
   // What was cut or scrubbed is unreachable now; the copier had already
   // copied it (an attachment's bytes, a stray page), so drop it from the file.
-  if (stray.size > 0 || prunedForm || opts.forDownload) collectGarbage(out);
+  if (stray.size > 0 || twins.size > 0 || prunedForm || opts.forDownload) collectGarbage(out);
 
   return out.save();
 }

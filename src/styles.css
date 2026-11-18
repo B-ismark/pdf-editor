@@ -572,8 +572,21 @@ body {
   color: var(--on-surface-variant);
   transition: transform var(--dur-short4) var(--ease-standard);
 }
-.outline__twisty:not(:empty):hover { background: var(--surface-container-highest); }
+.outline__twisty--has { cursor: pointer; }
+.outline__twisty--has:hover { background: var(--surface-container-highest); }
+/* A disclosure caret, drawn rather than borrowed: the chevron icon already
+   means "go forward" here, and an icon name means one thing. */
+.outline__twisty--has::before {
+  content: "";
+  border-block: 4.5px solid transparent;
+  border-inline-start: 6px solid currentColor;
+}
 .outline__twisty--open { transform: rotate(90deg); }
+/* A finger needs room: a near miss beside a small caret went to the page and
+   closed the sidebar. */
+@media (pointer: coarse) {
+  .outline__twisty { width: 40px; height: 40px; }
+}
 .outline__title {
   flex: 1;
   min-width: 0;
