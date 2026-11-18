@@ -103,6 +103,9 @@ export interface ExportInput {
   /** The page plan: which source pages go out, in what order, turned how far
    *  beyond their own `/Rotate`. Absent means every page, as loaded. */
   pages?: PageRef[];
+  /** Encrypt the download with this password (AES-256), needed to open it.
+   *  Used for this one file and never kept. */
+  password?: string;
 }
 
 /** Draw a page number onto a finished page (vector or rasterised alike). */
@@ -710,6 +713,27 @@ export async function exportPdf(
   if (anyReplaced) isolatePageResources(out);
   collectGarbage(out);
   if (anyReplaced) assertNoStructureTree(out);
+  // Last, so everything above is what gets encrypted. The password opens the
+  // file and allows everything once open: permission flags only ask a viewer
+  // to hold back, so offering them would promise protection a file can't
+  // give. The owner password is random and thrown away, so it isn't a second
+  // way in. Encrypting writes a fresh random file identifier (the sanitiser
+  // removed the original's), which the cipher needs.
+  if (input.password) {
+    out.encrypt({
+      userPassword: input.password,
+      ownerPassword: randomSecret(),
+      permissions: {
+        printing: "highResolution",
+        modifying: true,
+        copying: true,
+        annotating: true,
+        fillingForms: true,
+        contentAccessibility: true,
+        documentAssembly: true,
+      },
+    });
+  }
   // Appearances were generated when (and if) the form was flattened; asking
   // pdf-lib to regenerate every field's on save would rewrite the untouched
   // ones and throws on fields whose /DA it can't parse.
@@ -874,3 +898,9 @@ async function rasterisePage(
 }
 
 export { DEFAULT_STYLE };
+
+/** 32 random bytes as hex. */
+function randomSecret(): string {
+  const b = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+}

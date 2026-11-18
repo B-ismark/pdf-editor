@@ -74,6 +74,7 @@ const SignatureDialog = lazyPart(() => import("./components/SignatureDialog").th
 const FinishDialog = lazyPart(() => import("./components/FinishDialog").then((m) => m.FinishDialog));
 const CompressDialog = lazyPart(() => import("./components/CompressDialog").then((m) => m.CompressDialog));
 const HiddenInfoDialog = lazyPart(() => import("./components/HiddenInfoDialog").then((m) => m.HiddenInfoDialog));
+const ProtectDialog = lazyPart(() => import("./components/ProtectDialog").then((m) => m.ProtectDialog));
 const SignCertDialog = lazyPart(() => import("./components/SignCertDialog").then((m) => m.SignCertDialog));
 import type {
   Annotation,
@@ -461,6 +462,10 @@ export const DocumentEditor = memo(function DocumentEditor({
   const [menuOpen, setMenuOpen] = useState(false);
   const [organizeOpen, setOrganizeOpen] = useState(false);
   const [coverWarn, setCoverWarn] = useState<CoverWarning | null>(null);
+  const [protectOpen, setProtectOpen] = useState(false);
+  /** The password for the download being made, held only until it's made
+   * (or the whiteout warning in between is cancelled). Never stored. */
+  const pendingPassword = useRef<string | undefined>(undefined);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [findActive, setFindActive] = useState(0);
@@ -2232,6 +2237,8 @@ export const DocumentEditor = memo(function DocumentEditor({
 
   const runExport = useCallback(async () => {
     if (!pdf) return;
+    const password = pendingPassword.current;
+    pendingPassword.current = undefined;
     const mark = markNow.current;
     setStatus("exporting");
     setMessage("Building edited PDF…");
@@ -2239,7 +2246,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       const { exportPdf } = await import("./pdf/exporter");
       const out = await exportPdf(
         pdf,
-        { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, pages: planned },
+        { edits, textBoxes, redactions, annotations, stamps, links, formValues, pageNumbers, watermark, losslessRaster, pages: planned, password },
         (p, t) => setMessage(`Building edited PDF… page ${p}/${t}`),
       );
       downloadBytes(out, fileName.replace(/\.pdf$/i, "") + "-edited.pdf");
@@ -2248,7 +2255,12 @@ export const DocumentEditor = memo(function DocumentEditor({
       setMessage(
         (redactions.length > 0
           ? "Downloaded — redacted pages were flattened to images."
-          : "Downloaded edited PDF.") + (locked ? " This copy has no password." : ""),
+          : "Downloaded edited PDF.") +
+          (password
+            ? " It opens only with the password you set."
+            : locked
+              ? " This copy has no password. To add one, use Download with password."
+              : ""),
       );
     } catch (err) {
       setStatus("error");
@@ -2260,15 +2272,21 @@ export const DocumentEditor = memo(function DocumentEditor({
   // beneath stays recoverable. If any cover sits over live text, warn before
   // handing back a file that looks redacted but isn't. True redactions
   // rasterise the page and are safe, so they never trip this.
-  const download = useCallback(async () => {
-    if (!pdf) return;
-    const warn = findUnsafeCovers(pdf, redactions, planned);
-    if (warn.count > 0) {
-      setCoverWarn(warn);
-      return;
-    }
-    await runExport();
-  }, [pdf, redactions, planned, runExport]);
+  const download = useCallback(
+    async (password?: string) => {
+      if (!pdf) return;
+      // Held across the whiteout warning, so "Download anyway" makes the same
+      // file that was asked for.
+      pendingPassword.current = password;
+      const warn = findUnsafeCovers(pdf, redactions, planned);
+      if (warn.count > 0) {
+        setCoverWarn(warn);
+        return;
+      }
+      await runExport();
+    },
+    [pdf, redactions, planned, runExport],
+  );
 
   const goHome = useCallback(() => onCloseTab(activeId), [activeId, onCloseTab]);
 
@@ -2376,6 +2394,7 @@ export const DocumentEditor = memo(function DocumentEditor({
 
     // Making a file can't start while one is being made.
     { id: "download", group: "export", label: "Download PDF", icon: "download", keywords: "save export", disabled: busy, run: () => void download() },
+    { id: "protect", group: "export", label: "Download with password", icon: "protect", keywords: "encrypt password protect lock secure aes", opens: "dialog", disabled: busy, run: () => setProtectOpen(true) },
     { id: "compress", group: "export", label: "Compress PDF", icon: "compress", keywords: "shrink reduce size optimise", opens: "dialog", disabled: busy, run: openCompress },
     { id: "sign-cert", group: "export", label: "Sign with certificate", icon: "certificate", keywords: "digital signature pades certificate p12 sign", opens: "dialog", disabled: busy, run: () => { setSelection(null); setSignCertOpen(true); } },
     { id: "eximg", group: "export", label: "Export as images", icon: "images", keywords: "png zip export", disabled: busy, run: () => void exportImages() },
@@ -2505,7 +2524,7 @@ export const DocumentEditor = memo(function DocumentEditor({
           <div className={`splitbtn appbar__export${compact ? "" : " splitbtn--split"}`}>
             <button
               className="btn btn--filled appbar__download"
-              onClick={download}
+              onClick={() => void download()}
               disabled={busy}
               // On a phone the label is hidden and only the icon shows; without
               // this the button is announced as just "button".
@@ -3074,8 +3093,24 @@ export const DocumentEditor = memo(function DocumentEditor({
             setCoverWarn(null);
             void runExport();
           }}
-          onCancel={() => setCoverWarn(null)}
+          onCancel={() => {
+            pendingPassword.current = undefined;
+            setCoverWarn(null);
+          }}
         />
+      )}
+
+      {protectOpen && (
+        <Suspense fallback={null}>
+          <ProtectDialog
+            busy={busy}
+            onDownload={(pw) => {
+              setProtectOpen(false);
+              void download(pw);
+            }}
+            onClose={() => setProtectOpen(false)}
+          />
+        </Suspense>
       )}
 
       {finishTab && (

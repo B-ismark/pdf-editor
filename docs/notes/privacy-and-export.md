@@ -193,8 +193,14 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   in a file with `EncryptMetadata false` comes out undecodable. Organise's "Add
   PDF" doesn't decrypt (open the file as a tab instead), and a session saved
   before this change restores without decryption.
-  The download says "This copy has no password." Re-encrypting on export is
-  package 7.
+  The download says "This copy has no password." **Download with password**
+  (`ExportInput.password`) encrypts last, after `assertNoStructureTree`, with
+  `@cantoo/pdf-lib`'s `encrypt` (AES-256, V5/R6). Every permission is granted
+  and the owner password is 32 random bytes nobody is shown: permission flags
+  are honour-system, and a known owner password would only be a second key to
+  the same lock. The password is held in a ref across the whiteout warning and
+  cleared the moment the export reads it — never in state, storage or a
+  session copy.
 - **Download via `src/download.ts`.** It attaches the anchor before clicking and
   defers `revokeObjectURL`; revoking synchronously races the browser's fetch of
   the blob and cancels downloads on Firefox/Safari.

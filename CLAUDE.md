@@ -55,7 +55,7 @@ invariant it protects (and why it exists) is in
 when a spec fails or before you add one. Specs: `app`, `privacy`, `rendering`,
 `export`, `ocr`, `font`, `baseline`, `colors`, `find`, `phone`, `shell`,
 `icons`, `marks`, `affordance`, `shape`, `fragment`, `line`, `ligature`, `chrome`, `tabs`,
-`overlays`, `placement`, `edge`, `keyboard`, `saved`, `password`, `sign`, `pages`, `sidebar`, `patterns`, `hidden`, `update`. If you add a feature that touches privacy, the export bytes, or
+`overlays`, `placement`, `edge`, `keyboard`, `saved`, `password`, `sign`, `pages`, `sidebar`, `patterns`, `hidden`, `update`, `protect`. If you add a feature that touches privacy, the export bytes, or
 per-page rendering, add a spec for it.
 
 ## Architecture

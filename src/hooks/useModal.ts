@@ -20,9 +20,23 @@ interface ModalEntry {
   token: symbol;
   onClose: () => void;
   popClosed: boolean;
+  /** Its history entry exists (it may wait for an earlier unwind, below). */
+  pushed: boolean;
 }
 const stack: ModalEntry[] = [];
 let selfPop = false; // true while we programmatically unwind our own entry
+// Entries waiting for that unwind to land. One dialog handing over to another
+// in the same render (a form closing as the warning it triggers opens) runs
+// the old one's `back()` and the new one's `pushState` back to back — and
+// Chrome finishes the queued back *after* the push, discarding the new entry.
+// The new dialog then believes it owns an entry it doesn't, and closing it
+// steps the browser out of the app. So a push waits for the pop to arrive.
+let waiting: ModalEntry[] = [];
+
+function push(entry: ModalEntry) {
+  entry.pushed = true;
+  window.history.pushState({ __modal: true }, "");
+}
 let listenerInstalled = false;
 
 // Transient popovers (e.g. the colour picker) that own Escape while open.
@@ -41,6 +55,10 @@ function handlePop() {
   // A back() we issued ourselves to clean up an entry — consume it silently.
   if (selfPop) {
     selfPop = false;
+    const next = waiting;
+    waiting = [];
+    next.forEach(push);
+    removeListenerIfEmpty();
     return;
   }
   const top = stack[stack.length - 1];
@@ -57,7 +75,9 @@ function ensureListener() {
 }
 
 function removeListenerIfEmpty() {
-  if (stack.length === 0 && listenerInstalled) {
+  // Not while our own unwind is still on its way: its pop must be consumed
+  // here, or `selfPop` stays set and swallows the next real Back.
+  if (stack.length === 0 && listenerInstalled && !selfPop) {
     window.removeEventListener("popstate", handlePop);
     listenerInstalled = false;
   }
@@ -85,10 +105,11 @@ export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => voi
     const container = containerRef.current;
     const prevActive = document.activeElement as HTMLElement | null;
     const token = Symbol("modal");
-    const entry: ModalEntry = { token, onClose: () => onCloseRef.current(), popClosed: false };
+    const entry: ModalEntry = { token, onClose: () => onCloseRef.current(), popClosed: false, pushed: false };
     stack.push(entry);
     ensureListener();
-    window.history.pushState({ __modal: true }, "");
+    if (selfPop) waiting.push(entry);
+    else push(entry);
 
     const isTop = () => stack[stack.length - 1]?.token === token;
 
@@ -140,7 +161,10 @@ export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => voi
       // Closed via the UI (not the Back gesture) — unwind the history entry we
       // added. `selfPop` makes the resulting popstate a no-op so we never
       // cascade-close a parent modal.
-      if (!entry.popClosed) {
+      if (!entry.pushed) {
+        // Closed before its entry was made: there's nothing to unwind.
+        waiting = waiting.filter((w) => w !== entry);
+      } else if (!entry.popClosed) {
         selfPop = true;
         window.history.back();
       }

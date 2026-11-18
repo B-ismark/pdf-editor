@@ -149,6 +149,16 @@ type-checking can't see, and each exists because it broke once:
   view, an empty script tree, a broken `/Next` chain, a page with three
   private entries, `/BaseState /OFF` layers, and comments on a page that
   doesn't ship.
+- `protect.spec.ts` — Export → Download with password. The download is
+  AES-256 (`/V 5 /R 6`, read from the `/Encrypt` dict with upstream pdf-lib's
+  `ignoreEncryption`); pdf.js, the independent reader, refuses it with no or
+  the wrong password and reads the body with the right one; decrypted, it
+  keeps none of the hidden information export strips. The app's own password
+  prompt opens it. The password is in no storage, and the next plain download
+  isn't encrypted. Through the whiteout warning the copy made is still the
+  protected one, and closing that warning stays in the app: the password form
+  closing as the warning opens used to lose the warning's history step (see
+  `useModal`), so its close stepped the browser back to `about:blank`.
 - `patterns.spec.ts` — Redact patterns: every preset is found in the
   `personal` fixture, a phone number split across two runs too, and the
   decoys (a Luhn-failing "card", a bad-checksum IBAN, a span of years, a short

@@ -586,7 +586,7 @@ test("user-facing counts are written as English", async ({ page }) => {
  * document, so "make me a file" had no one place to look.
  */
 test.describe("Export split button", () => {
-  const OUTPUTS = ["Compress PDF", "Sign with certificate", "Export as images", "Export text (.txt)"];
+  const OUTPUTS = ["Download with password", "Compress PDF", "Sign with certificate", "Export as images", "Export text (.txt)"];
 
   test("the caret opens Export, which holds every way to make a file", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
