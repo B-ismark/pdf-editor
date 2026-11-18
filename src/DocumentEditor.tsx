@@ -28,6 +28,7 @@ import { PageNav } from "./components/PageNav";
 import { PageJump } from "./components/PageJump";
 import { CommandPalette, GROUP_LABEL, ariaKeys, type Command, type CommandGroup } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
+import { leftOutNote } from "./pdf/standardText";
 import { findMatches, findPatternMatches, joinPage, extractText, type FindMatch, type PatternHit } from "./pdf/find";
 import { PATTERN_PRESETS, customMatcher } from "./pdf/patterns";
 import { fitCrop, isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
@@ -287,13 +288,6 @@ function limitGroupMove(
 function placeHint(what: string): string {
   const touch = typeof matchMedia === "function" && matchMedia("(pointer: coarse)").matches;
   return touch ? `Tap where ${what} goes.` : `Click where ${what} goes. Esc cancels.`;
-}
-
-/** The sentence an export adds when a standard font left characters out: the
- * page showed them, the file doesn't, and the user should hear it from us. */
-function leftOutNote(chars: string[]): string {
-  const shown = chars.slice(0, 8).join(" ") + (chars.length > 8 ? " …" : "");
-  return ` Left out ${shown} — the built-in fonts can't write ${chars.length === 1 ? "it" : "them"}.`;
 }
 
 export interface DocumentEditorProps {
@@ -2495,12 +2489,18 @@ export const DocumentEditor = memo(function DocumentEditor({
     setMessage("Preparing to print…");
     try {
       const { exportPdf } = await import("./pdf/exporter");
-      const out = await exportPdf(pdf, exportInput(), (p, t) => setMessage(`Preparing to print… page ${p}/${t}`));
+      let leftOut = "";
+      const out = await exportPdf(
+        pdf,
+        { ...exportInput(), onDropped: (chars) => (leftOut = leftOutNote(chars)) },
+        (p, t) => setMessage(`Preparing to print… page ${p}/${t}`),
+      );
       const { printPdf } = await import("./print");
       const bytes = out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
       await printPdf(bytes, (p, t) => setMessage(`Preparing to print… drawing page ${p}/${t}`));
       setStatus("ready");
-      setMessage("");
+      // The print is the file, so it leaves out what the download would.
+      setMessage(leftOut.trim());
     } catch (err) {
       setStatus("error");
       setMessage(staleBuildMessage(err) ?? "Couldn't prepare the document for printing. Please try again.");

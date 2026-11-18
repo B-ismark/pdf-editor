@@ -74,3 +74,16 @@ export function sanitize(text: string, font: PDFFont, dropped?: Set<string>): st
   for (const ch of text.normalize("NFC")) out += fold(ch, font, dropped);
   return out;
 }
+
+/**
+ * The sentence an export adds when a standard font left characters out: the
+ * page showed them, the file doesn't, and the user should hear it from us.
+ * `where` names the files, when there's more than one (Download all).
+ */
+export function leftOutNote(chars: Iterable<string>, where: string[] = []): string {
+  const all = [...new Set(chars)];
+  if (all.length === 0) return "";
+  const shown = all.slice(0, 8).join(" ") + (all.length > 8 ? " …" : "");
+  const from = where.length > 0 ? ` from ${where.join(", ")}` : "";
+  return ` Left out ${shown}${from} — the built-in fonts can't write ${all.length === 1 ? "it" : "them"}.`;
+}

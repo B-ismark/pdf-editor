@@ -84,3 +84,49 @@ test("an export that leaves nothing out says nothing about it", async ({ page })
   await expect(msg).not.toContainText("Left out");
   expectClean(w);
 });
+
+/** A text box on page 1, typed with insertText (a keyboard has no key for "Ω"). */
+async function addBox(page: Page, text: string) {
+  await pickTool(page, "Add text");
+  const pg = (await page.locator(".page").first().boundingBox())!;
+  await page.mouse.click(pg.x + 80, pg.y + 40);
+  await page.keyboard.insertText(text);
+  await page.keyboard.press("Escape");
+}
+
+test("Download all names what it left out, and from which document", async ({ page }) => {
+  const w = watch(page);
+  const f = await fixtures();
+  await open(page, f.sample);
+  await addBox(page, "Ωmega");
+  // A second tab, so Download all is offered; nothing in it to leave out.
+  await page.setInputFiles("input[data-open-input]", f.typeset);
+  await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+  await page.waitForSelector(".page canvas");
+
+  await page.locator('[aria-label="Export options"]').click();
+  await Promise.all([
+    page.waitForEvent("download"),
+    page.locator(".menu__item", { hasText: "Download all (2) as ZIP" }).click(),
+  ]);
+  const msg = page.locator(".snackbar__msg");
+  await expect(msg).toContainText("Downloaded 2 documents as a ZIP.");
+  await expect(msg).toContainText("Left out Ω from sample.pdf — the built-in fonts can't write it.");
+  expectClean(w);
+});
+
+test("Print names what it left out: the print is the file", async ({ page }) => {
+  const w = watch(page);
+  // Record that the dialog would open, instead of opening it.
+  await page.addInitScript(() => {
+    (window as unknown as Record<string, unknown>).print = () => {
+      (window as unknown as Record<string, unknown>).__printed = true;
+    };
+  });
+  await open(page, (await fixtures()).sample);
+  await addBox(page, "Ωmega");
+  await page.keyboard.press("Control+p");
+  await expect.poll(() => page.evaluate(() => !!(window as unknown as { __printed?: boolean }).__printed), { timeout: 60_000 }).toBe(true);
+  await expect(page.locator(".snackbar__msg")).toContainText("Left out Ω — the built-in fonts can't write it.");
+  expectClean(w);
+});

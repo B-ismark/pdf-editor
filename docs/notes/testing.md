@@ -262,8 +262,9 @@ type-checking can't see, and each exists because it broke once:
   character WinAnsi can't encode instead of throwing, so `sanitize`
   (`standardText.ts`) detects it by its encoding. A letter with a plain form
   is folded to it (Ł→L, ź→z, ﬁ→fi; ó is WinAnsi already and stays); Greek and
-  Chinese are left out, and the status line after export names each left-out
-  character once (and says nothing when none were). Read through pdf.js,
+  Chinese are left out, and the status line after Download, Download all
+  (naming the documents) and Print names each left-out character once (and
+  says nothing when none were). Read through pdf.js,
   since content streams are compressed;
 - `saved.spec.ts` — a download is a save: it clears the counter, the tab's
   dot and the leave prompt, and turns the close prompt into a plain "Close";
