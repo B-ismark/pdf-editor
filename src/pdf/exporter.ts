@@ -625,9 +625,13 @@ export async function exportPdf(
         const src = await embedder.get(i, fragment.itemIndex);
         if (src && src.covers(edit!.text)) font = src.font;
       }
-      if (!font) font = await getFont(standardFontKey(style.font, style.bold, style.italic));
-
-      const text = sanitize(edit!.text, font, dropped);
+      // Only a standard font is sanitised. The document's own face has
+      // already been checked by `covers`, and in it a missing glyph — a
+      // space a subset left out, say — encodes as glyph 0, as "?" does when
+      // the subset has no "?" either; sanitize would take the spaces out.
+      const text = font
+        ? edit!.text
+        : sanitize(edit!.text, (font = await getFont(standardFontKey(style.font, style.bold, style.italic))), dropped);
       // Kept to the room before the next run on its line — see lineFit.ts.
       const k = fitScale(font.widthOfTextAtSize(text, style.size), fragment.width, roomAfter(fragment, pageData.fragments, edits));
       const textWidth = font.widthOfTextAtSize(text, style.size) * k;

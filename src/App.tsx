@@ -758,7 +758,7 @@ export function App() {
           losslessRaster,
           onDropped: (chars) => {
             chars.forEach((c) => leftOut.add(c));
-            leftOutOf.push(t.fileName);
+            if (!leftOutOf.includes(t.fileName)) leftOutOf.push(t.fileName);
           },
         });
         // Two tabs can share a file name (the same file opened twice); a ZIP

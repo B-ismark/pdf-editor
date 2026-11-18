@@ -10,6 +10,9 @@ import type { PDFFont } from "@cantoo/pdf-lib";
  * as "????". Nothing throws any more, so the only test left is the encoding:
  * a character that encodes exactly as "?" does, and isn't "?", was replaced.
  *
+ * Standard fonts only. In an embedded font a missing glyph encodes as glyph
+ * 0, and so may "?", so the test would take out whatever the subset lacks.
+ *
  * Type-only import: this module adds nothing to the render path.
  */
 
