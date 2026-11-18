@@ -67,6 +67,9 @@ export interface OpenDoc {
   /** The file on the user's disk it was opened from (or last saved as), where
    * the browser lets the app write back to it. Held in memory only. */
   handle?: FileHandle;
+  /** The file behind `handle` opens with a password, so saving over it
+   * removes that — the user is asked first. Cleared once it's been written. */
+  handleLocked?: boolean;
 }
 
 /** The document state a parked tab is at. */

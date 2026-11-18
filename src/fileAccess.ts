@@ -17,6 +17,7 @@ export interface FileHandle {
   createWritable(): Promise<{ write(data: BlobPart): Promise<void>; close(): Promise<void>; abort?(): Promise<void> }>;
   queryPermission?(d: { mode: "readwrite" }): Promise<PermissionState>;
   requestPermission?(d: { mode: "readwrite" }): Promise<PermissionState>;
+  isSameEntry?(other: FileHandle): Promise<boolean>;
 }
 
 interface PickerType {
@@ -46,12 +47,40 @@ export const canSaveAs = () => typeof pickers().showSaveFilePicker === "function
 export async function pickFiles(): Promise<{ file: File; handle: FileHandle }[] | null> {
   const show = pickers().showOpenFilePicker;
   if (!show) return null;
+  let handles: FileHandle[];
   try {
-    const handles = await show({ multiple: true, types: OPEN_TYPES });
-    return await Promise.all(handles.map(async (handle) => ({ file: await handle.getFile(), handle })));
+    handles = await show({ multiple: true, types: OPEN_TYPES });
   } catch (e) {
     if (isAbort(e)) return null;
     throw e;
+  }
+  // Picked, but unreadable (moved, deleted, locked by another app): said as
+  // such, not taken for a picker that didn't work.
+  return Promise.all(
+    handles.map(async (handle) => {
+      try {
+        return { file: await handle.getFile(), handle };
+      } catch {
+        throw new UnreadableFile(handle.name);
+      }
+    }),
+  );
+}
+
+/** A file the user picked that couldn't then be read. */
+export class UnreadableFile extends Error {
+  constructor(readonly fileName: string) {
+    super(`Couldn't read ${fileName}`);
+    this.name = "UnreadableFile";
+  }
+}
+
+/** Are these the same file on disk? */
+export async function sameFile(a: FileHandle, b: FileHandle): Promise<boolean> {
+  try {
+    return (await a.isSameEntry?.(b)) ?? false;
+  } catch {
+    return false;
   }
 }
 
@@ -95,7 +124,11 @@ export async function writeTo(handle: FileHandle, bytes: Uint8Array): Promise<vo
 export const pdfFile = (bytes: Uint8Array, name: string) => new File([bytes as BlobPart], name, { type: "application/pdf" });
 
 /** Can this browser share a PDF file? (Not just a link — many can only do that.) */
+let shareable: boolean | undefined;
 export function canShareFiles(): boolean {
+  return (shareable ??= probeShare());
+}
+function probeShare(): boolean {
   const nav = navigator as Navigator & { canShare?: (d: ShareData) => boolean };
   if (typeof nav.share !== "function" || typeof nav.canShare !== "function") return false;
   try {

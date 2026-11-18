@@ -1,6 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
-import { readFileSync } from "node:fs";
-import { basename } from "node:path";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { basename, join } from "node:path";
+import { PDFDocument } from "pdf-lib";
 import { fixtures, LOCKED_PASSWORD } from "./fixtures";
 import { dragOnPage, expectClean, open, pageTexts, pickTool, watch } from "./helpers";
 
@@ -29,6 +31,8 @@ interface StubOpts {
   /** Install a share sheet; "tap" refuses the first call as a browser does
    * once the click that asked for it has expired. */
   share?: "ok" | "tap";
+  /** Make every write fail, as a full disk or a file locked elsewhere does. */
+  failWrite?: boolean;
 }
 
 const asStub = (path: string): StubFile => ({ name: basename(path), b64: readFileSync(path).toString("base64") });
@@ -56,11 +60,15 @@ async function installStubs(page: Page, opts: StubOpts): Promise<void> {
       createWritable: async () => {
         const parts: BlobPart[] = [];
         return {
-          write: async (d: BlobPart) => void parts.push(d),
+          write: async (d: BlobPart) => {
+            if (o.failWrite) throw new DOMException("No space", "QuotaExceededError");
+            parts.push(d);
+          },
           close: async () => void writes.push({ name, b64: await toB64(new Blob(parts)) }),
           abort: async () => {},
         };
       },
+      isSameEntry: async (other: { name: string }) => other.name === name,
       queryPermission: async () => o.permission ?? "granted",
       requestPermission: async () => {
         calls.request++;
@@ -186,7 +194,7 @@ test.describe("save in place", () => {
     await page.keyboard.press("Control+s");
     const warn = page.getByRole("dialog", { name: "Save without its password?" });
     await expect(warn).toBeVisible();
-    await warn.getByRole("button", { name: "Cancel" }).click();
+    await warn.getByRole("button", { name: "Go back" }).click();
     expect(await writes(page)).toEqual([]);
 
     await page.keyboard.press("Control+s");
@@ -227,11 +235,19 @@ test.describe("save as", () => {
     await installStubs(page, {});
     await open(page, f.sample);
     await addText(page, "Kept");
+    // Every message shown from here on, as it's shown.
+    await page.evaluate(() => {
+      const seen: string[] = ((window as unknown as { __said: string[] }).__said = []);
+      new MutationObserver(() => {
+        for (const m of document.querySelectorAll(".snackbar__msg")) seen.push(m.textContent ?? "");
+      }).observe(document.body, { subtree: true, childList: true, characterData: true });
+    });
     await page.keyboard.press("Control+s");
     await expect.poll(async () => (await calls(page)).save).toBe(1);
+    await page.waitForTimeout(800);
     expect(await writes(page)).toEqual([]);
     await expect(counter(page)).toHaveText("1 change");
-    await expect(page.locator(".snackbar__msg")).toHaveCount(0);
+    expect(await page.evaluate(() => (window as unknown as { __said: string[] }).__said)).toEqual([]);
   });
 
   test("where the browser can't pick a place, Ctrl+S downloads", async ({ page }) => {
@@ -261,9 +277,12 @@ test.describe("share", () => {
     await exportMenu(page).getByRole("menuitem", { name: "Share" }).click();
     await expect.poll(async () => (await calls(page)).share).toBe(1);
     const shared = await page.evaluate(() => (window as unknown as { __shared: { name: string; type: string; b64: string }[] }).__shared);
-    expect(shared.map((s) => [s.name, s.type])).toEqual([["sample.pdf", "application/pdf"]]);
+    // Named as a download is, so it isn't mistaken for the original.
+    expect(shared.map((s) => [s.name, s.type])).toEqual([["sample-edited.pdf", "application/pdf"]]);
     const [text] = await pageTexts(Buffer.from(shared[0].b64, "base64"), [1]);
     expect(text).toContain("Shared text");
+    // A share target may keep nothing ("Copy", a draft): it isn't a save.
+    await expect(counter(page)).toHaveText("1 change");
   });
 
   test("when the browser wants a fresh tap, the file is ready behind one", async ({ page }) => {
@@ -277,6 +296,9 @@ test.describe("share", () => {
     await ready.getByRole("button", { name: "Share" }).click();
     await expect(ready).toHaveCount(0);
     expect((await calls(page)).share).toBe(2);
+    const shared = await page.evaluate(() => (window as unknown as { __shared: { b64: string }[] }).__shared);
+    expect(shared).toHaveLength(1);
+    expect(Buffer.from(shared[0].b64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
   });
 
   test("without a share sheet that takes files, there's no Share", async ({ page }) => {
@@ -356,5 +378,144 @@ test.describe("print", () => {
     // The pages go once printing is over.
     await page.evaluate(() => window.dispatchEvent(new Event("afterprint")));
     await expect(page.locator("#print-root")).toHaveCount(0);
+  });
+});
+
+/** Found by review, each shown failing before its fix. */
+test.describe("review fixes", () => {
+  test("the same file picked again goes to its tab, not a second one that would save over it", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.sample)] });
+    await openPicked(page);
+    await page.keyboard.press("Control+o");
+    await expect(page.getByRole("status").filter({ hasText: "sample.pdf is already open" }).first()).toBeVisible();
+    await expect(page.locator(".doctab")).toHaveCount(1);
+  });
+
+  test("two Ctrl+S at once write the file once", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.sample)] });
+    await openPicked(page);
+    await addText(page, "Once");
+    await page.evaluate(() => {
+      for (let i = 0; i < 2; i++) window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", ctrlKey: true, bubbles: true, cancelable: true }));
+    });
+    await expect(counter(page)).toHaveText("Saved");
+    await page.waitForTimeout(1500);
+    expect((await writes(page)).length).toBe(1);
+  });
+
+  test("once saved without its password, the file isn't warned about again", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.locked)] });
+    await openPicked(page, false);
+    const pw = page.getByRole("dialog", { name: "This PDF is password-protected" });
+    await pw.getByLabel("Password").fill(LOCKED_PASSWORD);
+    await pw.getByLabel("Password").press("Enter");
+    await page.waitForSelector(".page canvas", { timeout: 30_000 });
+    await addText(page, "One");
+    await page.keyboard.press("Control+s");
+    await page.getByRole("dialog", { name: "Save without its password?" }).getByRole("button", { name: "Save without password" }).click();
+    await expect(counter(page)).toHaveText("Saved");
+    await addText(page, "Two");
+    await page.keyboard.press("Control+s");
+    await expect(counter(page)).toHaveText("Saved");
+    await expect(page.getByRole("dialog", { name: "Save without its password?" })).toHaveCount(0);
+    expect((await writes(page)).length).toBe(2);
+  });
+
+  test("a print the browser starts itself prints the screen, not blank paper", async ({ page }) => {
+    const f = await fixtures();
+    await open(page, f.sample);
+    await page.emulateMedia({ media: "print" });
+    await expect(page.locator(".appbar")).toBeVisible();
+  });
+
+  test("a landscape page prints on a landscape sheet", async ({ page }) => {
+    const d = await PDFDocument.create();
+    d.addPage([595, 842]);
+    d.addPage([842, 595]);
+    const file = join(mkdtempSync(join(tmpdir(), "print-")), "mixed.pdf");
+    writeFileSync(file, await d.save());
+    await page.addInitScript(() => {
+      const w = window as unknown as Record<string, unknown>;
+      w.print = () => {
+        const imgs = [...document.querySelectorAll<HTMLImageElement>("#print-root img.print-page")];
+        const rules = [...document.adoptedStyleSheets].flatMap((s) => [...s.cssRules].map((r) => r.cssText));
+        w.__printed = imgs.map((i) => {
+          const name = i.style.getPropertyValue("page");
+          return rules.find((r) => name && r.startsWith(`@page ${name} `)) ?? "";
+        });
+      };
+    });
+    await open(page, file);
+    await page.keyboard.press("Control+p");
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __printed?: string[] }).__printed), { timeout: 60_000 }).toBeTruthy();
+    const sheets = await page.evaluate(() => (window as unknown as { __printed: string[] }).__printed);
+    expect(sheets[0]).toContain("595pt 842pt");
+    expect(sheets[1]).toContain("842pt 595pt");
+  });
+
+  test("on a Mac, Ctrl+S is left to the text; ⌘S saves", async ({ page }) => {
+    const f = await fixtures();
+    await page.addInitScript(() => Object.defineProperty(navigator, "platform", { get: () => "MacIntel" }));
+    await installStubs(page, { open: [asStub(f.sample)] });
+    await openPicked(page);
+    await addText(page, "Mac");
+    await page.keyboard.press("Control+s");
+    await page.waitForTimeout(800);
+    expect(await writes(page)).toEqual([]);
+    await page.keyboard.press("Meta+s");
+    await expect(counter(page)).toHaveText("Saved");
+  });
+});
+
+test.describe("save in place, with more open", () => {
+  test("each tab saves to its own file", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.sample), asStub(f.typeset)] });
+    await openPicked(page);
+    await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+    await page.locator(".doctab", { hasText: "sample.pdf" }).click();
+    await page.waitForSelector(".page canvas");
+    await addText(page, "Into sample");
+    await page.keyboard.press("Control+s");
+    await expect(counter(page)).toHaveText("Saved");
+    const out = await writes(page);
+    expect(out.map((x) => x.name)).toEqual(["sample.pdf"]);
+    const [text] = await pageTexts(Buffer.from(out[0].b64, "base64"), [1]);
+    expect(text).toContain("Into sample");
+    expect(text).toContain("Confidential Report");
+  });
+
+  test("a write that fails leaves the work unsaved, and says the file is unchanged", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { open: [asStub(f.sample)], failWrite: true });
+    await openPicked(page);
+    await addText(page, "Not written");
+    await page.keyboard.press("Control+s");
+    await expect(page.getByRole("status").filter({ hasText: "it's unchanged" }).first()).toBeVisible();
+    await expect(counter(page)).toHaveText("1 change");
+    await expect(activeTab(page).locator(".doctab__dirty")).toHaveCount(1);
+  });
+
+  test("after Save as on a password-opened file, Ctrl+S doesn't claim the new file has a password", async ({ page }) => {
+    const f = await fixtures();
+    await installStubs(page, { saveAs: "copy.pdf" });
+    await page.addInitScript(() => delete (window as { showOpenFilePicker?: unknown }).showOpenFilePicker);
+    await page.goto("/");
+    await page.setInputFiles("input[data-open-input]", f.locked);
+    const pw = page.getByRole("dialog", { name: "This PDF is password-protected" });
+    await pw.getByLabel("Password").fill(LOCKED_PASSWORD);
+    await pw.getByLabel("Password").press("Enter");
+    await page.waitForSelector(".page canvas", { timeout: 30_000 });
+    await addText(page, "One");
+    await page.keyboard.press("Control+s");
+    await expect(counter(page)).toHaveText("Saved");
+    await addText(page, "Two");
+    await page.keyboard.press("Control+s");
+    await expect(counter(page)).toHaveText("Saved");
+    await expect(page.getByRole("dialog", { name: "Save without its password?" })).toHaveCount(0);
+    expect((await writes(page)).map((x) => x.name)).toEqual(["copy.pdf", "copy.pdf"]);
   });
 });

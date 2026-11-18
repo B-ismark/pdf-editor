@@ -170,8 +170,14 @@ type-checking can't see, and each exists because it broke once:
   nothing; a password-opened file warns first. With no handle Ctrl+S is Save
   as (asked once, then the tab is that file); a cancelled picker is silent;
   without pickers Ctrl+S downloads. Share passes the edited PDF, and a refused
-  first call offers "Ready to share". Print lays out 12 pages at 595×842 pt,
-  150 dpi, with the redaction black; under print media only they show.
+  first call offers "Ready to share" (and isn't a save). Print lays out 12
+  pages at 595×842 pt, 150 dpi, with the redaction black; under print media
+  only they show. Review fixes: the same file picked again goes to its tab; two
+  Ctrl+S at once write once; a file once saved without its password (in place
+  or via Save as) isn't warned about again; a browser-started print shows the
+  app; a landscape page gets a landscape `@page`; on a Mac Ctrl+S is left
+  alone; with two tabs each saves to its own file; a failed write stays
+  unsaved.
 - `crop.spec.ts` — Package 8b. A page whose CropBox starts at 100,200: the
   heading's overlay sits on its glyphs (not off the page), an edit is redrawn
   at the run's own user-space position, and a link drawn 20 points in from

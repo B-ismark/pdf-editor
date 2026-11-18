@@ -37,19 +37,29 @@ export async function printPdf(
   root.setAttribute("aria-hidden", "true");
   const urls: string[] = [];
   const sheet = new CSSStyleSheet();
+  const printing = window.matchMedia("print");
+  // `afterprint` isn't fired everywhere; leaving print media is the other sign.
+  const onMedia = (e: MediaQueryListEvent) => {
+    if (!e.matches) cleanUp();
+  };
   current = () => {
     root.remove();
     for (const u of urls) URL.revokeObjectURL(u);
     document.adoptedStyleSheets = document.adoptedStyleSheets.filter((s) => s !== sheet);
     window.removeEventListener("afterprint", cleanUp);
+    printing.removeEventListener("change", onMedia);
   };
   try {
-    let first: { w: number; h: number } | null = null;
+    // One named page size per distinct page size, so a landscape page in a
+    // portrait document prints on a landscape sheet, not clipped onto a
+    // portrait one.
+    const sizes = new Map<string, string>();
     for (let i = 0; i < doc.numPages; i++) {
       onProgress(i + 1, doc.numPages);
       const page = await doc.getPage(i + 1);
       const vp = page.getViewport({ scale: 1 });
-      first ??= { w: vp.width, h: vp.height };
+      const size = `${vp.width}pt ${vp.height}pt`;
+      if (!sizes.has(size)) sizes.set(size, `pdfsheet${sizes.size}`);
       const want = DPI / 72;
       const scale = Math.min(want, Math.sqrt(MAX_PAGE_PX / (vp.width * vp.height)));
       const canvas = await renderPageToCanvas(bytes, i, scale);
@@ -65,13 +75,18 @@ export async function printPdf(
       // Sized in points, so it prints at the page's own size.
       img.style.width = `${vp.width}pt`;
       img.style.height = `${vp.height}pt`;
+      img.style.setProperty("page", sizes.get(size)!);
       root.append(img);
       await img.decode().catch(() => {});
     }
-    // The sheet the printer is asked for: the first page's size, no margins —
-    // the page carries its own. A constructed sheet, not a <style>: the
-    // content policy allows no inline styles.
-    if (first) sheet.replaceSync(`@page { size: ${first.w}pt ${first.h}pt; margin: 0; }`);
+    // The sheets the printer is asked for: each page's own size, no margins —
+    // the page carries its own. The first size is also the default, for a
+    // browser that doesn't know named pages. (A constructed sheet: no
+    // <style> element to inject, and nothing left behind once it's removed.)
+    const [firstSize] = sizes.keys();
+    const rules = [...sizes].map(([size, name]) => `@page ${name} { size: ${size}; margin: 0; }`);
+    if (firstSize) rules.unshift(`@page { size: ${firstSize}; margin: 0; }`);
+    sheet.replaceSync(rules.join("\n"));
     document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
     document.body.append(root);
   } catch (e) {
@@ -83,5 +98,6 @@ export async function printPdf(
   // Most browsers block on print(); some return at once and print later.
   // Either way the pages go when printing is over.
   window.addEventListener("afterprint", cleanUp, { once: true });
+  printing.addEventListener("change", onMedia);
   window.print();
 }

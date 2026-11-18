@@ -63,7 +63,7 @@ import {
   HardDrive,
   FileOutput,
   Printer,
-  Share,
+  Share2,
   ScanText,
   TextSearch,
   Search,
@@ -203,7 +203,7 @@ const MAP: Record<string, LucideIcon> = {
   save: Save,
   save_as: FileOutput,
   print: Printer,
-  share: Share,
+  share: Share2,
   /** Bring a previous session back. `History` was the obvious pick and the wrong
    * one: it is `RotateCcw` — the `reset` glyph — with a clock hand added, same arc,
    * same arrowhead. A document with a clock says "the file you had, earlier". */

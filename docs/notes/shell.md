@@ -253,7 +253,17 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   - A file's *handle* (`OpenDoc.handle`) comes only from `pickFiles` (Ctrl+O /
     Choose PDF on Chromium) or Save as, is memory-only and is lost on restore.
     Pictures never get one — saving a PDF over a JPEG. A rebuild that replaces
-    the tab (Organise) keeps it.
+    the tab (Organise) keeps it. Picking a file that's already open
+    (`isSameEntry`) goes to its tab: two tabs on one file save over each other.
+  - `handleLocked`, not `locked`, decides the "Save without its password?"
+    warning: it's about the file on disk, and clears once that's written
+    (in place or Save as). `locked` stays — it keeps the unlocked copy out of
+    the browser's storage.
+  - Save / Save as / Print / Share run one at a time (`exclusive`, a ref set at
+    once — the busy status lands a render later); a held Ctrl+S is one save.
+    On a Mac only ⌘ — Ctrl+P there is "caret up" in text. Under a dialog Ctrl+S
+    is swallowed (no "save web page"), Ctrl+P left to the browser.
+  - Share does **not** mark the document saved: a share target may keep nothing.
   - Permission is asked (`mayWrite`) **before** the export: the prompt needs
     the click, and a long build outlives it. Share can't do that (the file must
     exist first), so a `NotAllowedError` becomes the "Ready to share"
@@ -264,8 +274,11 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     closing doesn't ask (the write finished; a download might not have).
   - Print draws its own raster pages into `#print-root` and hides the app under
     `@media print` — no iframe (needs a CSP change, and a built-in viewer
-    phones lack). The `@page` size goes in a constructed sheet: the CSP allows
-    no inline `<style>`. Pages go on `afterprint`.
+    phones lack). The hiding is `body:has(> #print-root)`, so a print the
+    browser starts itself still prints the screen, not blank paper. Each page
+    size gets a named `@page` (`page:` on its image) in a constructed sheet, so
+    a landscape page gets a landscape sheet. Pages go on `afterprint` or when
+    print media ends, whichever comes.
   - Playwright gets no `filechooser` for `showOpenFilePicker`, so a spec that
     opens through the input on Chromium deletes it first (`tabs.spec` Ctrl+O),
     and `saveto.spec` stubs the pickers.

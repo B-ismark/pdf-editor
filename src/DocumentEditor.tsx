@@ -42,6 +42,9 @@ type Delivery =
   | { kind: "save"; target: FileHandle }
   | { kind: "save-as"; target: FileHandle }
   | { kind: "share" };
+/** Apple keyboards: the document shortcuts are ⌘, never Ctrl. */
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/.test(navigator.platform);
+
 const DELIVERY_VERB: Record<Delivery["kind"], string> = { download: "Download", save: "Save", "save-as": "Save", share: "Share" };
 import { onStrayBack, pushHistory, unwindHistory, type HistoryEntry } from "./hooks/useModal";
 import { plural } from "./plural";
@@ -368,7 +371,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   setLosslessRaster,
   theme,
 }: DocumentEditorProps) {
-  const { pdf, fileName, baked, saved: savedMark, locked, id: activeId, handle } = entry;
+  const { pdf, fileName, baked, saved: savedMark, locked, id: activeId, handle, handleLocked } = entry;
   const [tool, setTool] = useState<Tool>("select");
   /** "This page is a picture" — offered the first time the user clicks a page
    * with no text layer to edit (a scan, or a "print to PDF" that flattened
@@ -2046,9 +2049,13 @@ export const DocumentEditor = memo(function DocumentEditor({
       // A modal (Organize / Finish / Compress / Command Palette) owns the
       // keyboard while it's open — don't undo/redo/find/delete on the canvas
       // hidden beneath it. Modals manage their own Escape via useModal.
-      if (aModalIsOpen()) return;
       const mod = e.metaKey || e.ctrlKey;
       const key = e.key.toLowerCase();
+      if (aModalIsOpen()) {
+        // Not the browser's "save this web page" either, under a dialog.
+        if (mod && key === "s") e.preventDefault();
+        return;
+      }
       if (mod && key === "z") {
         e.preventDefault();
         e.shiftKey ? redo() : undo();
@@ -2056,8 +2063,11 @@ export const DocumentEditor = memo(function DocumentEditor({
       }
       // Ctrl/⌘+S saves the document, Ctrl/⌘+P prints it — not the browser's
       // "save this web page" or a print of the editor's own screen.
-      if (mod && (key === "s" || key === "p") && !e.shiftKey && !e.altKey) {
+      // On a Mac only ⌘: Ctrl+P there moves the caret up a line in text.
+      if ((IS_MAC ? e.metaKey && !e.ctrlKey : mod) && (key === "s" || key === "p") && !e.shiftKey && !e.altKey) {
         e.preventDefault();
+        // Held down, it's one save, not one per key repeat.
+        if (e.repeat) return;
         setMenuOpen(false);
         setExportOpen(false);
         if (key === "s") fileKeys.current.save();
@@ -2340,7 +2350,8 @@ export const DocumentEditor = memo(function DocumentEditor({
           setShareReady(file);
           setMessage("Your file is ready to share.");
         } else if (shared === "shared") {
-          onSaved(activeId, mark);
+          // Not marked saved: a share target ("Copy", a message draft) may
+          // keep nothing, so the work still needs saving somewhere.
           setMessage(`Shared ${editedName}.${flattened}${noPassword}`);
         } else setMessage("Not shared.");
         return;
@@ -2384,10 +2395,25 @@ export const DocumentEditor = memo(function DocumentEditor({
   );
   const download = useCallback((password?: string) => deliver({ kind: "download", password }), [deliver]);
 
+  // One save / print / share at a time. Set at once, not on the next render as
+  // the busy status is: a second Ctrl+S (or key repeat) while the first waits
+  // on a permission or a picker would otherwise start a second export to the
+  // same file.
+  const fileOp = useRef(false);
+  const exclusive = useCallback(async (op: () => Promise<void>) => {
+    if (fileOp.current || busyRef.current) return;
+    fileOp.current = true;
+    try {
+      await op();
+    } finally {
+      fileOp.current = false;
+    }
+  }, []);
+
   /** Write back to the file it came from. Permission is asked first, while the
    * click that asked for the save still counts. */
-  const saveInPlace = useCallback(async () => {
-    if (!handle || busyRef.current) return;
+  const saveInPlace = useCallback(() => exclusive(async () => {
+    if (!handle) return;
     try {
       if (!(await mayWrite(handle))) {
         setMessage(`Not saved — writing to ${handle.name} wasn't allowed. Try Save as… or Download.`);
@@ -2398,20 +2424,21 @@ export const DocumentEditor = memo(function DocumentEditor({
       return;
     }
     await deliver({ kind: "save", target: handle });
-  }, [handle, deliver]);
+  }), [handle, deliver, exclusive]);
 
   /** Save to a file the user picks; the document is that file from then on. */
-  const saveAs = useCallback(async () => {
-    if (!pdf || busyRef.current) return;
+  const saveAs = useCallback(() => exclusive(async () => {
+    if (!pdf) return;
     let target: FileHandle | null;
     try {
-      target = await pickSaveTarget(fileName.replace(/\.pdf$/i, "") + "-edited.pdf");
+      // "-edited" once: a file already saved as one isn't offered "-edited-edited".
+      target = await pickSaveTarget(fileName.replace(/\.pdf$/i, "").replace(/-edited$/i, "") + "-edited.pdf");
     } catch {
       setMessage("Couldn't open the save dialog. Use Download instead.");
       return;
     }
     if (target) await deliver({ kind: "save-as", target });
-  }, [pdf, fileName, deliver]);
+  }), [pdf, fileName, deliver, exclusive]);
 
   /** Ctrl+S: back to its own file where there is one; else wherever the user
    * picks; else a download — never the browser's "save this web page". */
@@ -2420,17 +2447,17 @@ export const DocumentEditor = memo(function DocumentEditor({
     if (handle) {
       // Over a file that opened with a password, the copy written wouldn't
       // have one: say so first.
-      if (locked) setUnlockWarn(true);
+      if (handleLocked) setUnlockWarn(true);
       else void saveInPlace();
     } else if (canSaveAs()) void saveAs();
     else void download();
-  }, [pdf, handle, locked, saveInPlace, saveAs, download]);
+  }, [pdf, handle, handleLocked, saveInPlace, saveAs, download]);
 
-  const share = useCallback(() => deliver({ kind: "share" }), [deliver]);
+  const share = useCallback(() => exclusive(() => deliver({ kind: "share" })), [deliver, exclusive]);
 
   /** Print the finished file — the edits drawn in, as they'll download. */
-  const printDoc = useCallback(async () => {
-    if (!pdf || busyRef.current) return;
+  const printDoc = useCallback(() => exclusive(async () => {
+    if (!pdf) return;
     setStatus("exporting");
     setMessage("Preparing to print…");
     try {
@@ -2445,7 +2472,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       setStatus("error");
       setMessage(staleBuildMessage(err) ?? "Couldn't prepare the document for printing. Please try again.");
     }
-  }, [pdf, exportInput]);
+  }), [pdf, exportInput, exclusive]);
   fileKeys.current = { save, print: () => void printDoc() };
 
   const goHome = useCallback(() => onCloseTab(activeId), [activeId, onCloseTab]);
@@ -2554,7 +2581,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     { id: "watermark", group: "finish", label: "Watermark", icon: "watermark", keywords: "draft stamp", opens: "dialog", run: () => { setSelection(null); setFinishTab("watermark"); } },
 
     // Making a file can't start while one is being made.
-    { id: "download", group: "export", label: "Download PDF", icon: "download", keywords: "save export", disabled: busy, run: () => void download() },
+    { id: "download", group: "export", label: "Download PDF", icon: "download", keywords: "save export", shortcut: !handle && !canSaveAs() ? "Ctrl+S" : undefined, disabled: busy, run: () => void download() },
     { id: "save", group: "export", label: `Save to ${handle?.name ?? ""}`, icon: "save", shortcut: "Ctrl+S", keywords: "save write file disk overwrite in place", disabled: busy, hidden: !handle, run: save },
     { id: "save-as", group: "export", label: "Save as…", icon: "save_as", shortcut: handle ? undefined : "Ctrl+S", keywords: "save file disk new copy choose folder location", disabled: busy, hidden: !canSaveAs(), run: () => void saveAs() },
     { id: "print", group: "export", label: "Print", icon: "print", shortcut: "Ctrl+P", keywords: "paper printer", disabled: busy, run: () => void printDoc() },
