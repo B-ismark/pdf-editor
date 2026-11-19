@@ -32,9 +32,13 @@ function resolve(mode: ThemeMode): "light" | "dark" {
  */
 export function useTheme() {
   const [mode, setMode] = useState<ThemeMode>(readMode);
+  // The theme actually on screen — "system" resolved, and kept live as the OS
+  // flips — for what follows the theme rather than the choice (Dim pages).
+  const [resolved, setResolved] = useState<"light" | "dark">(() => resolve(readMode()));
 
   const apply = useCallback((m: ThemeMode) => {
     const resolved = resolve(m);
+    setResolved(resolved);
     document.documentElement.setAttribute("data-theme", resolved);
     const meta = document.querySelector('meta[name="theme-color"]');
     if (meta) meta.setAttribute("content", resolved === "dark" ? "#141218" : "#fef7ff");
@@ -63,5 +67,5 @@ export function useTheme() {
     setMode((m) => MODES[(MODES.indexOf(m) + 1) % MODES.length]);
   }, []);
 
-  return { mode, setMode, cycle };
+  return { mode, setMode, cycle, resolved };
 }

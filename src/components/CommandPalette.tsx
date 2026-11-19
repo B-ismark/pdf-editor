@@ -1,4 +1,5 @@
 import { scrimPress } from "../hooks/useModal";
+import { leaveRef } from "../leave";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./Icon";
 
@@ -164,7 +165,7 @@ export function CommandPalette({ commands, onClose }: Props) {
   };
 
   return (
-    <div className="cmdk-scrim" onPointerDown={scrimPress(close)}>
+    <div className="cmdk-scrim" ref={leaveRef} onPointerDown={scrimPress(close)}>
       <div
         className="cmdk"
         role="dialog"

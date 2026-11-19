@@ -1314,7 +1314,7 @@ body {
 .app--dim .page__canvas,
 .app--dim .page__overlay,
 .app--dim .thumb__canvas {
-  filter: brightness(0.8);
+  filter: brightness(0.85);
   transition: filter var(--dur-short4) var(--ease-standard);
 }
 
@@ -3342,4 +3342,73 @@ body {
 @keyframes snack-in-left {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* ============ Motion: open and close (10g) ============
+   One vocabulary for everything that appears over the work. Arriving is
+   emphasized-decelerate (fast out of the gate, a long soft landing); leaving
+   is accelerate and shorter, because the person has already moved on — M3's
+   rule that exits run quicker than entrances. Scrims fade; surfaces fade and
+   travel a few pixels from where they came from: a menu from its button, a
+   dialog up from below, a sheet from the bottom edge. Exits are played by a
+   copy of the closed surface (src/leave.ts) — `.is-leaving` is only ever on
+   that copy. Reduced motion zeroes every duration in theme.css, and
+   leave.ts makes no copy at all. */
+.dialog-scrim,
+.cmdk-scrim {
+  animation: scrim-in var(--dur-short4) var(--ease-standard);
+}
+.dialog {
+  animation: dialog-in var(--dur-med2) var(--ease-emphasized-decelerate);
+}
+.menu__list {
+  transform-origin: top right;
+  animation: menu-in var(--dur-short4) var(--ease-emphasized-decelerate);
+}
+.colorfield__pop {
+  transform-origin: top left;
+  animation: menu-in var(--dur-short4) var(--ease-emphasized-decelerate);
+}
+@keyframes scrim-in { from { opacity: 0; } }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(12px) scale(0.97); } }
+@keyframes menu-in { from { opacity: 0; transform: translateY(-4px) scale(0.96); } }
+
+.is-leaving { pointer-events: none !important; }
+.dialog-scrim.is-leaving,
+.cmdk-scrim.is-leaving {
+  animation: scrim-out var(--dur-short3) var(--ease-standard-accelerate) forwards;
+}
+.dialog-scrim.is-leaving > .dialog,
+.cmdk-scrim.is-leaving > .cmdk {
+  animation: dialog-out var(--dur-short3) var(--ease-emphasized-accelerate) forwards;
+}
+.menu__list.is-leaving,
+.colorfield__pop.is-leaving {
+  animation: menu-out var(--dur-short2) var(--ease-standard-accelerate) forwards;
+}
+.panel.is-leaving {
+  animation: sheet-down var(--dur-short4) var(--ease-emphasized-accelerate) forwards;
+}
+/* The phone's page drawer and the scrims under it and the sheet. (Docked, the
+   drawer is in the layout and leave.ts makes no copy.) */
+.scrim,
+.pagenav__scrim { animation: scrim-in var(--dur-short4) var(--ease-standard); }
+.scrim.is-leaving,
+.pagenav__scrim.is-leaving {
+  animation: scrim-out var(--dur-short3) var(--ease-standard-accelerate) forwards;
+}
+.pagenav.is-leaving {
+  animation: drawer-out var(--dur-short4) var(--ease-emphasized-accelerate) forwards;
+}
+@keyframes drawer-out { to { transform: translateX(-100%); } }
+@keyframes scrim-out { to { opacity: 0; } }
+@keyframes dialog-out { to { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@keyframes menu-out { to { opacity: 0; transform: scale(0.98); } }
+@keyframes sheet-down { to { transform: translateY(100%); } }
+
+/* The docked Pages sidebar arrives the way the Inspector does, from its own
+   edge. (It leaves by the page taking the room back; see leave.ts.) */
+@media (min-width: 600px) {
+  .pagenav { animation: rail-in var(--dur-med2) var(--ease-emphasized-decelerate); }
+  @keyframes rail-in { from { opacity: 0; transform: translateX(-16px); } }
 }

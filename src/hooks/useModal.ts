@@ -1,4 +1,5 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
+import { leave } from "../leave";
 
 const FOCUSABLE = [
   "a[href]",
@@ -296,6 +297,16 @@ export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => voi
     };
     // Run once for the modal's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Leaving: a dialog on a scrim plays its exit (see leave.ts). A layout
+  // effect's cleanup runs before React takes the node out of the page; the
+  // full-screen surfaces (Organise, Compare) have no scrim and just go.
+  useLayoutEffect(() => {
+    const scrim = containerRef.current?.parentElement;
+    return () => {
+      if (scrim?.classList.contains("dialog-scrim")) leave(scrim);
+    };
   }, []);
 
   return containerRef;

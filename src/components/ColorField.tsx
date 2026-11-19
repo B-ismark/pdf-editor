@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { acquireEscapeLayer } from "../hooks/useModal";
+import { useLeavingRef } from "../leave";
 import { placeAnchored, type AnchorRect } from "../floating";
 
 interface Props {
@@ -33,6 +34,7 @@ export function ColorField({ value, onChange, small }: Props) {
   const [hex, setHex] = useState(value);
   const swatchRef = useRef<HTMLButtonElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
+  const popLeaving = useLeavingRef(popRef);
 
   useEffect(() => setHex(value), [value]);
 
@@ -113,7 +115,7 @@ export function ColorField({ value, onChange, small }: Props) {
            this fixed popover and throw its position way off. */
         createPortal(
           <div
-            ref={popRef}
+            ref={popLeaving}
             className="colorfield__pop"
             style={{ left: pos.left, top: pos.top }}
             role="dialog"

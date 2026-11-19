@@ -1,3 +1,4 @@
+import { useLeavingRef } from "../leave";
 import {
   useEffect,
   useLayoutEffect,
@@ -76,6 +77,7 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose, outline = []
   const [refocusTick, setRefocusTick] = useState(0);
   const refocus = () => setRefocusTick((t) => t + 1);
   const navRef = useRef<HTMLElement>(null);
+  const navLeaving = useLeavingRef(navRef);
   const listRef = useRef<HTMLDivElement>(null);
 
   const posOf = useMemo(() => new Map(pages.map((p, i) => [p.index, i])), [pages]);
@@ -408,7 +410,7 @@ export function PageNav({ bytes, pages, onArrange, onGrid, onClose, outline = []
   };
 
   return (
-    <nav ref={navRef} id="page-rail" className="pagenav" aria-label="Pages">
+    <nav ref={navLeaving} id="page-rail" className="pagenav" aria-label="Pages">
       <div className="pagenav__head">
         <span className="pagenav__title title-small">Pages</span>
         <span className="pagenav__count label-medium">{pageCount}</span>

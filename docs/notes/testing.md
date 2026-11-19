@@ -121,6 +121,20 @@ type-checking can't see, and each exists because it broke once:
   every Organise card shows an empty pick ring that fills when picked; the
   Organise line, the picture-only hint and the privacy line stay within a
   word budget.
+- `dark.spec.ts` — dark mode (slice 10g): pages dim by themselves in dark
+  (from the OS too, in System mode) and not in light; a choice either way
+  holds in both themes and across a reload; the old flag's "1" still counts,
+  its "0" doesn't; and no menu, palette or dialog has a light background
+  that isn't paper, the primary fill or an inverse surface — every dialog is
+  opened through the palette so none is skipped.
+- `motion.spec.ts` — open and close (slice 10g): the ⋯ menu and a dialog
+  play their entrances; on close the dialog is gone from the accessibility
+  tree at once while an inert, id-less, role-less copy (carrying what was
+  typed) plays `scrim-out`, focus returns to the opener, and the copy is gone
+  within a second; a click during the exit reaches what's under it; the
+  phone sheet and its scrim leave as copies; the docked Pages rail leaves
+  none; reduced motion runs no animation and makes no copy. Exit copies
+  carry `.is-leaving` — exclude it in any spec that scans the whole page.
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

@@ -817,7 +817,8 @@ test.describe("command registry", () => {
   /** Search the palette for `label` and return the row for command `id`. */
   async function paletteRow(page: Page, id: string, label: string) {
     await page.fill(".cmdk input", label);
-    return page.locator(`.cmdk__item[data-cmd="${id}"]`);
+    // Not the row in a palette still fading out from the last command.
+    return page.locator(`.cmdk-scrim:not(.is-leaving) .cmdk__item[data-cmd="${id}"]`);
   }
 
   test("every menu row is a palette command, with the same name, icon and mark", async ({ page }) => {

@@ -390,6 +390,46 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     not that a save already did, and that a password-opened file isn't saved.
     A link to a page keeps "Follows the page if it moves": behaviour, not a
     how-to.
+- **Dark mode and motion (10g).**
+  - *Dim pages follows the theme until it's chosen.* A white page on the
+    near-black surround was the brightest thing on a dark screen, and the
+    dim was off unless you went looking. `usePersistentChoice` keeps the
+    preference `null` until the person flips it (`pref.pageDim`, "on"/"off"),
+    and `dimPages = choice ?? theme.resolved === "dark"` — `useTheme` now
+    exposes `resolved`, live as the OS flips in System mode. The old
+    `pref.dimPages` flag wrote its default ("0") on first run, so only its
+    "1" is read, as a choice. The dim is `brightness(0.85)`: at 0.8 the
+    paper read as grey, the "disabled" look 10c took out of the thumbnails.
+    Preview only, as before — the export never sees it.
+  - *Every surface over the work is drawn from the dark tokens.* Checked, not
+    assumed: `dark.spec` opens the ⋯ menu, the palette and every dialog and
+    fails on any light background that isn't paper, the primary fill or M3's
+    inverse surface (tooltips, toasts — light on dark by design).
+  - *One motion vocabulary for what opens over the work* (end of
+    styles.css). Arriving: emphasized-decelerate — scrims fade; a menu
+    grows a few pixels from its button, a dialog rises and settles, the
+    docked Pages rail slides from its edge like the Inspector. Leaving:
+    accelerate, and shorter (`--dur-short3`, new) — the person has moved on.
+    No `fill-mode` on the entrances: a transform held after the motion would
+    make the dialog a containing block for anything fixed inside it.
+  - *Exits are played by a copy* (`src/leave.ts`). React removes a closed
+    surface outright, so there was nothing left to animate. Keeping twenty
+    dialogs mounted through a "closing" state was the alternative, and each
+    one a chance at a dead dialog holding focus; instead the element is
+    cloned at the moment React lets go of it (a callback ref's cleanup —
+    `leaveRef`, `useLeavingRef` — or `useModal`'s layout-effect cleanup;
+    both run before the node leaves the page), and the clone plays
+    `.is-leaving`. The clone is a picture: `inert`, `aria-hidden`, every
+    id / role / aria-* / name stripped (so no locator, label or screen
+    reader finds a second dialog), `pointer-events: none` (a click goes to
+    what's under it), canvases redrawn, typed values and scroll carried, and
+    removed on `animationend` or a timeout. Only floating surfaces get one —
+    a docked panel's copy would hold its room in the layout and shove the
+    page — and none under reduced motion or when the element is already
+    hidden (a tab parked in `<Activity>`). Full-screen Organise and Compare
+    have no scrim and just go. A callback ref must keep a stable identity:
+    React runs its cleanup whenever the function changes, so an inline arrow
+    would play the exit on every render.
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is
   794px, centred, with margin — not stretched to the window. Below that it

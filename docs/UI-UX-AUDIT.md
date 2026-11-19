@@ -944,8 +944,9 @@ appeared.
 - **The tool dock and zoom pill still float over the page.** Documented
   trade-offs with their reasoning at the CSS; the alternative placements were
   tried and collide with each other (see `tests/phone.spec.ts`).
-- **Pages stay white in dark mode** unless *Dim pages* is on. Fidelity to the
-  file is the default on purpose; finding #15 in Part 1 is the standing item.
+- **Pages dim in dark mode by default** (slice 10g): *Dim pages* follows the
+  theme until the person chooses, and the choice holds in both themes. The
+  dim is preview-only, so fidelity of the file is untouched; it closes #15.
 
 ---
 

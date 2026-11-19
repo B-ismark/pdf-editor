@@ -108,6 +108,7 @@
 
   /* ---- Motion: duration ---- */
   --dur-short2: 100ms;
+  --dur-short3: 150ms;
   --dur-short4: 200ms;
   --dur-med2: 300ms;
   --dur-med4: 400ms;
@@ -200,6 +201,7 @@
 @media (prefers-reduced-motion: reduce) {
   :root {
     --dur-short2: 0ms;
+    --dur-short3: 0ms;
     --dur-short4: 0ms;
     --dur-med2: 0ms;
     --dur-med4: 0ms;
