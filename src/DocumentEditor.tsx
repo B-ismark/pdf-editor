@@ -678,8 +678,9 @@ export const DocumentEditor = memo(function DocumentEditor({
     // An edit restored onto a page whose text hasn't been read yet: its
     // fragment isn't known, so it can't be compared with the original — count
     // it, so the document doesn't read as unchanged (and closable without a
-    // word) until its text arrives.
-    const pending = new Set(pdf.pages.filter((p) => p.textPending).map((p) => p.pageIndex));
+    // word) until its text arrives. Likewise a page whose text couldn't be
+    // read: the edit can't be placed, and it's still a change someone made.
+    const pending = new Set(pdf.pages.filter((p) => p.textPending || p.textUnreadable).map((p) => p.pageIndex));
     if (pending.size)
       for (const id of Object.keys(edits)) {
         const at = Number(id.slice(0, id.indexOf(":")));
@@ -2549,20 +2550,15 @@ export const DocumentEditor = memo(function DocumentEditor({
           setStatus("exporting");
           setMessage("Reading the document's text…");
           try {
+            // Doesn't reject: a page that won't read comes back unreadable.
             full = await completeText(pdf);
-          } catch {
-            setStatus(alive.current ? "error" : "ready");
-            setMessage(alive.current ? "Couldn't read the document's text. Please try again." : "");
-            return;
-          }
-          if (!alive.current) {
+          } finally {
+            // Leaving the busy state the wait set; the export sets its own.
+            // (Also if the editor is gone: busy would lock the workspace.)
             setStatus("ready");
             setMessage("");
-            return;
           }
-          // Leaving the busy state the wait set; the export sets its own.
-          setStatus("ready");
-          setMessage("");
+          if (!alive.current) return;
         }
         const warn = findUnsafeCovers(full, redactions, planned);
         if (warn.count > 0) {

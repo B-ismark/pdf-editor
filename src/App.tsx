@@ -764,8 +764,9 @@ export function App() {
         )
       ).flat();
     } catch {
+      // Not the text (a page that won't read comes back unreadable): the check.
       setStatus("error");
-      setMessage("Couldn't read the documents' text. Please try again.");
+      setMessage("Couldn't check the documents for whiteout. Please try again.");
       return;
     }
     if (unsafe.length > 0) {

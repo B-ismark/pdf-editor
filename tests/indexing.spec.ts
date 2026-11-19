@@ -277,7 +277,12 @@ test.describe("background text", () => {
       await failText(page, 2);
       await page.goto("/");
       const cover = { id: "r-1", pageIndex: 2, x: 0, y: 0, width: 2000, height: 2000, color: "#ffffff", cover: true };
-      await seedStore(page, [["doc:a", docRecord("a", "three.pdf", 0, { doc: { ...EMPTY, redactions: [cover] } })]], [["bytes:a", path]]);
+      const edits = { "2:0": { text: "Third page rewritten Kilimanjaro.", style: {} } };
+      await seedStore(
+        page,
+        [["doc:a", docRecord("a", "three.pdf", 0, { doc: { ...EMPTY, edits, redactions: [cover] } })]],
+        [["bytes:a", path]],
+      );
       await restoreSeeded(page);
       await painted(page);
       // Not stuck reading it: the Inspector and Find settle.
@@ -288,6 +293,8 @@ test.describe("background text", () => {
       await expect(page.locator(".findbar__count")).toHaveText("1/1");
       await expect(page.locator(".findbar__redact")).toBeEnabled();
       await page.keyboard.press("Escape");
+      // The edit restored onto it is still a change (the cover is the other).
+      await expect(page.locator(".appbar__changes")).toHaveText("2 changes");
       // Not "no text on page three, so the whiteout hides nothing": warned.
       let downloaded = false;
       page.on("download", () => (downloaded = true));

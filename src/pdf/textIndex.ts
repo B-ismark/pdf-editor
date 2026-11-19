@@ -88,7 +88,9 @@ export function indexText(pdf: LoadedPdf, onBatch: (read: Map<number, PageText>,
         const p = ix.queue.shift()!;
         let text: PageText;
         try {
-          text = await textOf(pdf.bytes, ix, p);
+          // A second try before giving up on a page: a one-off worker hiccup
+          // shouldn't mark it unreadable for as long as the file is open.
+          text = await textOf(pdf.bytes, ix, p).catch(() => (ix.stopped ? Promise.reject() : textOf(pdf.bytes, ix, p)));
         } catch {
           // The parse was released (the tab closed or was replaced): stop.
           if (ix.stopped) return;
@@ -178,7 +180,12 @@ export async function completeText(pdf: LoadedPdf): Promise<LoadedPdf> {
   await Promise.all(
     pending.map(async (p) => {
       // As the walk marks it: one bad page doesn't stop the document.
-      read.set(p.pageIndex, await textOf(pdf.bytes, ix, p.pageIndex).catch(() => UNREADABLE));
+      read.set(
+        p.pageIndex,
+        await textOf(pdf.bytes, ix, p.pageIndex)
+          .catch(() => textOf(pdf.bytes, ix, p.pageIndex))
+          .catch(() => UNREADABLE),
+      );
     }),
   );
   return { ...pdf, pages: fillPages(pdf.pages, read) };
