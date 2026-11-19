@@ -117,8 +117,12 @@ export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
         // where the reader had it before the room changed.
         const a = across.current;
         // Only while the content is as wide as when it was recorded: a page
-        // turned or reordered since changes what the fraction points at.
-        if (anchor.current && a && a.sw === el.scrollWidth) anchor.current.rx = a.rx;
+        // turned or reordered since changes what the fraction points at. The
+        // scroll width never reads less than the room, so once the room has
+        // grown past the content it reads the room instead, which says nothing
+        // about the content: that is a match too.
+        const sw = el.scrollWidth;
+        if (anchor.current && a && (a.sw === sw || (sw <= width + 1 && a.sw <= width + 1))) anchor.current.rx = a.rx;
       }
       setFitWidth(width);
     });

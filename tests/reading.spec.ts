@@ -207,3 +207,35 @@ test("back from another tab, a resize anchors to where the view is now, not befo
   await page.waitForTimeout(400);
   expect(Math.abs((await across()) - now), `across ${now} → ${await across()}`).toBeLessThan(0.02);
 });
+
+for (const [name, size, mobile, grow] of [
+  ["a panel closing", { width: 1024, height: 768 }, false, "pages"],
+  ["a phone turned on its side", { width: 390, height: 844 }, true, "rotate"],
+] as const) {
+  test(`zoomed in, more room from ${name} keeps the view across`, async ({ browser }) => {
+    // Given more room than the zoomed page needs, the scroll width reads the
+    // room, not the page: the check that the content hadn't changed failed,
+    // and the view went back to the left edge.
+    const ctx = await browser.newContext({ viewport: size, ...(mobile ? { hasTouch: true, isMobile: true } : {}) });
+    const page = await ctx.newPage();
+    await open(page, (await fixtures()).long);
+    const scroller = page.locator(".viewer__scroll");
+    if (grow === "pages") {
+      await page.locator('[aria-label="Show pages"]').first().click();
+      await expect(page.locator(".pagenav")).toBeVisible();
+    }
+    await page.locator('.icon-btn[aria-label="Zoom in"]').first().click();
+    await expect.poll(() => scroller.evaluate((el) => el.scrollWidth > el.clientWidth + 20)).toBe(true);
+    await scroller.evaluate((el) => (el.scrollLeft = el.scrollWidth));
+    await page.waitForTimeout(200);
+    // Where the view's left edge is across the document: what a refit keeps.
+    const across = () => scroller.evaluate((el) => el.scrollLeft / el.scrollWidth);
+    const before = await across();
+    if (grow === "pages") await page.locator('[aria-label="Hide pages"]').first().click();
+    else await page.setViewportSize({ width: 844, height: 390 });
+    await page.waitForTimeout(400);
+    expect(await scroller.evaluate((el) => el.scrollLeft), "not back at the left edge").toBeGreaterThan(20);
+    expect(Math.abs((await across()) - before), `across ${before} → ${await across()}`).toBeLessThan(0.03);
+    await ctx.close();
+  });
+}
