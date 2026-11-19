@@ -39,6 +39,13 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     `useViewport` takes the workspace's fit (the window may have been resized,
     or the panel hidden, meanwhile). Re-announcing the old fit first left a
     document that waited through a resize 280 px too wide.
+    Likewise `PageView` skips a paint when the canvas already holds that page
+    at that scale (`paintedAs`) — re-rendering blanks it first, the white flash
+    warm editors exist to avoid. **Hiding is also an ending:** the editor
+    gives back a phone selection's Back entry (its listener goes; Back in the
+    next document must not pop it) and drops `autoFocusId` (a box typed into
+    would take focus back from the tab strip), and `useHistory` ends the
+    gesture so typing either side of a switch is two undo steps.
   - **Who owns what.** For the tab in front, `tabs` stays the truth for `pdf`,
     `fileName`, `baked`, `saved` and `locked` (only the workspace changes
     them). Its `history`, `view`, `changeCount` and `unsaved` are stale while it

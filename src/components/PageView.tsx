@@ -154,10 +154,17 @@ function PageViewInner(props: Props) {
   // position, page anchors, and the scrollbar are unaffected.
   const { ref: frameRef, near } = useRenderWindow<HTMLDivElement>();
 
+  /** What the canvas holds now, as `renderPage`'s inputs. A document kept warm
+   * behind another re-runs this effect when it comes back (`<Activity>`), and
+   * painting again would blank a page that is already right. */
+  const paintedAs = useRef<{ bytes: ArrayBuffer; at: string } | null>(null);
   useEffect(() => {
     let cancelled = false;
     const canvas = canvasRef.current;
     if (!canvas) return;
+    const at = `${page.pageIndex}:${page.rotation}:${scale}`;
+    if (near && paintedAs.current?.bytes === bytes && paintedAs.current.at === at) return;
+    paintedAs.current = null;
     if (!near) {
       // Scrolled well away: hand the canvas' backing store back to the browser.
       // Leaving it allocated is what made memory grow with document length —
@@ -174,6 +181,7 @@ function PageViewInner(props: Props) {
       handle.promise
         .then(() => {
           if (!cancelled) {
+            paintedAs.current = { bytes, at };
             setPainted(true);
             setError(null);
           }

@@ -354,12 +354,17 @@ type-checking can't see, and each exists because it broke once:
   were shown to fail on the previous build;
 - `warm.spec.ts` — React 19.2's `<Activity>` keeps the last document mounted
   behind the one in front. Switching back shows the *same* canvas (marked
-  before the switch), with its undo, where a rebuilt editor painted new ones;
+  before the switch) and never painted again, with its undo, where a rebuilt
+  editor painted new ones; typing before and after a switch is two undo steps;
+  coming back by keyboard leaves focus on the strip, not in a text box that
+  was being typed into; on a phone, Back's history entries belong to the
+  document in front;
   the document behind is off the page entirely (one tab strip, none of its
   canvases or text boxes findable); Ctrl+Z in front never reaches it; and a
   window resized while it waited fits it on return. The first failed on the
   previous build, the last before the editor stopped re-announcing its old fit
-  on coming back (280 px off);
+  on coming back (280 px off). The second review's four (repaint, undo merge,
+  focus, Back entry) each failed before their fix;
 - `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
   never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
   character WinAnsi can't encode instead of throwing, so `sanitize`

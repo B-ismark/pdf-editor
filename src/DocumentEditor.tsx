@@ -1689,6 +1689,19 @@ export const DocumentEditor = memo(function DocumentEditor({
       backGuard.current = null;
     }
   }, [dismissable]);
+  // Going behind another document (`<Activity>`, see `App.tsx`) or closing:
+  // give back the Back entry a selection pushed, since the listener that
+  // would take it goes now, and the next document's Back must not pop it.
+  // Coming back with the selection still there pushes a new one (above). And
+  // a text box being typed into doesn't take focus again on the way back.
+  useEffect(
+    () => () => {
+      if (backGuard.current) unwindHistory(backGuard.current);
+      backGuard.current = null;
+      setAutoFocusId(null);
+    },
+    [],
+  );
   useEffect(
     () =>
       onStrayBack(() => {
