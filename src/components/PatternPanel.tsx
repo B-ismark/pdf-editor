@@ -179,8 +179,7 @@ export function PatternPanel({
       </div>
 
       <p className="patterns__note body-small">
-        Searches the page's own text, including recognised text. Form fields, notes and text you've added
-        aren't searched, and a scanned page needs Recognise text first.
+        Page text only — not form fields, notes or added text. Scans need Recognise text first.
       </p>
 
       <div className="patterns__foot">

@@ -445,13 +445,14 @@ export function Organize({
       </header>
 
       <p className="organize__hint body-small">
-        Reorder, rotate, or delete pages · tap a page to pick it ·{" "}
+        {/* The cards show reorder, rotate and delete themselves; the one
+            thing the grid can't show is where an added page will land. */}
+        {fileName} ·{" "}
         <span className="organize__at">
           {plan && insertAt < plan.length
             ? `new pages go after page ${insertAt}`
             : "new pages go at the end"}
         </span>
-        . {fileName}
       </p>
 
       {otherDocs.length > 0 && (
@@ -495,9 +496,11 @@ export function Organize({
                 aria-label={`Page ${i + 1}`}
               >
                 <Thumbnail bytes={sources.get(entry.sourceKey)!} index={entry.index} rotation={entry.rotation} crop={entry.crop} />
-                {selected.has(i) && (
-                  <span className="pcard__check"><Icon name="check" size={15} /></span>
-                )}
+                {/* Every card carries its pick ring, empty until picked: that a
+                    page can be picked is shown, not written in the hint. */}
+                <span className={`pcard__check${selected.has(i) ? "" : " pcard__check--off"}`} aria-hidden="true">
+                  {selected.has(i) && <Icon name="check" size={15} />}
+                </span>
               </button>
               <div className="pcard__no label-medium">{i + 1}</div>
               <div className="pcard__actions">

@@ -917,6 +917,8 @@ body {
 }
 .props__title { color: var(--on-surface); margin: 0; }
 .props__empty { color: var(--on-surface-variant); margin: 8px 0; }
+/* A note with nothing to say (a link's address is fine) takes no room. */
+.props__empty:empty { display: none; }
 /* Inline validation copy (e.g. a link URL we refuse to export). */
 .props__warn { color: var(--error); }
 .props__section { display: flex; flex-direction: column; gap: 15px; }
@@ -1879,22 +1881,34 @@ body {
  * the resize handle, so the handle's centre resizes and the surrounding ring
  * rotates — "hover close to the corner to rotate". */
 .rotate-zone {
+  --rotate-glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4' stroke='white' stroke-width='4.5'/%3E%3Cpath d='M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4' stroke='black' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E");
   position: absolute;
   width: 30px;
   height: 30px;
   transform: translate(-50%, -50%);
   border-radius: var(--radius-full);
-  cursor: grab;
+  /* The cursor is the instruction: a turning arrow says "twist here", so the
+     gesture needs no sentence in the Inspector. Inline (a data URI) — the CSP
+     allows data: images and nothing off-origin; grab is the fallback. */
+  cursor: var(--rotate-glyph) 12 12, grab;
   pointer-events: auto;
   touch-action: none;
   z-index: 1;
 }
-.rotate-zone:active { cursor: grabbing; }
+.rotate-zone:active { cursor: var(--rotate-glyph) 12 12, grabbing; }
+/* A cursor is no help to a finger, and the ring itself is invisible: one
+   corner (bottom-right — an image's delete badge sits top-left) carries the
+   same turning arrow, small, in the ring's outer quarter — off the box, clear
+   of the resize handle at the ring's centre. */
+.rotate-zone--hint {
+  background: var(--rotate-glyph) no-repeat 100% 100% / 14px 14px;
+}
 
 /* Bigger touch targets on coarse pointers */
 @media (pointer: coarse) {
   .handle { width: 20px; height: 20px; }
   .rotate-zone { width: 46px; height: 46px; }
+  .rotate-zone--hint { background-size: 18px 18px; }
   .tb-move { width: 32px; height: 20px; top: -22px; }
   .tb-move::after { line-height: 20px; font-size: 13px; }
 }
@@ -2800,6 +2814,15 @@ body {
   border-radius: var(--radius-full);
   background: var(--primary);
   color: var(--on-primary);
+}
+/* It sits on the page picture, which is paper-white in either theme, so it
+   is drawn for paper — a white ring with a faint dark edge, as photo pickers
+   do — not in the theme's surface colour (a dark notch in dark mode). */
+.pcard__check--off {
+  background: rgb(255 255 255 / 0.9);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35), var(--shadow-1);
+  box-sizing: border-box;
 }
 .pcard__no { color: var(--on-surface-variant); }
 /* Four controls under every page made a long document a field of icons. With

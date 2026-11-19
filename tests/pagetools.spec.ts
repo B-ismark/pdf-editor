@@ -523,7 +523,7 @@ test.describe("Split and Organise behave while they work", () => {
     // Pick only page 1: the hint says why that doesn't split.
     await org.locator(".pcard__thumb").first().click();
     await org.getByRole("button", { name: "Split into files" }).click();
-    await expect(d).toContainText("page 1 already does");
+    await expect(d).toContainText("Page 1 already starts a file");
     await d.getByLabel("Pages per file").fill("2.5");
     await expect(d).toContainText("Type a whole number of pages");
     await expect(d.getByRole("button", { name: /Download/ })).toBeDisabled();

@@ -485,7 +485,10 @@ test.describe("inspector", () => {
     const stamp = (await page.locator(".stamp").first().boundingBox())!;
     await page.mouse.click(stamp.x + 8, stamp.y + stamp.height - 8);
     await expect(page.locator(".props__title")).toHaveText("Image");
-    await expect(page.locator(".props__empty")).toContainText(/edited on the page/);
+    // The page shows how an image is edited; the panel offers a labelled
+    // Delete rather than a paragraph of instructions (see show.spec).
+    await page.locator(".props").getByRole("button", { name: "Delete" }).click();
+    await expect(page.locator(".stamp")).toHaveCount(0);
     expectClean(w);
   });
 

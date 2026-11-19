@@ -244,7 +244,7 @@ export function SignatureDialog({ onCreate, onClose }: Props) {
             <span className="sigremember__hint body-small">
               {remember
                 ? "Kept in Saved signatures in this browser, never uploaded. Remove it there any time."
-                : "Not kept for next time: it lives only in this document, and in the document's session copy if “Save session on this device” is on."}
+                : "Only in this document — and its session copy, if “Save session on this device” is on."}
             </span>
           </span>
         </label>

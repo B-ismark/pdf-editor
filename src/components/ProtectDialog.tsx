@@ -60,8 +60,7 @@ export function ProtectDialog({ onDownload, onClose, busy }: Props) {
         <h2 className="headline-small dialog__title" id="protect-title">Download with password</h2>
         <div className="pwform">
           <p className="body-medium confirm__msg">
-            The copy you download asks for this password before it opens. It isn't kept anywhere, so if it's lost, so
-            is the copy. The document here stays as it is.
+            The password isn't stored — if it's lost, so is the copy. The document here stays as it is.
           </p>
           <label className="field">
             <span className="field__label label-medium">Password</span>

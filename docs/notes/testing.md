@@ -111,6 +111,16 @@ type-checking can't see, and each exists because it broke once:
   loading and error live regions are in the page before anything happens, and
   the visible line isn't read twice; at 320 px the restore buttons still share
   a row (slice 10e).
+- `show.spec.ts` — show, don't tell (slice 10f): a selected image, note or
+  link has no visible paragraph of any class in the Inspector beyond what it
+  must say (a link to a page: that it follows the page; a refused address
+  still says why); an image's panel is two words, its Delete works from the
+  keyboard and leaves focus on the Inspector's heading; its rotate ring has an
+  image cursor with a `grab` fallback, and one corner shows a glyph that
+  actually decodes; several selected objects show a count and no paragraph;
+  every Organise card shows an empty pick ring that fills when picked; the
+  Organise line, the picture-only hint and the privacy line stay within a
+  word budget.
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch
@@ -520,6 +530,12 @@ For one-off exploration (a new interaction, a screenshot in both themes):
 - Gotcha: single-key tool shortcuts are ignored while a `contentEditable` has
   focus, so after typing into an overlay click something neutral (or use the
   `.tooldock__btn[aria-label="…"]` buttons) before switching tools.
+- Gotcha: start `page.waitForEvent("filechooser")` at the top of the test,
+  before the gesture's setup, not just before the keypress or click. Playwright
+  turns on chooser interception only once something waits, and that is a round
+  trip to the browser; under load the gesture won it about 1 run in 25, the
+  real (headless, invisible) dialog took the picker and the wait timed out
+  (`tabs` "Ctrl+O closes the menu").
 
 ## Writing specs against shapes and rasters
 

@@ -230,10 +230,10 @@ export function App() {
         void clearSession();
         void clearEngineCache();
         setStatus("ready");
-        setMessage("Stopped saving a copy on this device, and deleted the stored one.");
+        setMessage("Stopped saving on this device, and deleted the copy.");
       } else {
         setStatus("ready");
-        setMessage("Saving a copy on this device so a reload can't lose your work.");
+        setMessage("Saving edits on this device. Password-protected files aren't saved.");
       }
       return !on;
     });
