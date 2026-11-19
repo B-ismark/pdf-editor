@@ -115,7 +115,7 @@ test.describe("background text", () => {
     await page.keyboard.press("Escape");
     await expect(page.locator(".docpanel")).toContainText(/Reading text… [12] of 3 pages/);
     await expect(page.locator(".docpanel")).not.toContainText("No text layer");
-    await expect(page.locator(".snackbar__msg")).toHaveText("3 pages");
+    await expect(page.locator(".snackbar__msg")).toHaveText("Opened · 3 pages");
     // Then it all arrives.
     await expect(page.locator(".docpanel")).toContainText("Searchable on every page", { timeout: HOLD_MS + 10_000 });
     expectClean(w);

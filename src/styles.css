@@ -336,9 +336,10 @@ body {
 @media (max-width: 599px) {
   /* The phone's status toast is fixed to the window, not to the viewer, so it
      has to be told the strip is there or it lands 40px too high — over the zoom
-     pill. 128px (below the pill) + the 40px strip. Desktop anchors it to the
-     bottom and doesn't care. */
-  .app--tabs .snackbar { top: calc(168px + env(safe-area-inset-top)); }
+     pill. 128px (below the pill) + the 40px strip. It is top-anchored on a
+     phone only while the properties sheet holds the bottom (see below); the
+     rest of the time it sits above the bottom cluster and the strip is moot. */
+  .app--tabs:has(.viewer__scroll--sheet) .snackbar { top: calc(168px + env(safe-area-inset-top)); }
   /* Every pixel goes to the name: the file icon says nothing a tab doesn't. */
   .doctab { min-width: 120px; max-width: 180px; }
   .doctab__icon { display: none; }
@@ -792,13 +793,12 @@ body {
 /* ============ Floating zoom control ============ */
 .zoombar {
   position: absolute;
-  /* Top-right corner — the only zone no other floating surface claims. The
-     whole bottom edge is the tool cluster (dock + draw options), and every
-     contextual toolbar (find / multi-select / selection) is top-centre, so a
-     bottom-anchored zoom pill was inevitably covered by the draw bar. Pinning
-     it to the top-right keeps it permanently clear of the tool cluster; on
-     phones it also yields to a top-centre bar when one is showing (App gates
-     rendering) so the two never overlap on a narrow screen. */
+  /* Top-right on a narrow viewer: every contextual toolbar (find /
+     multi-select / selection) is top-centre, and on phones the pill yields to
+     one when it shows (DocumentEditor's zoomHidden). A bottom-*centre* pill was
+     covered by the draw bar; on a viewer wide enough (≥880px, "Reading width"
+     at the end of this file) it sits at the bottom-*right*, in the dock's row,
+     below the draw bar and beside the dock. */
   top: 12px;
   right: 12px;
   display: flex;
@@ -2718,6 +2718,21 @@ body {
      message showed. Drop the snackbar below the zoom pill's band (app bar 52 +
      the pill's 12px inset + its 54px height, plus a little breathing room). */
   .snackbar { top: calc(128px + env(safe-area-inset-top)); }
+  /* …but only while the properties sheet holds the bottom. Otherwise the top
+     band is the first page's opening lines — its title, what a reader looks at
+     the moment a file opens — so the toast sits above the bottom cluster
+     instead (dock 16+56, draw bar 76+60), over the page's foot. */
+  .app:not(:has(.viewer__scroll--sheet)) .snackbar { top: auto; bottom: calc(148px + env(safe-area-inset-bottom)); }
+  /* The phone's open draw bar is two rows (~110px from 76px up): clear it.
+     At ≤359px its style controls take a third row (~152px): clear that too. */
+  .app:not(:has(.viewer__scroll--sheet)):has(.drawbar:not(.drawbar--closed)) .snackbar {
+    bottom: calc(196px + env(safe-area-inset-bottom));
+  }
+  @media (max-width: 359px) {
+    .app:not(:has(.viewer__scroll--sheet)):has(.drawbar:not(.drawbar--closed)) .snackbar {
+      bottom: calc(240px + env(safe-area-inset-bottom));
+    }
+  }
 
   /* Download stays in the app bar on every breakpoint (no more FAB) — icon-only
      on phones to save room. */
@@ -2739,8 +2754,8 @@ body {
 }
 
 /* ============ Expanded window (>=840px): roomier side panel + page column.
-   Material's Expanded size class; pairs with the fit-to-width cap in
-   useViewport so a single page doesn't balloon on wide monitors. ============ */
+   Material's Expanded size class. (The page itself is capped at its printed
+   size by useViewport's ACTUAL_SIZE.) ============ */
 @media (min-width: 840px) {
   .panel { width: 320px; }
   .doc { gap: 24px; padding: 24px; }
@@ -3102,3 +3117,59 @@ body {
    in the shell as if they weren't there. A document kept warm behind the one
    in front is held off the page, in a box of its own. */
 .editors, .editor { display: contents; }
+
+/* ============ Reading width: the zoom pill's own place ============
+   The page now sits at its printed size with margin around it (useViewport's
+   ACTUAL_SIZE), so the pill no longer has to sit on the page's corner, over a
+   document's title. Where the viewer is wide enough for the dock and the pill
+   side by side, the pill joins the dock's row at the bottom-right, centred on
+   it: the controls for the view and the tools for the page, one band, out of
+   the reading. Narrower, it keeps the top-right, and the first page starts
+   below it instead of under it — scrolled, the pages pass beneath it as they
+   pass beneath the dock. */
+@container viewer (min-width: 880px) {
+  .zoombar { top: auto; bottom: calc(17px + env(safe-area-inset-bottom)); }
+}
+/* Whatever the browser brings into view — a tabbed-to box, a page from the
+   thumbnails or Go to page — stops clear of the dock's band at the bottom (and
+   the pill in it), and of the pill at the top on a narrow viewer, rather than
+   under them. (Not an open draw bar's height: it comes and goes.) Find and the
+   zoom anchors set the scroll directly and aren't affected. Paging keys step
+   by the padded height, so nothing under the dock is skipped. */
+.viewer__scroll { scroll-padding: 16px 0 calc(84px + env(safe-area-inset-bottom)); }
+@container viewer (max-width: 879.98px) {
+  .viewer__scroll { scroll-padding-top: 72px; }
+}
+@container viewer (max-width: 879.98px) {
+  .doc { padding-top: 72px; }
+}
+/* The status toast, on a window wide enough, takes the bottom-left of that
+   band — where a desktop toast is looked for, and where it covers neither the
+   page's opening lines nor the tools. Narrower, the band has no room for it
+   beside the dock, and it keeps its place above the bottom cluster. */
+@media (min-width: 1280px) {
+  .snackbar {
+    left: 16px;
+    bottom: calc(21px + env(safe-area-inset-bottom));
+    transform: none;
+    max-width: 344px;
+    animation-name: snack-in-left;
+  }
+  /* A draw tool's options bar is wider than the dock and sits above it: the
+     toast steps up over the whole bottom cluster (dock 16+56, bar 76+60). */
+  .app:has(.drawbar) .snackbar { bottom: calc(148px + env(safe-area-inset-bottom)); }
+  /* The toast is fixed to the window, so with the Pages sidebar open its
+     bottom-left corner is the sidebar's last thumbnail — and a busy toast
+     (Cancel) takes clicks. Then it goes back to the centre, above the bottom
+     cluster, as on narrower windows. */
+  .app:has(.pagenav) .snackbar {
+    left: 50%;
+    bottom: calc(148px + env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    animation-name: snack-in;
+  }
+}
+@keyframes snack-in-left {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

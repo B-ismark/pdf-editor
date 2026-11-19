@@ -55,7 +55,7 @@ invariant it protects (and why it exists) is in
 when a spec fails or before you add one. Specs: `app`, `privacy`, `rendering`,
 `export`, `ocr`, `font`, `baseline`, `colors`, `find`, `phone`, `shell`,
 `icons`, `marks`, `affordance`, `shape`, `fragment`, `line`, `ligature`, `chrome`, `tabs`,
-`overlays`, `placement`, `edge`, `keyboard`, `saved`, `password`, `sign`, `pages`, `sidebar`, `patterns`, `hidden`, `update`, `protect`, `pagetools`, `crop`, `saveto`, `forms`, `winansi`, `outline`, `headerfooter`, `compare`, `indexing`, `codec`, `warm`, `decoders`. If you add a feature that touches privacy, the export bytes, or
+`overlays`, `placement`, `edge`, `keyboard`, `saved`, `password`, `sign`, `pages`, `sidebar`, `patterns`, `hidden`, `update`, `protect`, `pagetools`, `crop`, `saveto`, `forms`, `winansi`, `outline`, `headerfooter`, `compare`, `indexing`, `codec`, `warm`, `decoders`, `reading`. If you add a feature that touches privacy, the export bytes, or
 per-page rendering, add a spec for it.
 
 ## Architecture
@@ -93,8 +93,10 @@ per-page rendering, add a spec for it.
 - **Viewport** — `hooks/useViewport.ts`: fit-to-width base scale + zoom
   multiplier, app-managed pan/pinch/double-tap/⌘-wheel. The scroll surface is
   `.viewer__scroll` inside a non-scrolling `.viewer` frame so the zoom control
-  stays pinned. Fit-scale is measured only on mount / doc load / window resize
-  (NOT on panel toggles) so opening the properties panel doesn't rescale-jump.
+  stays pinned. The fit follows the scroll surface's width (a ResizeObserver:
+  window resizes *and* panels opening beside it, so a page never runs under a
+  panel), capped at the page's printed size (`ACTUAL_SIZE`) — on a wide window
+  the page sits at a reading width with margin and a panel only moves the margin.
 - **Overlays** — one absolutely-positioned overlay per page (`PageView.tsx`)
   holds `EditableFragment`, `TextBoxItem`, `RedactionItem`, `AnnotationLayer`
   (SVG), `NoteItem`, `StampItem`. All coordinates are PDF units (origin

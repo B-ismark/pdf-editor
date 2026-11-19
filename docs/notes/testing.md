@@ -52,6 +52,11 @@ type-checking can't see, and each exists because it broke once:
   for the text's colour; a rotated page is declined rather than sampled at
   mis-mapped coordinates; and scrolling reads back no pixels;
 - `find.spec.ts` — the active match is on screen and clear of the find bar;
+- `reading.spec.ts` — a page fits at no more than its printed size, centred
+  with margin, on a wide window; opening Pages refits a page that would run
+  under the panel, keeping the reader on their page; and at rest the zoom pill,
+  the status toast and the dock leave the first page's opening lines clear (and
+  each other), on a wide window, a laptop and a phone (slice 10a).
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

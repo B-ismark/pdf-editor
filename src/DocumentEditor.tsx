@@ -3300,10 +3300,11 @@ export const DocumentEditor = memo(function DocumentEditor({
             </div>
           )}
 
-          {/* Pinned zoom control (top-right, does not scroll). On phones it
-              yields to whichever top-centre contextual bar is showing (find /
-              multi-select / selection) so the two never overlap on a narrow
-              screen; the bottom tool cluster never reaches it. */}
+          {/* Pinned zoom control (does not scroll): bottom-right in the dock's
+              row on a wide viewer, top-right on a narrow one (styles.css,
+              "Reading width"). On phones it yields to whichever top-centre
+              contextual bar is showing (find / multi-select / selection) so
+              the two never overlap on a narrow screen. */}
           {!zoomHidden && (
           <div className="zoombar" role="group" aria-label="Zoom">
             <button className="icon-btn" onClick={vp.zoomOut} aria-label="Zoom out" data-tip="Zoom out">

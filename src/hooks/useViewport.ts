@@ -10,10 +10,12 @@ import { dragState, tapSuppress } from "./useDrag";
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 6;
 const PAD = 24; // px of breathing room around the page at fit-width
-// On Expanded (>=840dp) windows, cap the fit-to-width page column so a single
-// page doesn't balloon to an awkward size on a wide monitor; the extra room
-// becomes centred margin instead. (audit #9 / M-2)
-const MAX_FIT_WIDTH = 1100;
+/** A page is never fitted larger than it is: one PDF point is 1/72 inch, one
+ * CSS pixel 1/96. On a wide window the page sits at its printed size, centred,
+ * with the room around it as margin — a reading width, as a viewer shows paper —
+ * instead of stretching to the window (an A4 page was 1052px wide at 1440).
+ * Narrower than that, it fits the room it has. Zoom goes past it either way. */
+export const ACTUAL_SIZE = 96 / 72;
 
 /**
  * Viewport zoom controller (research "Model B": native scroll + app-managed
@@ -29,11 +31,15 @@ const MAX_FIT_WIDTH = 1100;
  * single shell kept one for its whole life — so it is carried from the editor
  * going into the background to the one coming forward ({@link useViewport}'s
  * `seed`). Measured afresh, each switch drew one frame at the unmeasured scale
- * (and restored the scroll position against it), and re-fitted a page the
- * user had chosen to leave at its size by hiding the panel. */
+ * (and restored the scroll position against it). */
 export interface Fit {
   fitWidth: number;
   pageWidthPts: number;
+}
+
+/** The fit-to-width scale for a page this wide in a surface this wide. */
+export function fitFor(surfaceWidth: number, pageWidthPts: number) {
+  return Math.min(ACTUAL_SIZE, (surfaceWidth - PAD * 2) / pageWidthPts);
 }
 
 export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
@@ -56,20 +62,29 @@ export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
   const seeded = useRef(!!seed && seed.fitWidth > 0);
   const [zoom, setZoom] = useState(1);
 
-  const effectiveWidth = Math.min(fitWidth, MAX_FIT_WIDTH);
   const fitScale =
-    pageWidthPts > 0 && fitWidth > 0 ? (effectiveWidth - PAD * 2) / pageWidthPts : 1;
+    pageWidthPts > 0 && fitWidth > 0 ? fitFor(fitWidth, pageWidthPts) : 1;
   const scale = Math.max(0.05, fitScale * zoom);
 
-  // The fit-to-width base is measured only when the scroll surface first
-  // mounts, when a new document loads, and on genuine window resizes — NOT on
-  // every container-width change. Opening the properties panel narrows the
-  // scroll surface, and we deliberately keep the current scale then so the
-  // page doesn't rescale-jump; it simply gains a little scroll room.
+  // The fit follows the room the page has: the scroll surface's width, measured
+  // when it mounts, when a new document loads, and whenever it changes — a
+  // window resize, or a panel (Pages, the Inspector) opening or closing beside
+  // it. Measuring only on window resizes kept the scale steady when a panel
+  // opened, but a page that had fitted the wider room then ran under the panel,
+  // its right edge out of reach. The page is capped at its printed size
+  // (`ACTUAL_SIZE`), so on a wide window a panel only moves the margin and
+  // nothing rescales; it shrinks only when it would otherwise be cut off.
   const measure = useCallback(() => {
     const node = elRef.current;
     if (node && node.clientWidth > 0) setFitWidth(node.clientWidth);
   }, []);
+  // The surface's width as last measured, and the page width, for the
+  // observer below, which outlives any one render.
+  const lastWidth = useRef(fitWidth);
+  lastWidth.current = fitWidth;
+  const across = useRef<number | null>(null);
+  const pageWidthRef = useRef(pageWidthPts);
+  pageWidthRef.current = pageWidthPts;
   // Re-fit when a new document sets its page width (panel is closed then).
   const fittedTo = useRef(seed?.pageWidthPts ?? null);
   /** The surface this effect last ran on: running again on the same one means
@@ -87,8 +102,43 @@ export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
       fittedTo.current = back.pageWidthPts;
       setFitWidth(back.fitWidth);
     } else if (!seeded.current) measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
+    // A change in the room the page has refits it, keeping the reader's place:
+    // the same point of the document stays at the top-left of the view.
+    // (Held off the page behind another document, the surface measures 0 and
+    // is left alone; coming back, it is measured again.)
+    const ro = new ResizeObserver(() => {
+      const width = el.clientWidth;
+      if (width <= 0 || width === lastWidth.current) return;
+      const pts = pageWidthRef.current;
+      if (pts > 0 && lastWidth.current > 0 && fitFor(width, pts) !== fitFor(lastWidth.current, pts)) {
+        captureAnchor(0, 0);
+        // Sideways, the browser has already clamped the scroll to the new
+        // width by now (a narrower page leaves less to scroll): anchor to
+        // where the reader had it before the room changed.
+        // (No check that the content is as wide as it was: the scroll width
+        // moves for reasons that aren't the content — it never reads less
+        // than the room, and the margin round the pages steps up at 840px —
+        // and a check on it threw good places away. A page turned in the
+        // sidebar leaves it as it was.)
+        if (anchor.current && across.current !== null) anchor.current.rx = across.current;
+      }
+      setFitWidth(width);
+    });
+    ro.observe(el);
+    // Where the reader is across the document, recorded only from scrolls at
+    // the measured width — not the browser's clamp when the room changes.
+    const onScroll = () => {
+      if (el.clientWidth === lastWidth.current && el.scrollWidth > 0)
+        across.current = el.scrollLeft / el.scrollWidth;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", onScroll);
+      // Held off the page behind another document, the surface comes back
+      // scrolled to its start with no scroll event to say so.
+      across.current = null;
+    };
     // `carried` is read when the effect runs, not tracked.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [el, measure]);
