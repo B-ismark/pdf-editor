@@ -71,7 +71,7 @@ Read only the section a package points at, not the whole folder.
   - [x] Pattern redaction with a review list. Guarded by the `patterns` spec; notes in `docs/notes/privacy-and-export.md`.
   - [x] A "Remove hidden information" report. Guarded by the `hidden` spec; notes in `docs/notes/privacy-and-export.md`.
   - [x] Encrypt and decrypt on export (`@cantoo/pdf-lib` or qpdf-wasm, lazy-loaded and self-hosted). — Export → Download with password (AES-256 via `@cantoo/pdf-lib`); decrypt was already the password prompt on open.
-- [ ] **8. Page tools** (M ×2). (PRODUCT §2.1)
+- [x] **8. Page tools** (M ×2). (PRODUCT §2.1)
   - [x] Split, Images → PDF, Crop, insert a page at a position.
     - [x] Split, Images → PDF, insert at a position (8a). Guarded by the `pagetools` spec; notes in `docs/notes/pages.md`.
     - [x] Crop (8b). Guarded by the `crop` spec; notes in `docs/notes/pages.md` (view origin, Crop).
@@ -79,7 +79,7 @@ Read only the section a package points at, not the whole folder.
   - [x] Complete forms, with a keep-fillable/flatten choice (8d). Guarded by the `forms` spec; notes in `docs/notes/privacy-and-export.md` (Forms).
   - [x] Outline sidebar; links to a page (8e). Guarded by the `outline` spec; notes in `docs/notes/pages.md` (Outline and links to a page).
   - [x] Header/footer tokens and Bates numbering (8f). Guarded by the `headerfooter` spec; notes in `docs/notes/shell.md` (Header & footer).
-  - Compare two documents.
+  - [x] Compare two documents (8g). Guarded by the `compare` spec; notes in `docs/notes/pages.md` (Compare).
 - [ ] **9. Engine upgrades** (M). (TECH 2.5, 2.7, §3)
   - Background text extraction.
   - Raster and image encoding in a Worker.

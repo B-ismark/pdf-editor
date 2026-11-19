@@ -274,6 +274,34 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
   *as shown* (`marginsOf` / `cropFromMargins`), which is what lets "All pages"
   apply one set of margins to pages of any size or turn.
 
+## Compare
+
+`CompareDialog.tsx` over `pdf/compare.ts`. Full-screen, like Organise; the ⋯
+menu's *Compare documents*, disabled until a second tab is open.
+
+- **Each side is the file as it would download.** A tab whose change count is
+  past what's baked into its bytes is run through `exportPdf` and re-read;
+  otherwise its own parse is used. Every parse the dialog made is released on
+  close (`releaseDoc`) — never the front document's own.
+- **Text is read the way Find reads it** (`joinPage`), so two writers that
+  split a line into different runs still read the same. Words compare after
+  `normalWord` (NFKC, plain quotes, no soft hyphens or zero-widths).
+- **Two passes, both Myers with a cap.** Lines first, then words only inside
+  the stretches of lines that differ — a reflowed paragraph is a block of
+  changed lines but one changed word. Past `MAX_LINE_D` the whole text goes to
+  the word pass; past `MAX_WORD_D` a stretch is reported replaced whole and the
+  result is marked rough (the status line says so). Memory is O(D²), not
+  O(N·M).
+- **Marks are approximate.** A word's box is its share of the run's advance
+  width — glyph widths aren't known here. Good enough to point at a word; never
+  used for anything that reaches a file.
+- **Pages pair by index.** A page inserted in After shifts the Overlay of every
+  page after it; the text diff is unaffected (it runs over the whole document).
+- **Overlay** is an ink diff (luminance < 160): ink in both is drawn faint,
+  ink only in one in `--diff-removed` / `--diff-added`, read from the theme.
+- Pages render only near the viewport (IntersectionObserver, 800px margin) and
+  free their canvases when they leave it.
+
 ## Known limits
 
 - OCR renders in user space. On a page whose own `/Rotate` turns sideways-scanned
