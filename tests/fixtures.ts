@@ -69,6 +69,9 @@ export interface Fixtures {
   form: string;
   /** One page of form fields the write path gets wrong easily — see {@link FORM_EDGE}. */
   formEdge: string;
+  /** One page, two images in the formats pdf.js decodes with WebAssembly: see
+   * {@link CODECS}. */
+  codecs: string;
   /** HTML pretending to be a PDF. */
   fake: string;
 }
@@ -279,6 +282,7 @@ async function build(): Promise<Fixtures> {
     hidden: write("hidden.pdf", await hiddenPdf()),
     form: write("form.pdf", await formPdf()),
     formEdge: write("form-edge.pdf", await formEdgePdf()),
+    codecs: write("codecs.pdf", await codecsPdf()),
     fake: write("not-a-pdf.pdf", "<!doctype html><html><body><h1>Not a PDF</h1></body></html>"),
   };
 }
@@ -1467,4 +1471,54 @@ async function formEdgePdf(): Promise<Uint8Array> {
   acro.set(PDFName.of("NeedAppearances"), PDFBool.True);
 
   return doc.save({ updateFieldAppearances: false });
+}
+
+/**
+ * Images pdf.js 5 decodes with WebAssembly modules it loads at runtime (pdf.js
+ * 4 did it in plain script): a fax-coded scan (`CCITTFaxDecode`, the usual
+ * encoding of a black-and-white scan) and a JPEG 2000 image (`JPXDecode`).
+ * Each is a few dozen bytes, written here by an encoder once.
+ *
+ * The page is 300 × 200; `ccitt` and `jpx` are where each image is drawn, in
+ * PDF units. The scan is white with a black square in its middle half; the JPX
+ * is a flat red. Undecoded, either is simply not painted: white.
+ */
+export const CODECS = {
+  page: { width: 300, height: 200 },
+  ccitt: { x: 20, y: 40, size: 120 },
+  jpx: { x: 160, y: 40, size: 120 },
+  red: [220, 20, 20],
+};
+
+async function codecsPdf(): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([CODECS.page.width, CODECS.page.height]);
+  const ctx = doc.context;
+  const bytes = (b64: string) => new Uint8Array(Buffer.from(b64, "base64"));
+  // 64 × 64, Group 4 (K -1): a black 32 × 32 square in the middle.
+  const fax = ctx.register(
+    PDFRawStream.of(
+      ctx.obj({
+        Type: "XObject", Subtype: "Image", Width: 64, Height: 64, ColorSpace: "DeviceGray", BitsPerComponent: 1,
+        Filter: "CCITTFaxDecode", DecodeParms: { K: -1, Columns: 64, Rows: 64, BlackIs1: true },
+      }),
+      bytes("JqB4b/////yC43////////////////////+P////8AEAEA=="),
+    ),
+  );
+  // 32 × 32 JP2, flat rgb(220, 20, 20). The colour space comes from the file.
+  const jpx = ctx.register(
+    PDFRawStream.of(
+      ctx.obj({ Type: "XObject", Subtype: "Image", Width: 32, Height: 32, Filter: "JPXDecode" }),
+      bytes(
+        "AAAADGpQICANCocKAAAAFGZ0eXBqcDIgAAAAAGpwMiAAAAAtanAyaAAAABZpaGRyAAAAIAAAACAAAwcHAAAAAAAPY29scgEAAAAAABAAAACzanAyY/9P/1EALwAAAAAAIAAAACAAAAAAAAAAAAAAACAAAAAgAAAAAAAAAAAAAwcBAQcBAQcBAf9SAAwAAAABAAUEBAAB/1wAE0BASEhQSEhQSEhQSEhQSEhQ/2QAJQABQ3JlYXRlZCBieSBPcGVuSlBFRyB2ZXJzaW9uIDIuNS40/5AACgAAAAAALAAB/5PPtAgDM8+0CAgfz7QICB+AgICAgICAgICAgICAgID/2Q==",
+      ),
+    ),
+  );
+  page.node.set(PDFName.of("Resources"), ctx.obj({ XObject: { Fax: fax, Jpx: jpx } }));
+  const { ccitt: a, jpx: b } = CODECS;
+  page.node.set(
+    PDFName.of("Contents"),
+    ctx.register(ctx.flateStream(`q ${a.size} 0 0 ${a.size} ${a.x} ${a.y} cm /Fax Do Q q ${b.size} 0 0 ${b.size} ${b.x} ${b.y} cm /Jpx Do Q`)),
+  );
+  return doc.save();
 }

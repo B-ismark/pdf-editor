@@ -352,6 +352,11 @@ type-checking can't see, and each exists because it broke once:
   redaction solid black and the photo intact. With the worker's script blocked
   the export still finishes on the page (and still as JPEG). The first three
   were shown to fail on the previous build;
+- `decoders.spec.ts` — pdf.js 5. A fax-coded scan (`CCITTFaxDecode`) and a
+  JPEG 2000 image (`codecs` fixture, a few dozen bytes each, written by an
+  encoder once) paint — black square on white, flat red — with their
+  WebAssembly fetched from the app's own origin and no script fallback needed.
+  Shown to fail (both blank) with `wasmUrl` left out of `getDocument()`;
 - `warm.spec.ts` — React 19.2's `<Activity>` keeps the last document mounted
   behind the one in front. Switching back shows the *same* canvas (marked
   before the switch) and never painted again, with its undo, where a rebuilt

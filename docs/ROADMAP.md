@@ -80,8 +80,8 @@ Read only the section a package points at, not the whole folder.
   - [x] Outline sidebar; links to a page (8e). Guarded by the `outline` spec; notes in `docs/notes/pages.md` (Outline and links to a page).
   - [x] Header/footer tokens and Bates numbering (8f). Guarded by the `headerfooter` spec; notes in `docs/notes/shell.md` (Header & footer).
   - [x] Compare two documents (8g). Guarded by the `compare` spec; notes in `docs/notes/pages.md` (Compare).
-- [ ] **9. Engine upgrades** (M). (TECH 2.5, 2.7, §3)
+- [x] **9. Engine upgrades** (M). (TECH 2.5, 2.7, §3)
   - [x] Background text extraction (9a). Guarded by the `indexing` spec; notes in `docs/notes/rendering.md` (A page's text arrives after the page).
   - [x] Raster and image encoding in a Worker (9b). Guarded by the `codec` spec; notes in `docs/notes/privacy-and-export.md` (The image codec runs off the page).
   - [x] React 19.2, using `<Activity>` for background tabs (9c). Guarded by the `warm` spec; notes in `docs/notes/tabs.md` (The last document stays warm).
-  - pdf.js 5, Vite 7.
+  - [x] pdf.js 5, Vite 7 (9d). Guarded by the `decoders` spec (and every text and rendering spec); notes in `docs/notes/rendering.md` (pdf.js's decoders ship with the app).

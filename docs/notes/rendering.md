@@ -96,3 +96,24 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   has run, and posts a `MessageChannel` message, which isn't clamped. Not
   `scheduler.yield`: it resumes ahead of React's queued render, so progress
   never painted. Call it as often as you like; most calls return immediately.
+
+## pdf.js's decoders ship with the app
+
+- **Scans and JPEG 2000 paint only through `wasmUrl`.** Since pdf.js 5 the
+  worker decodes JPEG 2000 (OpenJPEG), JBIG2 *and fax-coded scans*
+  (`CCITTFaxDecode`, one module with JBIG2) and ICC colour profiles (qcms) with
+  WebAssembly modules it fetches at runtime from the `wasmUrl` document
+  option, falling back to script builds fetched from the same place. Left
+  unset, both fetches fail, pdf.js only warns, and the image isn't painted: a
+  scanned contract opens blank. `pdfjsWasmPlugin` (vite.config.ts) copies the
+  modules, their script fallbacks and their licences into
+  `dist/pdfjs-<version>/` (the names are fixed by pdf.js, so the version is in
+  the folder) and serves them in dev; **every `getDocument()` spreads
+  `pdfjsDocOptions`** (`pdf/pdfjsOptions.ts`), which makes the folder absolute,
+  since the worker resolves a relative URL against its own script. A new
+  `getDocument()` that forgets it draws such pages blank — the `decoders` spec
+  catches it only on the paths it opens. `quickjs-eval` (a document's own
+  JavaScript) is deliberately not shipped.
+- **`page.render` needs `canvas` as well as `canvasContext`** since pdf.js 5
+  (type-checked, so a missing one fails the build).
+

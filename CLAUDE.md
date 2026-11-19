@@ -55,7 +55,7 @@ invariant it protects (and why it exists) is in
 when a spec fails or before you add one. Specs: `app`, `privacy`, `rendering`,
 `export`, `ocr`, `font`, `baseline`, `colors`, `find`, `phone`, `shell`,
 `icons`, `marks`, `affordance`, `shape`, `fragment`, `line`, `ligature`, `chrome`, `tabs`,
-`overlays`, `placement`, `edge`, `keyboard`, `saved`, `password`, `sign`, `pages`, `sidebar`, `patterns`, `hidden`, `update`, `protect`, `pagetools`, `crop`, `saveto`, `forms`, `winansi`, `outline`, `headerfooter`, `compare`, `indexing`, `codec`, `warm`. If you add a feature that touches privacy, the export bytes, or
+`overlays`, `placement`, `edge`, `keyboard`, `saved`, `password`, `sign`, `pages`, `sidebar`, `patterns`, `hidden`, `update`, `protect`, `pagetools`, `crop`, `saveto`, `forms`, `winansi`, `outline`, `headerfooter`, `compare`, `indexing`, `codec`, `warm`, `decoders`. If you add a feature that touches privacy, the export bytes, or
 per-page rendering, add a spec for it.
 
 ## Architecture
@@ -77,9 +77,10 @@ per-page rendering, add a spec for it.
 - **Workspace (tabs)** — several PDFs can be open at once, one `DocTabs` tab
   each. `App.tsx` is the *workspace shell*: the tab list, opening/closing,
   password prompt, restore, autosave, prefs, the status line. The document *in
-  front* is a `DocumentEditor.tsx`, mounted fresh per document (keyed by tab id
-  and a load generation), so nothing that edits it knows tabs exist. The others
-  are *parked* in `tabs: OpenDoc[]` (`workspace.ts`) with their whole undo
+  front* is a `DocumentEditor.tsx`, one per document (keyed by tab id and a load
+  generation), so nothing that edits it knows tabs exist. The last one before
+  it stays mounted, hidden in React's `<Activity>` and held off the page; the
+  others are *parked* in `tabs: OpenDoc[]` (`workspace.ts`) with their whole undo
   history, their scroll position and zoom, and their change count. See
   `docs/notes/tabs.md` before touching `openBytes` or the split.
 - **State** — `hooks/useHistory.ts` holds a single `DocState`

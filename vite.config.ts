@@ -23,6 +23,61 @@ const ocrAssetVersion = [
 ].join("-");
 
 /**
+ * pdf.js's WebAssembly decoders, served from the app's own origin.
+ *
+ * pdf.js 5 decodes JPEG 2000 (OpenJPEG), JBIG2 and fax-coded scans (one module,
+ * `jbig2`) and ICC colour profiles (qcms) with WebAssembly modules its worker
+ * fetches at runtime from the `wasmUrl` document option, falling back to a
+ * script build of each fetched from the same place. Unset, both fetches fail
+ * and the image is quietly not painted — a scanned page opens blank. So the
+ * modules ship as part of the app, under a folder named for the pdf.js version
+ * (their file names are fixed by pdf.js, so the folder is what changes when
+ * pdf.js does), and the app passes that folder as `wasmUrl`.
+ *
+ * The script fallbacks ship too: browsers with WebAssembly switched off (e.g.
+ * a hardened "no JIT" mode) still decode, just slower. Not `quickjs-eval`: that
+ * runs a document's own JavaScript, which this app never does.
+ */
+const pdfjsVersion: string = require("pdfjs-dist/package.json").version;
+const PDFJS_ASSET_DIR = `pdfjs-${pdfjsVersion}/`;
+const PDFJS_WASM_FILES = [
+  "openjpeg.wasm",
+  "openjpeg_nowasm_fallback.js",
+  "jbig2.wasm",
+  "jbig2_nowasm_fallback.js",
+  "qcms_bg.wasm",
+  "LICENSE_OPENJPEG",
+  "LICENSE_PDFJS_OPENJPEG",
+  "LICENSE_JBIG2",
+  "LICENSE_PDFJS_JBIG2",
+  "LICENSE_QCMS",
+  "LICENSE_PDFJS_QCMS",
+];
+const pdfjsWasmFile = (name: string) => require.resolve(`pdfjs-dist/wasm/${name}`);
+
+function pdfjsWasmPlugin(): Plugin {
+  const type = (name: string) =>
+    name.endsWith(".wasm") ? "application/wasm" : name.endsWith(".js") ? "text/javascript" : "text/plain";
+  return {
+    name: "pdfjs-wasm-decoders",
+    async generateBundle() {
+      for (const name of PDFJS_WASM_FILES) {
+        this.emitFile({ type: "asset", fileName: PDFJS_ASSET_DIR + name, source: await readFile(pdfjsWasmFile(name)) });
+      }
+    },
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const path = (req.url ?? "").split("?")[0];
+        const name = path.startsWith(`/${PDFJS_ASSET_DIR}`) ? path.slice(PDFJS_ASSET_DIR.length + 1) : "";
+        if (!PDFJS_WASM_FILES.includes(name)) return next();
+        res.setHeader("Content-Type", type(name));
+        res.end(await readFile(pdfjsWasmFile(name)));
+      });
+    },
+  };
+}
+
+/**
  * Inject a Content-Security-Policy `<meta>` into index.html.
  *
  * The app's core promise is that the document never leaves the device. Today
@@ -108,7 +163,9 @@ function cspPlugin(): Plugin {
  * fed ordinary Unicode text. It keys that entry on the *first* code point of the
  * glyph's text, so the "fi" ligature (text "fi") is filed under "f" and, coming
  * later, replaces the real "f": every "f" typed in that face draws "fi"
- * ("from" → "firom"). pdf.js's own canvas never notices (it draws by private-use
+ * ("from" → "firom"). (pdf.js 5 files the standard ligatures — "fi", "ffl",
+ * U+FB00–FB4F — under their own code points instead; any other glyph whose
+ * text is several characters, a "ct" or a "Th", still lands on its first.) pdf.js's own canvas never notices (it draws by private-use
  * codes); everything here that uses the face by Unicode does — the selected
  * overlay, the raster export's `ctx.font`, and the vector export, which embeds
  * these very bytes (`fontEmbed.ts`). So it is fixed once, at the source: a glyph
@@ -127,8 +184,10 @@ function cspPlugin(): Plugin {
  * the code, the build fails rather than silently dropping the fix.
  */
 const PDF_WORKER = /[\\/]pdfjs-dist[\\/]build[\\/]pdf\.worker\.min\.mjs$/;
-/** `adjustMapping`'s ToUnicode lookup, keyed on the first code point. */
-const FIRST_CODE_POINT = /"string"==typeof (\w+)&&\(\1=\1\.codePointAt\(0\)\);if\(\1&&!\(/g;
+/** `adjustMapping`'s ToUnicode lookup for a glyph whose text is more than one
+ * UTF-16 unit: since pdf.js 5 a standard ligature (U+FB00–FB4F) gets its own
+ * code point, and anything else falls back to the first code point. */
+const FIRST_CODE_POINT = /(\w+)=(\w+)\.get\(\1\)\|\|\1\.codePointAt\(0\)\}if\(\1&&/g;
 /** `adjustMapping`'s head, up to where it skips a glyph `hasGlyph` rejects:
  * names its ToUnicode map (4th parameter) and the extra Unicode map (2nd const). */
 const SKIPPED_GLYPH =
@@ -157,9 +216,11 @@ function patchPdfWorker(code: string): string {
     `Max size of CID is 65,535");let ${g}=-1;${pick};${g}>=0&&${g}<${n}&&(${map}[${cc}]=${g})`,
   );
   const ligatures = replaceOnce(
-    cid, FIRST_CODE_POINT, "ToUnicode first-code-point site", (_m, u) =>
-    // One code point (one or two UTF-16 units) keeps its entry; more get none.
-    `"string"==typeof ${u}&&(${u}=${u}.length>(${u}.codePointAt(0)>65535?2:1)?void 0:${u}.codePointAt(0));if(${u}&&!(`,
+    cid, FIRST_CODE_POINT, "ToUnicode first-code-point site", (_m, u, ligs) =>
+    // pdf.js's own: a standard ligature is filed under its own code point. Then
+    // one code point (here, one outside the BMP: two UTF-16 units) keeps its
+    // entry; more get none.
+    `${u}=${ligs}.get(${u})||(${u}.length>(${u}.codePointAt(0)>65535?2:1)?void 0:${u}.codePointAt(0))}if(${u}&&`,
   );
   return replaceOnce(
     ligatures,
@@ -201,7 +262,7 @@ function pdfWorkerPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [react(), cspPlugin(), pdfWorkerPlugin()],
+  plugins: [react(), cspPlugin(), pdfWorkerPlugin(), pdfjsWasmPlugin()],
   base: "./",
   resolve: {
     // One PDF engine. The app writes with @cantoo/pdf-lib (the maintained
@@ -217,6 +278,7 @@ export default defineConfig({
   worker: { format: "es" },
   define: {
     __OCR_ASSET_VERSION__: JSON.stringify(ocrAssetVersion),
+    __PDFJS_ASSET_DIR__: JSON.stringify(PDFJS_ASSET_DIR),
   },
   build: {
     rollupOptions: {

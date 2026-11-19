@@ -124,7 +124,7 @@ async function ensureFontsLoaded(
   canvas.width = Math.max(1, Math.ceil(viewport.width));
   canvas.height = Math.max(1, Math.ceil(viewport.height));
   const ctx = canvas.getContext("2d");
-  if (ctx) await page.render({ canvasContext: ctx, viewport }).promise;
+  if (ctx) await page.render({ canvas, canvasContext: ctx, viewport }).promise;
   // Hand the backing store straight back; this raster is never shown.
   canvas.width = 0;
   canvas.height = 0;
