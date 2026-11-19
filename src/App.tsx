@@ -1048,7 +1048,14 @@ export function App() {
         className="app"
         onDragOver={(e) => {
           if (!carriesFiles(e)) return;
+          // Still cancelled, so the browser doesn't open the file itself.
           e.preventDefault();
+          // A dialog would refuse the drop: say no, don't offer it.
+          if (aModalIsOpen()) {
+            e.dataTransfer.dropEffect = "none";
+            setDragging(false);
+            return;
+          }
           setDragging(true);
         }}
         onDragLeave={(e) => {
@@ -1095,18 +1102,23 @@ export function App() {
               <span className="restore-banner__icon"><Icon name="restore" size={22} /></span>
               <div className="restore-banner__text">
                 <b className="title-small">Restore last session?</b>
-                <span className="body-small restore-banner__files">
+                {/* A long list is cut short; the tooltip has it whole. */}
+                <span className="body-small restore-banner__files" data-tip={restorable.docs.map((d) => d.fileName).join(", ")}>
                   {restorable.docs.length === 1
                     ? restorable.docs[0].fileName
                     : `${plural(restorable.docs.length, "document")} · ${restorable.docs.map((d) => d.fileName).join(", ")}`}
                 </span>
               </div>
-              <button className="btn btn--tonal" onClick={restoreSession}>Restore</button>
-              {/* "Dismiss" only hides this prompt — the copy stays on the device
-                  so it can still be restored later. "Delete" is the way to
-                  actually get rid of it, which previously had no UI at all. */}
-              <button className="btn btn--text" onClick={dismissRestore}>Not now</button>
-              <button className="btn btn--text" onClick={discardRestorable}>Delete</button>
+              {/* One group: on a narrow screen it moves under the text whole,
+                  rather than leaving Restore beside it and the rest below. */}
+              <div className="restore-banner__actions">
+                <button className="btn btn--tonal" onClick={restoreSession}>Restore</button>
+                {/* "Not now" only hides this prompt — the copy stays on the
+                    device so it can still be restored later. "Delete" is the
+                    way to actually get rid of it. */}
+                <button className="btn btn--text" onClick={dismissRestore}>Not now</button>
+                <button className="btn btn--text" onClick={discardRestorable}>Delete</button>
+              </div>
             </div>
           )}
           <div className="dropzone__card">
@@ -1118,12 +1130,20 @@ export function App() {
             <button className="btn btn--filled btn--lg" onClick={openAnother}>
               <Icon name="open_file" size={18} /> Choose PDF or photos
             </button>
+            {/* Shown here, announced by the regions below: a region that
+                mounts with its text already in it often isn't read out. */}
             {status === "loading" && (
-              <p className="body-small dropzone__note" role="status">
-                <span className="spinner spinner--sm" aria-hidden="true" /> {message}
+              <p className="body-small dropzone__note" aria-hidden="true">
+                <span className="spinner spinner--sm" /> {message}
               </p>
             )}
-            {status === "error" && <p className="body-small dropzone__err" role="alert">{message}</p>}
+            {status === "error" && <p className="body-small dropzone__err" aria-hidden="true">{message}</p>}
+          </div>
+          <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+            {status === "loading" ? message : ""}
+          </div>
+          <div className="sr-only" role="alert" aria-live="assertive" aria-atomic="true">
+            {status === "error" ? message : ""}
           </div>
           {openInput}
         </div>
@@ -1157,6 +1177,12 @@ export function App() {
       onDragOver={(e) => {
         if (!hasFiles(e)) return;
         e.preventDefault();
+        // A dialog would refuse the drop: say no, don't offer it.
+        if (aModalIsOpen()) {
+          e.dataTransfer.dropEffect = "none";
+          if (dragging) setDragging(false);
+          return;
+        }
         if (!dragging) setDragging(true);
       }}
       onDragLeave={(e) => {

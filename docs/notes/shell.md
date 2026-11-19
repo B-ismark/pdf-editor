@@ -345,8 +345,17 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   - The restore offer and the welcome are one centred group
     (`align-content: center`); the column is `minmax(0, 1fr)` so the offer's
     min-content can't widen it past a phone (it scrolled sideways, clipping the
-    headline), and the offer wraps its buttons below on a phone.
-  - Loading and error lines are `role="status"` / `role="alert"`.
+    headline). Its three buttons are one group
+    (`.restore-banner__actions`) that moves below the text whole on a phone,
+    never Restore beside the text and the other two under it; the file list
+    carries its full names as a tooltip, since it is cut short.
+  - While a dialog is open (the password prompt from a first drop), a file
+    over the window gets `dropEffect = "none"` and no surface, in the welcome
+    and the editor alike: `openFiles` would refuse it behind the scrim. The
+    dragover is still cancelled, or the browser would open the file itself.
+  - The visible loading and error lines are `aria-hidden`; persistent `sr-only`
+    `role="status"` / `role="alert"` regions announce them, as in the editor —
+    a region that mounts with its text already in it often isn't read out.
   - Lines use `text-wrap: balance`, so none ends on one word.
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is

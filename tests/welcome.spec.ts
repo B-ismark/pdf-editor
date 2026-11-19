@@ -50,6 +50,9 @@ interface Drag {
 }
 const PDF = { name: "sample.pdf", b64: "" };
 
+/** Two frames: long enough for a state change from the last event to paint. */
+const settle = (page: Page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+
 async function drag(page: Page, type: "dragover" | "dragleave" | "drop", o: Drag = {}) {
   await page.evaluate(
     ([type, at, related, file]) => {
@@ -112,7 +115,7 @@ test("a file over the window shows where it will land, and dropping opens it", a
 test("dragging text over the welcome isn't an offer to open it", async ({ page }) => {
   await page.goto("/");
   await drag(page, "dragover");
-  await page.waitForTimeout(200);
+  await settle(page);
   await expect(page.locator(".dropzone__drop")).toHaveCount(0);
 });
 
@@ -125,6 +128,32 @@ test("the button says photos open too, and isn't an upload", async ({ page }) =>
   await expect(btn.locator("svg")).not.toHaveClass(/lucide-upload\b/);
 });
 
+test("while a dialog is open, a file over the window isn't offered a drop", async ({ page }) => {
+  await page.goto("/");
+  const f = await fixtures();
+  const locked = { name: "locked.pdf", b64: (await readFile(f.locked)).toString("base64") };
+  await drag(page, "dragover", { file: locked });
+  await drag(page, "drop", { file: locked });
+  await expect(page.getByRole("dialog")).toBeVisible();
+  const sample = { ...PDF, b64: (await readFile(f.sample)).toString("base64") };
+  await drag(page, "dragover", { at: ".appbar", file: sample });
+  await settle(page);
+  await expect(page.locator(".dropzone__drop")).toHaveCount(0);
+});
+
+test("opening and failing are announced by live regions that were already there", async ({ page }) => {
+  await page.goto("/");
+  // Present, and empty, before anything happens: inserted with text, a region
+  // often isn't read out.
+  const alert = page.locator(".app [role=alert]");
+  await expect(alert).toHaveCount(1);
+  await expect(alert).toHaveText("");
+  await expect(page.locator(".app [role=status]")).toHaveCount(1);
+  await drag(page, "drop", { file: { name: "notes.pdf", b64: Buffer.from("not a pdf at all").toString("base64") } });
+  await expect(alert).not.toHaveText("", { timeout: 15_000 });
+  await expect(page.locator(".dropzone__err")).toBeVisible();
+});
+
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   test("nothing asks a finger to drag, and no line ends on one word", async ({ page }) => {
@@ -132,7 +161,7 @@ test.describe("on a phone", () => {
     await expect(card(page)).toBeVisible();
     await expect(card(page)).not.toContainText(/drag|drop/i);
     expect(await orphans(page)).toEqual([]);
-    const box = (await page.getByRole("button", { name: "Choose PDF" }).boundingBox())!;
+    const box = (await page.getByRole("button", { name: "Choose PDF or photos" }).boundingBox())!;
     expect(box.height).toBeGreaterThanOrEqual(44);
   });
 
@@ -143,9 +172,14 @@ test.describe("on a phone", () => {
     await expect(page.locator(".restore-banner")).toBeVisible();
     const over = await page.locator(".dropzone").evaluate((el) => el.scrollWidth - el.clientWidth);
     expect(over).toBeLessThanOrEqual(0);
+    const boxes = [];
     for (const name of ["Restore", "Not now", "Delete"]) {
       const b = (await page.locator(".restore-banner").getByRole("button", { name }).boundingBox())!;
       expect(b.x + b.width, name).toBeLessThanOrEqual(390);
+      boxes.push(b);
     }
+    // The three choices stay together on one row, not Restore by the text and
+    // the other two below it.
+    expect(new Set(boxes.map((b) => Math.round(b.y))).size).toBe(1);
   });
 });

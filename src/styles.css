@@ -676,7 +676,8 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.restore-banner__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 120px; }
+.restore-banner__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1 1 180px; }
+.restore-banner__actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 4px; margin-left: auto; }
 .restore-banner__text b { color: var(--on-surface); }
 .restore-banner__text span { color: var(--on-surface-variant); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
