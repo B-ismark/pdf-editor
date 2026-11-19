@@ -419,6 +419,45 @@ test("a resourceless form with an indirect /Subtype keeps what it paints", async
   expect((await pageTexts(bytes, [1, 2])).map((t) => t.trim())).toEqual(["", "FORM_KEPT"]);
 });
 
+/**
+ * The same inheritance one level down: a form with resources of its own paints
+ * a form without any, which draws from the first form's. Narrowing the first
+ * form to the names in its own content alone cut what the inner one paints.
+ */
+test("a form inside a form keeps what the inner one paints from the outer's resources", async ({ page }) => {
+  const doc = await PDFDocument.create();
+  const ctx = doc.context;
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const text = (t: string) =>
+    ctx.register(ctx.flateStream(`BT /F1 24 Tf 72 700 Td (${t}) Tj ET`, {
+      Type: "XObject", Subtype: "Form", BBox: [0, 0, 612, 792], Resources: { Font: { F1: font.ref } },
+    }));
+  const secret = text("FORM_SECRET");
+  const kept = text("FORM_KEPT");
+  // Inner: no /Resources, so `/Fk` is looked up in the outer form's.
+  const inner = ctx.register(ctx.flateStream("/Fk Do", { Type: "XObject", Subtype: "Form", BBox: [0, 0, 612, 792] }));
+  const outer = ctx.register(ctx.flateStream("/Fi Do", {
+    Type: "XObject", Subtype: "Form", BBox: [0, 0, 612, 792],
+    Resources: { XObject: { Fi: inner, Fk: kept, Fs: secret } },
+  }));
+  const res = ctx.register(ctx.obj({ Font: { F1: font.ref }, XObject: { Fs: secret, Fo: outer } }));
+  for (const name of ["Fs", "Fo"]) {
+    const p = doc.addPage([612, 792]);
+    p.node.set(PDFName.of("Resources"), res);
+    p.node.set(PDFName.of("Contents"), ctx.register(ctx.flateStream(`/${name} Do`)));
+  }
+  const file = join(mkdtempSync(join(tmpdir(), "nested-")), "nested-form.pdf");
+  writeFileSync(file, await doc.save());
+
+  await open(page, file);
+  await page.keyboard.press("Control+f");
+  await page.locator(".findbar input").fill("SECRET");
+  await page.waitForTimeout(500);
+  await page.locator(".findbar button", { hasText: "Redact all" }).click();
+  const bytes = await downloadFrom(page, ".appbar__download");
+  expect((await pageTexts(bytes, [1, 2])).map((t) => t.trim())).toEqual(["", "FORM_KEPT"]);
+});
+
 /** Strongly red pixels on page `n`'s canvas, once it has scrolled in and painted. */
 async function redPixels(page: Page, n: number): Promise<number> {
   await page.evaluate((n) => document.querySelectorAll(".page")[n].scrollIntoView(), n);

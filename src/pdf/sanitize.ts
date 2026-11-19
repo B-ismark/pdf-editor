@@ -300,7 +300,8 @@ export function sanitizeDocument(doc: PDFDocument, report: ScrubReport = emptySc
         continue;
       }
       if (!(annot instanceof PDFDict)) continue;
-      const subtype = String(annot.get(PDFName.of("Subtype")));
+      // Resolved: an indirect /Subtype must not read as "something else" and slip through.
+      const subtype = String(deref(annot.get(PDFName.of("Subtype"))));
       if (ANNOT_DROP.has(subtype)) {
         if (subtype === "/FileAttachment") addFile(report, deref(annot.get(PDFName.of("FS"))), deref, "Attachment");
         else report.media++;
@@ -314,7 +315,7 @@ export function sanitizeDocument(doc: PDFDocument, report: ScrubReport = emptySc
   // 5) Private data riding on images and forms.
   for (const [, obj] of ctx.enumerateIndirectObjects()) {
     if (!(obj instanceof PDFStream)) continue;
-    const subtype = String(obj.dict.get(PDFName.of("Subtype")));
+    const subtype = String(deref(obj.dict.get(PDFName.of("Subtype"))));
     if (subtype !== "/Image" && subtype !== "/Form") continue;
     let privateHere = false;
     for (const key of XOBJECT_DROP) {

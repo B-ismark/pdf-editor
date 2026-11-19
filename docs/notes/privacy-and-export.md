@@ -53,7 +53,11 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     looking for `Do` names only a *form* can hold. It checks `/Subtype /Form`
     now — *resolved*: a `/Subtype` can be an indirect reference, and reading
     the unresolved one as "not a form" cut what the form painted out of the
-    file. Any new walk over XObjects should do both.
+    file. Any new walk over XObjects should do both — and `sanitize.ts` had the
+    same slip: an image or annotation with an indirect `/Subtype` skipped the
+    scrub, so its private data (or an embedded player) shipped. Forms are
+    narrowed with the same inheritance rule as pages: a resourceless form a
+    form paints draws from that form's resources, so its names count there too.
   - **A worker that never answered is not retried.** If it fails before its
     first reply it couldn't load, and `codec.ts` stays on the page for the rest
     of the session rather than fetching it again for every image.

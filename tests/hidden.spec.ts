@@ -238,6 +238,23 @@ test.describe("the report reads unusual files truthfully", () => {
     expect(r.removed("private")?.detail).toContain("on 1 page, image or drawing");
   });
 
+  // An indirect /Subtype is legal, and read unresolved it isn't "/Image" or
+  // "/Screen" — so the clean-up skipped the object and the private data shipped.
+  test("private data and players are found behind an indirect /Subtype", async () => {
+    const r = await report((doc) => {
+      const ctx = doc.context;
+      const img = ctx.stream(new Uint8Array([0, 0, 0]), {
+        Type: "XObject", Width: 1, Height: 1, ColorSpace: "DeviceRGB", BitsPerComponent: 8,
+        PieceInfo: { App: { Private: PDFString.of("x") } },
+      });
+      img.dict.set(PDFName.of("Subtype"), ctx.register(PDFName.of("Image")));
+      ctx.register(img);
+      annot(doc, { Subtype: ctx.register(PDFName.of("Screen")) });
+    });
+    expect(r.removed("private")?.detail).toContain("on 1 page, image or drawing");
+    expect(r.removed("media")?.title).toBe("1 embedded player");
+  });
+
   test("layers switched off by default (/BaseState /OFF) are listed", async () => {
     const r = await report((doc) => {
       const ctx = doc.context;

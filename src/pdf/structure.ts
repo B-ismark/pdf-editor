@@ -389,6 +389,31 @@ export function isolatePageResources(doc: PDFDocument): void {
   const ctx = doc.context;
   const done = new Set<PDFObject>();
 
+  /** A form with no /Resources of its own paints from its parent's, so the
+   * names it draws count as the parent's: add them to `used`, transitively. */
+  const inheritorsOf = (res: PDFDict, used: Set<string>): void => {
+    const xo = deref(doc, res.get(PDFName.of("XObject")));
+    if (!(xo instanceof PDFDict)) return;
+    const pending = [...used];
+    while (pending.length) {
+      const f = deref(doc, xo.get(PDFName.of(pending.pop()!)));
+      // Forms only: an image has no content to read, and decoding one to
+      // look for names in it inflated every flate image a page drew — a
+      // redacted page's raster is 13 MB of samples — on the page, for nothing.
+      if (
+        f instanceof PDFStream &&
+        String(deref(doc, f.dict.get(PDFName.of("Subtype")))) === "/Form" &&
+        !f.dict.has(PDFName.of("Resources"))
+      ) {
+        const ft = streamText(f);
+        if (ft === null) continue;
+        const more = new Set<string>();
+        xobjectNamesIn(ft, more);
+        for (const n of more) if (!used.has(n)) (used.add(n), pending.push(n));
+      }
+    }
+  };
+
   /** Return a copy of `res` whose /XObject holds only `used`; recurse into the
    * forms it keeps. `inheritInto` collects names a form without resources of
    * its own draws from its parent's. */
@@ -419,6 +444,7 @@ export function isolatePageResources(doc: PDFDocument): void {
     if (text === null) return;
     const used = new Set<string>();
     xobjectNamesIn(text, used);
+    inheritorsOf(res, used);
     form.dict.set(PDFName.of("Resources"), narrowed(res, used, depth));
   };
 
@@ -451,29 +477,7 @@ export function isolatePageResources(doc: PDFDocument): void {
     if (res instanceof PDFDict && readable) {
       const used = new Set<string>();
       xobjectNamesIn(text, used);
-      // A form with no /Resources of its own paints from the page's; its
-      // names count as the page's.
-      const xo = deref(doc, res.get(PDFName.of("XObject")));
-      if (xo instanceof PDFDict) {
-        const pending = [...used];
-        while (pending.length) {
-          const f = deref(doc, xo.get(PDFName.of(pending.pop()!)));
-          // Forms only: an image has no content to read, and decoding one to
-          // look for names in it inflated every flate image a page drew — a
-          // redacted page's raster is 13 MB of samples — on the page, for nothing.
-          if (
-            f instanceof PDFStream &&
-            String(deref(doc, f.dict.get(PDFName.of("Subtype")))) === "/Form" &&
-            !f.dict.has(PDFName.of("Resources"))
-          ) {
-            const ft = streamText(f);
-            if (ft === null) continue;
-            const more = new Set<string>();
-            xobjectNamesIn(ft, more);
-            for (const n of more) if (!used.has(n)) (used.add(n), pending.push(n));
-          }
-        }
-      }
+      inheritorsOf(res, used);
       node.set(PDFName.of("Resources"), narrowed(res, used, 0));
     }
     const annots = deref(doc, node.get(PDFName.of("Annots")));
