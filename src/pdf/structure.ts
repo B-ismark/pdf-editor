@@ -456,7 +456,14 @@ export function isolatePageResources(doc: PDFDocument): void {
         const pending = [...used];
         while (pending.length) {
           const f = deref(doc, xo.get(PDFName.of(pending.pop()!)));
-          if (f instanceof PDFStream && !f.dict.has(PDFName.of("Resources"))) {
+          // Forms only: an image has no content to read, and decoding one to
+          // look for names in it inflated every flate image a page drew — a
+          // redacted page's raster is 13 MB of samples — on the page, for nothing.
+          if (
+            f instanceof PDFStream &&
+            String(f.dict.get(PDFName.of("Subtype"))) === "/Form" &&
+            !f.dict.has(PDFName.of("Resources"))
+          ) {
             const ft = streamText(f);
             if (ft === null) continue;
             const more = new Set<string>();

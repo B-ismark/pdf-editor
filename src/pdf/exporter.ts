@@ -1,5 +1,5 @@
 import { HF_MARGIN, labelsFor, textColor, textSize } from "./headerFooter";
-import { LineCapStyle, PDFArray, PDFCatalog,  PDFDict, PDFDocument, PDFHexString, PDFInvalidObject, PDFName, PDFPage, PDFPageLeaf, PDFPageTree, PDFRef, PDFStream, PDFString,  StandardFonts, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb, type PDFFont } from "@cantoo/pdf-lib";
+import { LineCapStyle, PDFArray, PDFCatalog,  PDFDict, PDFDocument, PDFHexString, PDFInvalidObject, PDFName, PDFPage, PDFPageLeaf, PDFPageTree, PDFRef, PDFStream, PDFString,  StandardFonts, concatTransformationMatrix, degrees, drawObject, PDFRawStream, popGraphicsState, pushGraphicsState, rgb, type PDFFont } from "@cantoo/pdf-lib";
 import { fitScale, roomAfter } from "./lineFit";
 import { renderPageToCanvas } from "./loader";
 import { completeText } from "./textIndex";
@@ -31,7 +31,7 @@ import {
   readPageColors,
   type PageColors,
 } from "./fragmentColors";
-import { loadJpegEncoder, type JpegEncoder } from "./jpeg";
+import { encodeRaster } from "./codec";
 import { yieldToUI } from "./yield";
 import { applyForm, formFieldNames } from "./formFill";
 import {
@@ -230,51 +230,63 @@ async function embedStamp(out: PDFDocument, dataUrl: string) {
     : out.embedJpg(dataUrl);
 }
 
-/** Encode a canvas to PNG bytes without a base64 round-trip. Falls back to
- * `toDataURL` on the (rare) browser where `toBlob` isn't available. */
-async function canvasPngBytes(canvas: HTMLCanvasElement): Promise<Uint8Array> {
-  if (typeof canvas.toBlob !== "function") {
-    return Uint8Array.from(atob(canvas.toDataURL("image/png").split(",")[1]), (c) =>
-      c.charCodeAt(0),
-    );
-  }
-  const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob(resolve, "image/png"),
-  );
-  if (!blob) throw new Error("Could not encode the page image");
-  return new Uint8Array(await blob.arrayBuffer());
-}
-
 /**
- * Embed a finished page raster, choosing whichever of PNG and JPEG is smaller.
+ * Encode a finished page raster and draw it full-page onto `page`.
  *
- * PNG alone used to ship here, and it is the wrong default for the content that
- * most often gets redacted: lossless has no defence against scanner noise, so a
- * scanned A4 page cost ~5 MB where JPEG costs ~1 MB. But PNG still wins
+ * The encoding is chosen in `codecCore.ts` (off the page, in the codec worker):
+ * both a lossless and a JPEG encoding are made and the smaller kept. PNG alone
+ * used to ship here, and it is the wrong default for the content that most
+ * often gets redacted: lossless has no defence against scanner noise, so a
+ * scanned A4 page cost ~5 MB where JPEG costs ~1 MB. But lossless still wins
  * outright on sparse vector pages — a mostly-blank page is a few KB flat and
  * would be an order of magnitude *larger* as JPEG — so neither codec can be
  * picked up front. Encoding both and keeping the smaller is the same
- * "never grow a stream" rule `optimizeImages.ts` follows, and it means turning
- * this on can't make any page bigger than it was before.
+ * "never grow a stream" rule `optimizeImages.ts` follows.
  *
- * `encodeJpeg` is null when the user asked for a lossless raster, which skips
- * the comparison entirely. A JPEG encode that throws also falls back to PNG:
- * the page still exports, just larger.
+ * `lossless` (the user asked for a bit-exact raster) skips JPEG entirely.
+ *
+ * The lossless encoding arrives as a ready-made `/FlateDecode` image body
+ * (`rgbaToFlate`) and goes in as a raw stream: giving pdf-lib a PNG made it
+ * decode the PNG on the page and deflate the raw samples again on save, which
+ * cost as long as the encode it replaced.
  */
-async function embedPageRaster(
+async function drawPageRaster(
   out: PDFDocument,
+  page: PDFPage,
   canvas: HTMLCanvasElement,
-  encodeJpeg: JpegEncoder | null,
+  lossless: boolean,
+  wPt: number,
+  hPt: number,
 ) {
-  const png = await canvasPngBytes(canvas);
-  if (!encodeJpeg) return out.embedPng(png);
-  let jpeg: Uint8Array | null = null;
-  try {
-    jpeg = await encodeJpeg(canvas);
-  } catch {
-    jpeg = null; // codec unavailable or failed on this page — PNG is still correct
+  const enc = await encodeRaster(canvas, {
+    jpegQuality: lossless ? null : REDACT_JPEG_QUALITY,
+    lossless: true,
+  });
+  if (enc.kind !== "flate") {
+    const image = enc.kind === "jpeg" ? await out.embedJpg(enc.bytes) : await out.embedPng(enc.bytes);
+    page.drawImage(image, { x: 0, y: 0, width: wPt, height: hPt });
+    return;
   }
-  return jpeg && jpeg.length < png.length ? out.embedJpg(jpeg) : out.embedPng(png);
+  const ctx = out.context;
+  const dict = ctx.obj({
+    Type: "XObject",
+    Subtype: "Image",
+    Width: enc.width,
+    Height: enc.height,
+    ColorSpace: "DeviceRGB",
+    BitsPerComponent: 8,
+    Filter: "FlateDecode",
+    DecodeParms: { Predictor: 15, Colors: 3, BitsPerComponent: 8, Columns: enc.width },
+    Length: enc.bytes.length,
+  });
+  const ref = ctx.register(PDFRawStream.of(dict, enc.bytes));
+  const name = page.node.newXObject("Image", ref);
+  page.pushOperators(
+    pushGraphicsState(),
+    concatTransformationMatrix(wPt, 0, 0, hPt, 0, 0),
+    drawObject(name),
+    popGraphicsState(),
+  );
 }
 
 /** Load a data-URL image element (for the raster path). */
@@ -555,12 +567,6 @@ export async function exportPdf(
   let embedder: SourceFontEmbedder | null = null;
   if (anyEdits) embedder = await createSourceFontEmbedder(loaded.bytes, out);
 
-  // Resolved once, on the first redacted page, and only when a lossy raster is
-  // allowed — loading the codec costs a WASM init, and most documents never
-  // take the raster path at all.
-  let jpegEncoder: Promise<JpegEncoder> | null = null;
-  const getJpegEncoder = () =>
-    losslessRaster ? null : (jpegEncoder ??= loadJpegEncoder(REDACT_JPEG_QUALITY));
 
   let done = 0;
   for (const pageData of loaded.pages) {
@@ -615,7 +621,7 @@ export async function exportPdf(
 
     if (needsRaster) {
       const oldRef = finished[i].ref;
-      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, pageEdited, await getJpegEncoder(), formValues);
+      const rasterPage = await rasterisePage(out, loaded, pageData.pageIndex, edits, sourceFonts, pageBoxes, pageRedactions, pageAnnots, pageStamps, pageEdited, losslessRaster, formValues);
       finished[i] = rasterPage;
       replaced.set(oldRef, rasterPage.ref);
       applyPageLayers(rasterPage, seen, { x: 0, y: 0 });
@@ -944,7 +950,8 @@ async function rasterisePage(
    * recomputed: it decides both the font harvest and the colour sample, and two
    * copies of the same predicate is how one of them ends up out of date. */
   pageEdited: boolean,
-  encodeJpeg: JpegEncoder | null,
+  /** Encode the raster losslessly (no JPEG). */
+  lossless: boolean,
   /** The form's answers: the page is drawn without its fields, and they go
    * back on as the preview shows them — under the redactions. */
   formValues: Record<string, FormValue> = {},
@@ -1071,13 +1078,6 @@ async function rasterisePage(
     ctx.fillRect(r.x * S, (H - (r.y + r.height)) * S, r.width * S, r.height * S);
   }
 
-  // Encoded via a Blob, not `toDataURL()`. A redacted A4 page at 3× is ~7 MP,
-  // whose PNG becomes a ~10-30 MB base64 *string* that pdf-lib then decodes back
-  // to bytes — two large copies plus the base64 33% overhead, all on the main
-  // thread and all held at once. `toBlob` hands over the encoded bytes directly,
-  // which on a document with several redacted pages is the difference between
-  // exporting and an out-of-memory tab.
-  const image = await embedPageRaster(out, canvas, encodeJpeg);
   const wPt = pageData.viewBox.width;
   const hPt = pageData.viewBox.height;
   // Not in the page tree yet: the exporter swaps it in for the original when
@@ -1087,7 +1087,7 @@ async function rasterisePage(
   page.setSize(wPt, hPt);
   page.setRotation(degrees(0));
   page.setCropBox(0, 0, wPt, hPt);
-  page.drawImage(image, { x: 0, y: 0, width: wPt, height: hPt });
+  await drawPageRaster(out, page, canvas, lossless, wPt, hPt);
   return page;
 }
 

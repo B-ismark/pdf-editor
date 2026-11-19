@@ -1,7 +1,7 @@
 import { PDFDocument } from "@cantoo/pdf-lib";
 import { renderPageToCanvas } from "./loader";
 import { sanitizeDocument } from "./sanitize";
-import { loadJpegEncoder } from "./jpeg";
+import { encodeRaster } from "./codec";
 import { optimizeImages } from "./optimizeImages";
 import { yieldToUI } from "./yield";
 
@@ -30,13 +30,14 @@ export async function compressPdf(
   onProgress?: (page: number, total: number) => void,
 ): Promise<Uint8Array> {
   const out = await PDFDocument.create({ updateMetadata: false });
-  const encodeJpeg = await loadJpegEncoder(opts.quality);
   for (let i = 0; i < pageSizes.length; i++) {
     onProgress?.(i + 1, pageSizes.length);
     await yieldToUI();
     const canvas = await renderPageToCanvas(bytes, i, opts.scale);
-    const jpg = await encodeJpeg(canvas);
-    const img = await out.embedJpg(jpg);
+    // Encoded off the page, in the codec worker.
+    const jpg = await encodeRaster(canvas, { jpegQuality: opts.quality, lossless: false });
+    canvas.width = canvas.height = 0;
+    const img = await out.embedJpg(jpg.bytes);
     const { width, height } = pageSizes[i];
     const page = out.addPage([width, height]);
     page.drawImage(img, { x: 0, y: 0, width, height });

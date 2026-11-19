@@ -29,9 +29,33 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   `pref.losslessRaster` (⋯ menu, and the Inspector with nothing selected) skips JPEG entirely for users who need the
   raster bit-exact. `docs/RASTER-CODEC-EVAL.md` has the measurements, and the
   reasons JBIG2 and MuPDF were evaluated and turned down.
+- **The image codec runs off the page.** The redaction raster's encode (both
+  codecs, keep the smaller), Compress's per-page JPEG and "Keep text"'s
+  per-image decode/downsample/re-encode all live in `codecCore.ts`, which runs
+  in `codecWorker.ts`; `codec.ts` is the page side. The page hands over an
+  `ImageBitmap` (a few ms) instead of encoding it (a second per redacted page).
+  Three things to keep:
+  - **The worker is never a dependency.** No worker, no `OffscreenCanvas`, a
+    script that won't load, a worker that dies: `codec.ts` fails what was
+    waiting and runs the *same* `codecCore` functions on the page. Don't add a
+    second encoder for the fallback — one implementation is what keeps the two
+    paths' files the same. `onerror` is what stops a dead worker hanging an
+    export; keep it.
+  - **The lossless raster goes in as a raw flate stream, not a PNG.**
+    `rgbaToFlate` (`pixelCodec.ts`) writes DeviceRGB rows behind PNG filters
+    (`/Predictor 15`), deflated — the bytes of a PNG's IDAT, minus the PNG.
+    `embedPng` would decode that PNG on the page and deflate the raw samples
+    again on save, which cost as much as the encode did. Alpha is composited on
+    white and dropped, so the page needs no `/SMask`.
+  - **Nothing on the page may decode an image to look inside it.** The second
+    half of the freeze was `isolatePageResources` (`structure.ts`) inflating
+    every XObject without resources of its own — 13 MB of raster samples —
+    looking for `Do` names only a *form* can hold. It checks `/Subtype /Form`
+    now; any new walk over XObjects should too.
 - **`optimizeImages.ts` decodes flate images itself.** `DCTDecode` goes to the
   browser's JPEG decoder; `FlateDecode` is inflated, un-predicted, and unpacked
-  here — `/Predictor` is not optional, since ignoring it yields noise rather
+  here (in the codec worker; `pixelCodec.ts`, with the checks that need
+  pdf-lib's objects — `flateParms`, masks — still on the page) — `/Predictor` is not optional, since ignoring it yields noise rather
   than a slightly-off image, and `flateParms` therefore *bails* on anything it
   can't read rather than assuming the default. Every unsupported shape (chained
   filters, 1/16-bit depths, CMYK or indexed colour, masks, `/Decode`) returns
