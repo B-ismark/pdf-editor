@@ -605,7 +605,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   const exportListRef = useRef<HTMLDivElement>(null);
   const nextId = (prefix: string) => `${prefix}-${idCounter.current++}`;
 
-  const vp = useViewport(fitRef.current);
+  const vp = useViewport(fitRef.current, () => fitRef.current);
   const { fitWidth, pageWidthPts } = vp.fit;
   // A form box or radio keeps focus after a click, and keys go to it (Space
   // ticks, arrows move the choice). Selecting something else on the page
@@ -622,8 +622,17 @@ export const DocumentEditor = memo(function DocumentEditor({
     return () => document.removeEventListener("pointerdown", onDown, true);
   }, []);
 
+  /** The fit this editor last handed on. Only a change is handed on: coming
+   * back from behind another document re-runs this effect with the fit it had
+   * when it left, and writing that would overwrite the one it is about to
+   * take (the window may have been resized meanwhile, see `useViewport`). */
+  const handedOn = useRef("");
   useEffect(() => {
-    if (fitWidth > 0 && pageWidthPts > 0) fitRef.current = { fitWidth, pageWidthPts };
+    const at = `${fitWidth}:${pageWidthPts}`;
+    if (fitWidth > 0 && pageWidthPts > 0 && at !== handedOn.current) {
+      handedOn.current = at;
+      fitRef.current = { fitWidth, pageWidthPts };
+    }
   }, [fitRef, fitWidth, pageWidthPts]);
   // >=600px gets the persistent side panel + tool rail (Material Medium+);
   // <600px is the compact phone layout (contextual selection bar + on-demand
@@ -1680,6 +1689,19 @@ export const DocumentEditor = memo(function DocumentEditor({
       backGuard.current = null;
     }
   }, [dismissable]);
+  // Going behind another document (`<Activity>`, see `App.tsx`) or closing:
+  // give back the Back entry a selection pushed, since the listener that
+  // would take it goes now, and the next document's Back must not pop it.
+  // Coming back with the selection still there pushes a new one (above). And
+  // a text box being typed into doesn't take focus again on the way back.
+  useEffect(
+    () => () => {
+      if (backGuard.current) unwindHistory(backGuard.current);
+      backGuard.current = null;
+      setAutoFocusId(null);
+    },
+    [],
+  );
   useEffect(
     () =>
       onStrayBack(() => {

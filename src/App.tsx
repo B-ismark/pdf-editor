@@ -1,4 +1,5 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Activity, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { DocumentEditor } from "./DocumentEditor";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { TooltipHost } from "./components/TooltipHost";
@@ -74,13 +75,41 @@ function useStable<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) 
  * password prompt, restore, autosave, app-wide preferences and the status line.
  * The document in front is a {@link DocumentEditor}; the rest are parked here.
  */
+/** How many editors stay mounted: the one in front and the last one before it.
+ * Hidden, an editor keeps its pages' canvases, so this is memory; two is the
+ * back-and-forth between a pair of files, which is most switching. */
+const WARM = 2;
+
+/**
+ * Where the editor in front sits in the shell. Each mounted editor renders into
+ * a box of its own (App's `hosts`), and only the front one's box is in the page:
+ * a document kept warm behind it is held off the page entirely, so nothing that
+ * looks the page up — its own code, a find, a test, assistive tech — can meet
+ * the hidden copy of an editor's controls. Its layout effect runs before the
+ * editors' (it comes first), so an editor coming to the front is already in the
+ * page when its own effects measure or focus anything.
+ */
+function EditorSlot({ host }: { host: HTMLElement }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const slot = ref.current;
+    if (slot && slot.firstChild !== host) slot.replaceChildren(host);
+  }, [host]);
+  return <div ref={ref} className="editors" />;
+}
+
 export function App() {
   // ---- Every open document, one tab each ----
   const [tabs, setTabs] = useState<OpenDoc[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  /** Bumped every time a document comes to the front, so its editor is a fresh
-   * mount even when the id is the same (a document rebuilt in place). */
-  const [gen, setGen] = useState(0);
+  /** The documents with an editor mounted, the one in front first: it and the
+   * one before it (see {@link WARM}). The rest are parked as data alone.
+   * `gen` is the editor's mount: a new one for a new or rebuilt document, so
+   * nothing per-document can leak into it; the same one for a switch back. */
+  const [warm, setWarm] = useState<{ id: string; gen: number }[]>([]);
+  const mounts = useRef(0);
+  /** Each mounted editor's box, by its key (see {@link EditorSlot}). */
+  const hosts = useRef(new Map<string, HTMLDivElement>());
   /** What the editor in front last reported. Only read when it is about the
    * tab in front ({@link LiveDoc.id}). */
   const [live, setLive] = useState<LiveDoc | null>(null);
@@ -229,10 +258,16 @@ export function App() {
     );
   }, []);
 
-  /** Bring a document to the front: a fresh editor, seeded from its entry. */
-  const showDoc = useCallback((t: OpenDoc) => {
+  /** Bring a document to the front. `fresh` (a new or rebuilt document) mounts
+   * a new editor, seeded from its entry; otherwise one still warm from the
+   * last switch is shown again as it was left, and any other is mounted. */
+  const showDoc = useCallback((t: OpenDoc, fresh = true) => {
     setActiveId(t.id);
-    setGen((g) => g + 1);
+    setWarm((w) => {
+      const had = w.find((x) => x.id === t.id);
+      const gen = had && !fresh ? had.gen : ++mounts.current;
+      return [{ id: t.id, gen }, ...w.filter((x) => x.id !== t.id)].slice(0, WARM);
+    });
     setLive(null);
   }, []);
 
@@ -242,7 +277,7 @@ export function App() {
       const target = tabs.find((t) => t.id === id);
       if (!target) return;
       setTabs(parkActive(tabs, activeId));
-      showDoc(target);
+      showDoc(target, false);
     },
     [activeId, busy, tabs, parkActive, showDoc],
   );
@@ -690,6 +725,7 @@ export function App() {
     for (const t of tabs) releaseDoc(t.pdf.bytes);
     setTabs([]);
     setActiveId(null);
+    setWarm([]);
     setLive(null);
     fitRef.current = null;
     setNavOpen(false);
@@ -715,7 +751,8 @@ export function App() {
       flushSave.current = true;
       releaseDoc(closing.pdf.bytes);
       setTabs(rest);
-      if (id === activeId) showDoc(rest[Math.min(i, rest.length - 1)]);
+      setWarm((w) => w.filter((x) => x.id !== id));
+      if (id === activeId) showDoc(rest[Math.min(i, rest.length - 1)], false);
     },
     [tabs, activeId, closeAll, showDoc],
   );
@@ -1090,6 +1127,22 @@ export function App() {
     );
   }
 
+  const mountedEditors = warm.flatMap((w) => {
+    const t = tabs.find((x) => x.id === w.id);
+    return t ? [{ t, gen: w.gen }] : [];
+  });
+  if (!mountedEditors.some((m) => m.t.id === front.id)) mountedEditors.unshift({ t: front, gen: 0 });
+  const hostFor = (key: string) => {
+    let h = hosts.current.get(key);
+    if (!h) {
+      h = document.createElement("div");
+      h.className = "editor";
+      hosts.current.set(key, h);
+    }
+    return h;
+  };
+  const keys = mountedEditors.map(({ t, gen }) => `${t.id}:${gen}`);
+  for (const k of hosts.current.keys()) if (!keys.includes(k)) hosts.current.delete(k);
   const hasFiles = (e: React.DragEvent) => [...e.dataTransfer.types].includes("Files");
   return (
     <div
@@ -1114,40 +1167,50 @@ export function App() {
     >
       {updateBanner}
       <TooltipHost />
-      <DocumentEditor
-        key={`${front.id}:${gen}`}
-        entry={front}
-        tabs={tabs}
-        status={status}
-        setStatus={setStatus}
-        setMessage={setMessage}
-        setOnCancel={setOnCancel}
-        idCounter={idCounter}
-        handleRef={editorRef}
-        fitRef={fitRef}
-        onLive={onLive}
-        onSaved={onSaved}
-        onPages={onPages}
-        onReplace={onReplace}
-        onSwitch={onSwitch}
-        onCloseTab={onCloseTab}
-        onOpenAnother={openAnother}
-        openElsewhere={openElsewhere}
-        onDownloadAll={onDownloadAll}
-        navOpen={navOpen}
-        setNavOpen={setNavOpen}
-        drawbarOpen={drawbarOpen}
-        setDrawbarOpen={setDrawbarOpen}
-        inspectorOpen={inspectorOpen}
-        setInspectorOpen={setInspectorOpen}
-        dimPages={dimPages}
-        setDimPages={setDimPages}
-        autosaveOn={autosaveOn}
-        onToggleAutosave={toggleAutosave}
-        losslessRaster={losslessRaster}
-        setLosslessRaster={setLosslessRaster}
-        theme={editorTheme}
-      />
+      {/* The editor in front, and the one before it kept warm behind it: hidden
+          by <Activity>, which keeps its state and pages and stops its effects,
+          so switching back is immediate and finds it as it was left — and held
+          off the page meanwhile (see EditorSlot). */}
+      <EditorSlot host={hostFor(`${front.id}:${mountedEditors.find((m) => m.t.id === front.id)!.gen}`)} />
+      {mountedEditors.map(({ t, gen }) => createPortal(
+          <Activity mode={t.id === front.id ? "visible" : "hidden"}>
+            <DocumentEditor
+              entry={t}
+              tabs={tabs}
+              status={status}
+              setStatus={setStatus}
+              setMessage={setMessage}
+              setOnCancel={setOnCancel}
+              idCounter={idCounter}
+              handleRef={editorRef}
+              fitRef={fitRef}
+              onLive={onLive}
+              onSaved={onSaved}
+              onPages={onPages}
+              onReplace={onReplace}
+              onSwitch={onSwitch}
+              onCloseTab={onCloseTab}
+              onOpenAnother={openAnother}
+              openElsewhere={openElsewhere}
+              onDownloadAll={onDownloadAll}
+              navOpen={navOpen}
+              setNavOpen={setNavOpen}
+              drawbarOpen={drawbarOpen}
+              setDrawbarOpen={setDrawbarOpen}
+              inspectorOpen={inspectorOpen}
+              setInspectorOpen={setInspectorOpen}
+              dimPages={dimPages}
+              setDimPages={setDimPages}
+              autosaveOn={autosaveOn}
+              onToggleAutosave={toggleAutosave}
+              losslessRaster={losslessRaster}
+              setLosslessRaster={setLosslessRaster}
+              theme={editorTheme}
+          />
+          </Activity>,
+          hostFor(`${t.id}:${gen}`),
+          `${t.id}:${gen}`,
+      ))}
       {dragging && (
         <div className="dropveil" aria-hidden="true">
           <span className="dropveil__card title-medium">

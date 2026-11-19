@@ -324,7 +324,10 @@ export function CompareDialog({ docs, before, after, onClose }: Props) {
                 key={i}
                 className="compare__row"
                 data-row={i}
-                ref={(el) => (el ? rowRefs.current.set(i, el) : rowRefs.current.delete(i))}
+                ref={(el) => {
+                  if (el) rowRefs.current.set(i, el);
+                  else rowRefs.current.delete(i);
+                }}
               >
                 <span className="label-small compare__pagenum">Page {i + 1}</span>
                 {mode === "side" ? (
@@ -417,7 +420,7 @@ function shareOf(p: PageData, b: Box): { left: number; top: number; width: numbe
 
 /** Draw a page while it's near the screen, and let go of the pixels once it
  * isn't — a long document's every page at full size would not fit in memory. */
-function useNearScreen<T extends Element>(): [RefObject<T>, boolean] {
+function useNearScreen<T extends Element>(): [RefObject<T | null>, boolean] {
   const ref = useRef<T>(null);
   const [near, setNear] = useState(false);
   useEffect(() => {

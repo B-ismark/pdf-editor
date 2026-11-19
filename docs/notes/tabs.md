@@ -12,10 +12,40 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   screen. `DocumentEditor.tsx` is the one document in front — its history,
   view, tools, selection, find, Inspector and dialogs. The shared types are in
   `workspace.ts`. The editor is mounted with `key={id + ":" + gen}`, and `gen`
-  goes up every time a document comes to the front (a switch, a new tab, a
-  rebuild in place), so **every document gets a fresh editor**: nothing
-  per-document can leak into the next file, and there is no reset list to keep
-  up to date (the old `resetDocUi` / `showDoc`).
+  goes up every time a *new or rebuilt* document comes to the front (a new tab,
+  a rebuild in place), so **an editor belongs to one document for its whole
+  life**: nothing per-document can leak into the next file, and there is no
+  reset list to keep up to date (the old `resetDocUi` / `showDoc`).
+  - **The last document stays warm** (`warm`, `WARM = 2`). A switch keeps the
+    editor it leaves mounted behind the new one, under React 19.2's
+    `<Activity mode="hidden">`: its state, DOM and painted canvases stay, its
+    effects (listeners, observers, the `useImperativeHandle` handle) are torn
+    down, and a switch back reveals it in one frame instead of repainting
+    every page. A third document pushes the oldest out; it comes back, as
+    before, in a fresh editor seeded from its parked entry. Parking still
+    happens on every switch-away, so `tabs` stays the truth for autosave,
+    close and Download all — and nothing outside an editor changes a
+    background document's `history`, which is all the editor seeds once.
+  - **The one behind is off the page, not just hidden.** Each editor renders
+    through a portal into a box of its own (`hosts` in `App.tsx`) and only the
+    front one's box is attached, by `EditorSlot`. Merely hidden, its tab strip,
+    tool dock, pages and ids were all still in the document: every
+    `document.querySelector` in the app (and every test locator) could meet
+    the hidden copy first. `EditorSlot` comes before the editors so its layout
+    effect attaches the box before theirs run.
+  - **Reveal re-runs every effect, mount-only ones included**, with the state
+    it left with. Anything an effect *hands on* must not repeat a stale value:
+    the editor only writes the fit to `fitRef` when it changes, and on reveal
+    `useViewport` takes the workspace's fit (the window may have been resized,
+    or the panel hidden, meanwhile). Re-announcing the old fit first left a
+    document that waited through a resize 280 px too wide.
+    Likewise `PageView` skips a paint when the canvas already holds that page
+    at that scale (`paintedAs`) — re-rendering blanks it first, the white flash
+    warm editors exist to avoid. **Hiding is also an ending:** the editor
+    gives back a phone selection's Back entry (its listener goes; Back in the
+    next document must not pop it) and drops `autoFocusId` (a box typed into
+    would take focus back from the tab strip), and `useHistory` ends the
+    gesture so typing either side of a switch is two undo steps.
   - **Who owns what.** For the tab in front, `tabs` stays the truth for `pdf`,
     `fileName`, `baked`, `saved` and `locked` (only the workspace changes
     them). Its `history`, `view`, `changeCount` and `unsaved` are stale while it

@@ -3096,3 +3096,9 @@ body {
   }
 }
 .compare .segmented__btn { white-space: nowrap; }
+
+/* The slot for the editor in front, and each mounted document's own box
+   (App.tsx, EditorSlot): no boxes of their own, so the editor's parts lay out
+   in the shell as if they weren't there. A document kept warm behind the one
+   in front is held off the page, in a box of its own. */
+.editors, .editor { display: contents; }

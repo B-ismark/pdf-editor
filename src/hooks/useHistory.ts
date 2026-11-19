@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Updater<T> = (prev: T) => T;
 
@@ -47,6 +47,9 @@ export function useHistory<T>(initial: T, limit = 200, from?: HistorySnapshot<T>
   // (a switch reads it from an event handler, after any pending commit).
   const latest = useRef(h);
   latest.current = h;
+  // Typing before and after the document went behind another is two steps,
+  // not one: hiding it (`<Activity>`, see `App.tsx`) ends the gesture.
+  useEffect(() => () => setH((p) => (p.lastKey == null ? p : { ...p, lastKey: null })), []);
 
   const set = useCallback(
     (updater: Updater<T>, key?: string) => {
