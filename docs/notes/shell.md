@@ -301,9 +301,11 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   - **A scrim closes on press, and the press lands nowhere** (`scrimPress`):
     closing on pointerdown removes the scrim, so the mousedown that followed
     reached the page behind and took focus off the opener just restored.
-    Every scrim cancels its pointerdown.
+    Every scrim cancels its pointerdown. A finger's tap sends its click
+    anyway, onto whatever was under the backdrop, so a touch or pen press also
+    swallows the next click (within 600ms).
   - Closing a tab from its "Discard & close" warning puts focus on the tab
-    now in front (its close button), not the page.
+    now in front (the tab itself), not the page.
   - Titles are `<h2 className="headline-small dialog__title">` (24px), every
     dialog alike. Compare and Organise are full-screen surfaces with a bar
     title, and keep `title-large`.

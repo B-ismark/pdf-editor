@@ -357,6 +357,21 @@ test.describe("with a finger", () => {
       await expect(d).toBeHidden();
     }
   });
+
+  test("tapping the backdrop closes the dialog and nothing under it", async ({ page }) => {
+    // The press closed the dialog; the tap's click came after and landed on
+    // whatever the backdrop had covered — here, a tool.
+    await open(page, (await fixtures()).sample);
+    const tool = page.locator('.tooldock__btn[aria-label="Add text"]');
+    const at = (await tool.boundingBox())!;
+    await fromPalette(page, "Watermark");
+    const d = page.locator('[role="dialog"][aria-modal="true"]');
+    await expect(d).toBeVisible();
+    await page.touchscreen.tap(at.x + at.width / 2, at.y + at.height / 2);
+    await expect(d).toBeHidden();
+    await page.waitForTimeout(300);
+    await expect(tool).not.toHaveClass(/tooldock__btn--on/);
+  });
 });
 
 test("closing a dialog by its backdrop gives focus back too", async ({ page }) => {

@@ -137,10 +137,27 @@ let handedOn: HTMLElement | null = null;
  */
 export function scrimPress(close: (() => void) | undefined) {
   if (!close) return undefined;
-  return (e: { preventDefault(): void }) => {
+  return (e: { preventDefault(): void; pointerType?: string }) => {
     e.preventDefault();
+    // A finger's tap still sends its click once the scrim is gone, and it
+    // pressed whatever sat under the backdrop. Swallow that one click.
+    if (e.pointerType && e.pointerType !== "mouse") swallowNextClick();
     close();
   };
+}
+
+function swallowNextClick() {
+  const eat = (ev: Event) => {
+    ev.preventDefault();
+    ev.stopPropagation();
+    done();
+  };
+  const done = () => {
+    document.removeEventListener("click", eat, true);
+    clearTimeout(timer);
+  };
+  document.addEventListener("click", eat, true);
+  const timer = setTimeout(done, 600);
 }
 
 /**
