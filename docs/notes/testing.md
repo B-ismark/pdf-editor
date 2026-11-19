@@ -101,9 +101,11 @@ type-checking can't see, and each exists because it broke once:
   close" leaves focus on the tab in front (slice 10d).
 - `welcome.spec.ts` — the first screen leads with the privacy promise as its
   headline, in at most 14 words, with no box round it at rest; a file dragged
-  over the window shows a drop surface ("Drop to open") that stays while the
-  drag crosses the welcome's own text, and dropping opens it; on a phone
-  nothing mentions dragging and no line ends on one word (slice 10e).
+  over the window (the app bar included) shows a drop surface covering it that
+  stays while the drag crosses the welcome's own text, and dropping opens it;
+  dragged text shows nothing; the button names photos and isn't the upload
+  arrow; on a phone nothing mentions dragging, no line ends on one word, and
+  the restore offer fits without sideways scroll (slice 10e).
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

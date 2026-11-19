@@ -330,12 +330,24 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
 - **The welcome (10e).** A greeting, not a form field: no dashed box at rest
   (that is how an upload field looks), the privacy promise as the headline
   ("Your PDFs stay on this device", the `on_device` icon), one short line, the
-  button. **Few words**: how to use it is shown, not written. The drag hint
-  ("or drag & drop files here", which a phone was told too) is gone — the
-  whole window takes a drop and shows a solid drop surface while a file is
-  over it. `dragleave` into one of the welcome's own children isn't leaving
-  (checked with `relatedTarget`), or the surface flickered. Headline and
-  lines use `text-wrap: balance`, so none ends on one word.
+  button. **Few words**: how to use it is shown, not written.
+  - The drag hint ("or drag & drop files here", which a phone was told too) is
+    gone. The handlers sit on the welcome's whole `.app` (the app bar too, as
+    in the editor), and while a drag *carrying files* is over it a solid
+    "Drop to open" surface covers the window (`position: fixed`, so a scrolled
+    welcome doesn't leave it hanging off the top). A dragged text selection
+    shows nothing. `dragleave` into one of its own children isn't leaving
+    (checked with `relatedTarget`), or the surface flickered.
+  - The button says "Choose PDF or photos": that line was the only place
+    starting a document from pictures was mentioned. Its icon is `open_file`
+    (a folder), not the upload arrow — under "No uploads" that contradicted the
+    headline.
+  - The restore offer and the welcome are one centred group
+    (`align-content: center`); the column is `minmax(0, 1fr)` so the offer's
+    min-content can't widen it past a phone (it scrolled sideways, clipping the
+    headline), and the offer wraps its buttons below on a phone.
+  - Loading and error lines are `role="status"` / `role="alert"`.
+  - Lines use `text-wrap: balance`, so none ends on one word.
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is
   794px, centred, with margin — not stretched to the window. Below that it

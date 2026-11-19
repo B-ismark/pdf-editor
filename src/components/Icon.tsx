@@ -41,6 +41,7 @@ import {
   Highlighter,
   FileClock,
   FileLock,
+  FolderOpen,
   Image as ImageIcon,
   Images,
   LayoutGrid,
@@ -70,6 +71,7 @@ import {
   TextSearch,
   Search,
   SendToBack,
+  ShieldCheck,
   Shrink,
   Signature,
   SlidersHorizontal,
@@ -79,7 +81,6 @@ import {
   Square,
   SquarePen,
   Stamp,
-  ShieldCheck,
   StickyNote,
   Sun,
   Trash2,
@@ -172,6 +173,8 @@ const MAP: Record<string, LucideIcon> = {
 
   // ---- files in & out ----
   upload_file: Upload,
+  /** Open a file from this device — not an upload: nothing leaves it. */
+  open_file: FolderOpen,
   /** The exported PDF — the primary output. */
   download: Download,
   /** A plain-text sidecar, not the PDF. */

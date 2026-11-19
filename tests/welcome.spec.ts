@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { readFile } from "node:fs/promises";
 import { fixtures } from "./fixtures";
+import { docRecord, seedStore } from "./helpers";
 
 /**
  * The first screen: a welcome, not a form field (slice 10e).
@@ -40,16 +41,24 @@ async function orphans(page: Page) {
   });
 }
 
-async function drag(page: Page, type: "dragover" | "dragleave" | "drop", related?: string, file?: { name: string; b64: string }) {
+interface Drag {
+  /** Where the event fires (default: the welcome's middle). */
+  at?: string;
+  related?: string;
+  /** A file the drag carries; without one, it carries text (a selection). */
+  file?: { name: string; b64: string };
+}
+const PDF = { name: "sample.pdf", b64: "" };
+
+async function drag(page: Page, type: "dragover" | "dragleave" | "drop", o: Drag = {}) {
   await page.evaluate(
-    ([type, related, file]) => {
+    ([type, at, related, file]) => {
       const dt = new DataTransfer();
       if (file) {
         const bytes = Uint8Array.from(atob(file.b64), (c) => c.charCodeAt(0));
         dt.items.add(new File([bytes], file.name, { type: "application/pdf" }));
-      }
-      const target = document.querySelector(".dropzone")!;
-      target.dispatchEvent(
+      } else dt.setData("text/plain", "a selection");
+      document.querySelector(at)!.dispatchEvent(
         new DragEvent(type, {
           bubbles: true,
           cancelable: true,
@@ -58,7 +67,7 @@ async function drag(page: Page, type: "dragover" | "dragleave" | "drop", related
         }),
       );
     },
-    [type, related ?? null, file ?? null] as const,
+    [type, o.at ?? ".dropzone__card h1", o.related ?? null, o.file ?? null] as const,
   );
 }
 
@@ -80,20 +89,40 @@ test("the welcome leads with the promise, in few words, with no box round it", a
 
 test("a file over the window shows where it will land, and dropping opens it", async ({ page }) => {
   await page.goto("/");
+  const file = { ...PDF, b64: (await readFile((await fixtures()).sample)).toString("base64") };
   const drop = page.locator(".dropzone__drop");
   await expect(drop).toHaveCount(0);
-  await drag(page, "dragover");
+  await drag(page, "dragover", { file });
   await expect(drop).toBeVisible();
   await expect(drop).toHaveText(/drop to open/i);
   // Crossing onto the welcome's own text is still over the window.
-  await drag(page, "dragleave", ".dropzone__card h1");
+  await drag(page, "dragleave", { at: ".dropzone", related: ".dropzone__card h1", file });
   await expect(drop).toBeVisible();
-  await drag(page, "dragleave");
+  await drag(page, "dragleave", { at: ".dropzone", file });
   await expect(drop).toHaveCount(0);
-  await drag(page, "dragover");
-  const b64 = (await readFile((await fixtures()).sample)).toString("base64");
-  await drag(page, "drop", undefined, { name: "sample.pdf", b64 });
+  // The whole window: the app bar takes it too, and the surface covers it.
+  await drag(page, "dragover", { at: ".appbar", file });
+  await expect(drop).toBeVisible();
+  const [bar, surface] = await Promise.all([page.locator(".appbar").boundingBox(), drop.boundingBox()]);
+  expect(surface!.y).toBeLessThan(bar!.y + bar!.height);
+  await drag(page, "drop", { at: ".appbar", file });
   await expect(page.locator(".page__overlay").first()).toBeVisible({ timeout: 15_000 });
+});
+
+test("dragging text over the welcome isn't an offer to open it", async ({ page }) => {
+  await page.goto("/");
+  await drag(page, "dragover");
+  await page.waitForTimeout(200);
+  await expect(page.locator(".dropzone__drop")).toHaveCount(0);
+});
+
+test("the button says photos open too, and isn't an upload", async ({ page }) => {
+  await page.goto("/");
+  const btn = page.getByRole("button", { name: "Choose PDF or photos" });
+  await expect(btn).toBeVisible();
+  // The upload arrow sat right under "No uploads".
+  await expect(btn.locator("svg")).toHaveClass(/\blucide\b/);
+  await expect(btn.locator("svg")).not.toHaveClass(/lucide-upload\b/);
 });
 
 test.describe("on a phone", () => {
@@ -105,5 +134,18 @@ test.describe("on a phone", () => {
     expect(await orphans(page)).toEqual([]);
     const box = (await page.getByRole("button", { name: "Choose PDF" }).boundingBox())!;
     expect(box.height).toBeGreaterThanOrEqual(44);
+  });
+
+  test("the restore offer fits the phone; nothing scrolls sideways", async ({ page }) => {
+    await page.goto("/");
+    await seedStore(page, [["doc:a", docRecord("a", "a-rather-long-file-name-for-a-phone.pdf", 0)]], [["bytes:a", (await fixtures()).sample]]);
+    await page.reload();
+    await expect(page.locator(".restore-banner")).toBeVisible();
+    const over = await page.locator(".dropzone").evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(over).toBeLessThanOrEqual(0);
+    for (const name of ["Restore", "Not now", "Delete"]) {
+      const b = (await page.locator(".restore-banner").getByRole("button", { name }).boundingBox())!;
+      expect(b.x + b.width, name).toBeLessThanOrEqual(390);
+    }
   });
 });

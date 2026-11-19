@@ -1041,8 +1041,27 @@ export function App() {
   );
 
   if (!front) {
+    // Only files: dragging a text selection over the window isn't an open.
+    const carriesFiles = (e: React.DragEvent) => [...e.dataTransfer.types].includes("Files");
     return (
-      <div className="app">
+      <div
+        className="app"
+        onDragOver={(e) => {
+          if (!carriesFiles(e)) return;
+          e.preventDefault();
+          setDragging(true);
+        }}
+        onDragLeave={(e) => {
+          // Leaving for one of its own children isn't leaving.
+          if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+        }}
+        onDrop={(e) => {
+          if (!carriesFiles(e)) return;
+          e.preventDefault();
+          setDragging(false);
+          void openFiles(e.dataTransfer.files);
+        }}
+      >
         {updateBanner}
         <TooltipHost />
         {passwordDialog}
@@ -1065,32 +1084,17 @@ export function App() {
             <Icon name={themeIcon} size={20} />
           </button>
         </header>
-        <div
-          className={`dropzone${dragging ? " dropzone--active" : ""}`}
-          onDragOver={(e) => {
-            e.preventDefault();
-            setDragging(true);
-          }}
-          onDragLeave={(e) => {
-            // Leaving for one of its own children isn't leaving.
-            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            setDragging(false);
-            void openFiles(e.dataTransfer.files);
-          }}
-        >
+        <div className="dropzone">
           {dragging && (
             <div className="dropzone__drop" aria-hidden="true">
-              <Icon name="upload_file" size={22} /> Drop to open
+              <Icon name="open_file" size={22} /> Drop to open
             </div>
           )}
           {restorable && (
             <div className="restore-banner">
               <span className="restore-banner__icon"><Icon name="restore" size={22} /></span>
               <div className="restore-banner__text">
-                <b className="title-small">Restore your last session?</b>
+                <b className="title-small">Restore last session?</b>
                 <span className="body-small restore-banner__files">
                   {restorable.docs.length === 1
                     ? restorable.docs[0].fileName
@@ -1112,14 +1116,14 @@ export function App() {
             <h1 className="headline-small">Your PDFs stay on this device</h1>
             <p className="body-medium dropzone__sub">No uploads. No account.</p>
             <button className="btn btn--filled btn--lg" onClick={openAnother}>
-              <Icon name="upload_file" size={18} /> Choose PDF
+              <Icon name="open_file" size={18} /> Choose PDF or photos
             </button>
             {status === "loading" && (
-              <p className="body-small dropzone__note">
+              <p className="body-small dropzone__note" role="status">
                 <span className="spinner spinner--sm" aria-hidden="true" /> {message}
               </p>
             )}
-            {status === "error" && <p className="body-small dropzone__err">{message}</p>}
+            {status === "error" && <p className="body-small dropzone__err" role="alert">{message}</p>}
           </div>
           {openInput}
         </div>
