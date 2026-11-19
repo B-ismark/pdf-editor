@@ -110,12 +110,29 @@ export function Organize({
     setAfter(null);
   };
 
+  // Where the keyboard goes once a move or a delete has re-laid the grid: the
+  // moved card remounts (its key holds its place) and a deleted one is gone,
+  // so focus fell to the page — and the controls it was showing went with it.
+  const refocus = useRef<{ at: number; label?: string } | null>(null);
+  const keepFocus = (at: number, label?: string) => {
+    if (gridRef.current?.contains(document.activeElement)) refocus.current = { at, label };
+  };
+  useEffect(() => {
+    const want = refocus.current;
+    refocus.current = null;
+    const card = want && gridRef.current?.querySelectorAll<HTMLElement>(".pcard")[want.at];
+    if (!card) return;
+    const btn = want.label ? card.querySelector<HTMLButtonElement>(`[aria-label="${want.label}"]`) : null;
+    (btn && !btn.disabled ? btn : card.querySelector<HTMLElement>(".pcard__thumb"))?.focus();
+  }, [plan]);
+
   const move = (i: number, dir: -1 | 1) => {
     if (!plan) return;
     const j = i + dir;
     if (j < 0 || j >= plan.length) return;
     const next = plan.slice();
     [next[i], next[j]] = [next[j], next[i]];
+    keepFocus(j, dir < 0 ? "Move earlier" : "Move later");
     update(next);
   };
   const rotate = (i: number) => {
@@ -127,6 +144,7 @@ export function Organize({
   };
   const del = (i: number) => {
     if (!plan) return;
+    keepFocus(Math.min(i, plan.length - 2));
     update(plan.filter((_, k) => k !== i));
   };
   const toggleSel = (i: number) => {
@@ -470,10 +488,15 @@ export function Organize({
               key={`${entry.sourceKey}-${entry.index}-${i}`}
               className={`pcard${selected.has(i) ? " pcard--sel" : ""}`}
             >
-              <button className="pcard__thumb" onClick={() => toggleSel(i)} aria-pressed={selected.has(i)}>
+              <button
+                className="pcard__thumb"
+                onClick={() => toggleSel(i)}
+                aria-pressed={selected.has(i)}
+                aria-label={`Page ${i + 1}`}
+              >
                 <Thumbnail bytes={sources.get(entry.sourceKey)!} index={entry.index} rotation={entry.rotation} crop={entry.crop} />
                 {selected.has(i) && (
-                  <span className="pcard__check"><Icon name="add" size={15} /></span>
+                  <span className="pcard__check"><Icon name="check" size={15} /></span>
                 )}
               </button>
               <div className="pcard__no label-medium">{i + 1}</div>

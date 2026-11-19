@@ -1271,9 +1271,17 @@ body {
 
 /* "Dim pages" preview mode: soften the always-white page canvas to cut glare
    (esp. in dark mode). Preview only — the exported PDF is unaffected. */
+/* The thumbnail's canvas lives in its own host (see Thumbnail.tsx); the host
+   is no box, so the canvas sits in the frame as if it were its child. These were
+   once one rule run together — every thumbnail was dimmed all the time (grey
+   paper, which reads as disabled) and Dim mode hid the pages outright, since a
+   canvas set to `display: contents` draws nothing. The overlay dims with the
+   canvas: an edit's cover is sampled from the undimmed paper and stood out as
+   a white patch. */
+.thumb__host { display: contents; }
 .app--dim .page__canvas,
-.app--dim .thumb__host { display: contents; }
-.thumb__canvas {
+.app--dim .page__overlay,
+.app--dim .thumb__canvas {
   filter: brightness(0.8);
   transition: filter var(--dur-short4) var(--ease-standard);
 }
@@ -2726,6 +2734,21 @@ body {
   color: var(--on-primary);
 }
 .pcard__no { color: var(--on-surface-variant); }
+/* Four controls under every page made a long document a field of icons. With
+   a mouse they show for the page under the pointer, the picked pages, and the
+   card the keyboard is in; they keep their room, so nothing moves as they come
+   and go. Wherever a finger may be used — a phone, a tablet, a touch laptop —
+   they stay: an unseen control there either takes a tap it shouldn't, or isn't
+   there to reach at all. */
+@media (hover: hover) and (pointer: fine) {
+  .pcard__actions { opacity: 0; transition: opacity var(--dur-short4) var(--ease-standard); }
+  .pcard:hover .pcard__actions,
+  .pcard:focus-within .pcard__actions,
+  .pcard--sel .pcard__actions { opacity: 1; }
+}
+@media (any-pointer: coarse) {
+  .pcard .pcard__actions { opacity: 1; }
+}
 .pcard__actions { display: flex; gap: 2px; }
 .icon-btn--sm { width: 40px; height: 40px; color: var(--on-surface-variant); }
 
