@@ -409,7 +409,9 @@ export function isolatePageResources(doc: PDFDocument): void {
 
   const narrowForm = (form: PDFObject | undefined, depth: number): void => {
     if (!(form instanceof PDFStream) || done.has(form) || depth > 16) return;
-    if (String(form.dict.get(PDFName.of("Subtype"))) !== "/Form") return;
+    // Resolved: a /Subtype can be an indirect reference, and an unresolved one
+    // reads as "not a form" — which would cut out what the form paints.
+    if (String(deref(doc, form.dict.get(PDFName.of("Subtype")))) !== "/Form") return;
     done.add(form);
     const res = deref(doc, form.dict.get(PDFName.of("Resources")));
     if (!(res instanceof PDFDict)) return;
@@ -461,7 +463,7 @@ export function isolatePageResources(doc: PDFDocument): void {
           // redacted page's raster is 13 MB of samples — on the page, for nothing.
           if (
             f instanceof PDFStream &&
-            String(f.dict.get(PDFName.of("Subtype"))) === "/Form" &&
+            String(deref(doc, f.dict.get(PDFName.of("Subtype")))) === "/Form" &&
             !f.dict.has(PDFName.of("Resources"))
           ) {
             const ft = streamText(f);

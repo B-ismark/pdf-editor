@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFString, decodePDFRawStream, type PDFObject } from "pdf-lib";
+import { PDFArray, PDFDict, PDFDocument, PDFHexString, PDFName, PDFRawStream, PDFRef, PDFString, StandardFonts, decodePDFRawStream, type PDFObject } from "pdf-lib";
 import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -380,6 +380,43 @@ test("a redacted page's drawings don't ride out on a page that shares its resour
 
   expect((await pageTexts(bytes, [1, 2])).map((t) => t.trim())).toEqual(["", "FORM_KEPT"]);
   expect(allText(await PDFDocument.load(bytes, { updateMetadata: false })), "the redacted page's form is gone").not.toContain("SECRET");
+});
+
+/**
+ * The same, through a form with no resources of its own — it paints from the
+ * page's — whose `/Subtype` is an indirect reference. Narrowing has to read
+ * that form to see what it paints; taking the unresolved reference for "not a
+ * form" cut the page's own drawing out of the file (9b's image-skip check).
+ */
+test("a resourceless form with an indirect /Subtype keeps what it paints", async ({ page }) => {
+  const doc = await PDFDocument.create();
+  const ctx = doc.context;
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const text = (t: string) =>
+    ctx.register(ctx.flateStream(`BT /F1 24 Tf 72 700 Td (${t}) Tj ET`, {
+      Type: "XObject", Subtype: "Form", BBox: [0, 0, 612, 792], Resources: { Font: { F1: font.ref } },
+    }));
+  const wrapper = ctx.flateStream("/Fk Do", { Type: "XObject", BBox: [0, 0, 612, 792] });
+  wrapper.dict.set(PDFName.of("Subtype"), ctx.register(PDFName.of("Form")));
+  const res = ctx.register(ctx.obj({
+    Font: { F1: font.ref },
+    XObject: { Fs: text("FORM_SECRET"), Fk: text("FORM_KEPT"), Fw: ctx.register(wrapper) },
+  }));
+  for (const name of ["Fs", "Fw"]) {
+    const p = doc.addPage([612, 792]);
+    p.node.set(PDFName.of("Resources"), res);
+    p.node.set(PDFName.of("Contents"), ctx.register(ctx.flateStream(`/${name} Do`)));
+  }
+  const file = join(mkdtempSync(join(tmpdir(), "subtype-")), "indirect-subtype.pdf");
+  writeFileSync(file, await doc.save());
+
+  await open(page, file);
+  await page.keyboard.press("Control+f");
+  await page.locator(".findbar input").fill("SECRET");
+  await page.waitForTimeout(500);
+  await page.locator(".findbar button", { hasText: "Redact all" }).click();
+  const bytes = await downloadFrom(page, ".appbar__download");
+  expect((await pageTexts(bytes, [1, 2])).map((t) => t.trim())).toEqual(["", "FORM_KEPT"]);
 });
 
 /** Strongly red pixels on page `n`'s canvas, once it has scrolled in and painted. */

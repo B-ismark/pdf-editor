@@ -178,9 +178,14 @@ test.describe("image encoding off the page", () => {
    */
   test("if the codec worker can't start, the export still completes on the page", async ({ page }) => {
     const w = watch(page);
-    await page.route(/codecWorker[^/]*\.js/, (route) => route.abort());
+    let fetched = 0;
+    await page.route(/codecWorker[^/]*\.js/, (route) => (fetched++, route.abort()));
     await redactPhoto(page);
     const bytes = await download(page, ".appbar__download");
+    // And it isn't asked for again: a worker that can't load once won't the
+    // next time either, and "Keep text" would otherwise retry it per image.
+    await download(page, ".appbar__download");
+    expect(fetched, "the worker script was tried once, not once per encode").toBe(1);
     expect((await pageTexts(bytes, [1]))[0].trim()).toBe("");
     const filters = (await images(bytes)).map((i) => String(i.dict.get(PDFName.of("Filter"))));
     expect(filters, "MozJPEG still ran, on the page").toContain("/DCTDecode");

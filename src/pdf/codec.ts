@@ -23,6 +23,12 @@ const IDLE_MS = 20_000;
 type Pending = { resolve: (r: CodecReply & { ok: true }) => void; reject: (e: Error) => void };
 
 let worker: Worker | null = null;
+/** Whether the current worker has ever answered. One that fails before its
+ *  first reply couldn't load (a blocked script, a browser without module
+ *  workers); asking again would only fetch and fail again, once per image. */
+let answered = false;
+/** Set once a worker failed to load: from then on everything runs on the page. */
+let unavailable = false;
 let nextId = 1;
 const pending = new Map<number, Pending>();
 let idle: ReturnType<typeof setTimeout> | null = null;
@@ -37,6 +43,7 @@ function canUseWorker(): boolean {
 
 /** Drop the worker and fail whatever was waiting on it; callers fall back. */
 function discard(reason: string) {
+  if (worker && !answered && reason !== "idle") unavailable = true;
   worker?.terminate();
   worker = null;
   if (idle) clearTimeout(idle);
@@ -46,9 +53,19 @@ function discard(reason: string) {
   for (const p of waiting) p.reject(new Error(reason));
 }
 
+/** Let the worker go once nothing has been asked of it for {@link IDLE_MS}. */
+function armIdle() {
+  if (pending.size > 0) return;
+  if (idle) clearTimeout(idle);
+  idle = setTimeout(() => {
+    if (pending.size === 0) discard("idle");
+  }, IDLE_MS);
+}
+
 function getWorker(): Worker | null {
-  if (!canUseWorker()) return null;
+  if (unavailable || !canUseWorker()) return null;
   if (worker) return worker;
+  answered = false;
   try {
     worker = new Worker(new URL("./codecWorker.ts", import.meta.url), { type: "module" });
   } catch {
@@ -57,17 +74,13 @@ function getWorker(): Worker | null {
   }
   worker.onmessage = (e: MessageEvent<CodecReply>) => {
     const reply = e.data;
+    answered = true;
     const p = pending.get(reply.id);
     if (!p) return;
     pending.delete(reply.id);
     if (reply.ok) p.resolve(reply);
     else p.reject(new Error(reply.error));
-    if (pending.size === 0) {
-      if (idle) clearTimeout(idle);
-      idle = setTimeout(() => {
-        if (pending.size === 0) discard("idle");
-      }, IDLE_MS);
-    }
+    armIdle();
   };
   // A worker that fails to load, or dies (out of memory on a huge image), says
   // so here and nowhere else: without this its callers would wait for ever.
@@ -90,6 +103,7 @@ function call(msg: CodecRequest, transfer: Transferable[]): Promise<CodecReply &
       w.postMessage(msg, transfer);
     } catch (e) {
       pending.delete(msg.id);
+      armIdle();
       reject(e instanceof Error ? e : new Error(String(e)));
     }
   });

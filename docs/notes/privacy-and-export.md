@@ -51,7 +51,19 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     half of the freeze was `isolatePageResources` (`structure.ts`) inflating
     every XObject without resources of its own — 13 MB of raster samples —
     looking for `Do` names only a *form* can hold. It checks `/Subtype /Form`
-    now; any new walk over XObjects should too.
+    now — *resolved*: a `/Subtype` can be an indirect reference, and reading
+    the unresolved one as "not a form" cut what the form painted out of the
+    file. Any new walk over XObjects should do both.
+  - **A worker that never answered is not retried.** If it fails before its
+    first reply it couldn't load, and `codec.ts` stays on the page for the rest
+    of the session rather than fetching it again for every image.
+  - **The `<meta>` CSP does not reach workers.** A dedicated worker takes its
+    policy from its own script's response headers, which GitHub Pages doesn't
+    let us set — true of `patternWorker` before this, and now of the code that
+    holds the raster's pixels. So workers carry no network code at all, by
+    rule: no `fetch`, no `importScripts` of anything but our own bundle. That
+    rule, not the browser, is what keeps them local; review a worker change
+    for it.
 - **`optimizeImages.ts` decodes flate images itself.** `DCTDecode` goes to the
   browser's JPEG decoder; `FlateDecode` is inflated, un-predicted, and unpacked
   here (in the codec worker; `pixelCodec.ts`, with the checks that need
