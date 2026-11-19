@@ -85,3 +85,25 @@ Read only the section a package points at, not the whole folder.
   - [x] Raster and image encoding in a Worker (9b). Guarded by the `codec` spec; notes in `docs/notes/privacy-and-export.md` (The image codec runs off the page).
   - [x] React 19.2, using `<Activity>` for background tabs (9c). Guarded by the `warm` spec; notes in `docs/notes/tabs.md` (The last document stays warm).
   - [x] pdf.js 5, Vite 7 (9d). Guarded by the `decoders` spec (and every text and rendering spec); notes in `docs/notes/rendering.md` (pdf.js's decoders ship with the app).
+- [ ] **10. Visual and UX polish** (M ×6). From a screenshot walk of the app after section 9 (desktop 1440 and phone 390, light and dark). One slice per PR, each with before/after screenshots.
+  - [ ] **10a. Calm the canvas.** First impression of an open document.
+    - An A4 page fills the whole viewer at "100 %", so you see a wall of text, not a page. Cap the fitted width (a readable page with margin around it) and centre it.
+    - Opening the Pages sidebar leaves the page clipped under the Inspector. Refit when the room for the page changes (the no-jump rule is about the Inspector only).
+    - The zoom pill sits on the page's top-right corner, and on a phone it covers the title. Give it a place of its own.
+    - The "150 pages · 3750 text fragments" toast is engineer language and sits on the content. Plain words ("Ready · 150 pages"), placed clear of the page, gone quickly.
+  - [ ] **10b. Chrome hierarchy.**
+    - App bar and tab strip read as two stacked tinted bars. Make them one surface, with the tabs as its lower row.
+    - The ⋯ menu's section headers (large, tracked uppercase) are louder than its items, and the menu runs past the window (FILE is cut off). Quiet the labels; fit the menu to the window.
+    - Inspector: uppercase labels, mixed alignment, a centred floating "Reset style", a bold number inside "Size 24". One rhythm for label / control rows.
+    - Phone: the Download button is taller than its neighbours.
+  - [ ] **10c. Thumbnails and Organise.**
+    - Thumbnails show grey paper (sidebar and Organise), which reads as disabled. White paper on the tinted surface, as on the canvas.
+    - Organise puts four controls under every page; with 150 pages it is a field of icons. Show them for the page under the pointer or picked; keep the number.
+  - [ ] **10d. Dialogs and focus.**
+    - A dialog opened by mouse shows a heavy focus ring on its close button, so the first thing the eye lands on is "close". Focus the first field, and show the ring for keyboard focus only.
+    - Dialog titles are small for their weight on the page; the disabled primary button looks washed out rather than waiting.
+    - The command palette's right column mixes shortcut keys (V, T) with categories (Draw). Group headings for categories; the column for keys.
+  - [ ] **10e. First run.**
+    - The dashed drop box feels like a form field, not a welcome. A warmer empty state that leads with the privacy promise.
+    - On a phone it says "drag & drop files here", which a phone can't do; the helper line orphans its last words.
+  - [ ] **10f. Dark mode and motion pass.** The white page against the near-black surround, the "Dim pages" default, and a check that every surface, menu and dialog uses the dark tokens; then a motion pass over open/close of panels, menus and dialogs.
