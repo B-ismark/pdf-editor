@@ -99,21 +99,29 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
 
 ## pdf.js's decoders ship with the app
 
-- **Scans and JPEG 2000 paint only through `wasmUrl`.** Since pdf.js 5 the
-  worker decodes JPEG 2000 (OpenJPEG), JBIG2 *and fax-coded scans*
-  (`CCITTFaxDecode`, one module with JBIG2) and ICC colour profiles (qcms) with
-  WebAssembly modules it fetches at runtime from the `wasmUrl` document
-  option, falling back to script builds fetched from the same place. Left
-  unset, both fetches fail, pdf.js only warns, and the image isn't painted: a
-  scanned contract opens blank. `pdfjsWasmPlugin` (vite.config.ts) copies the
-  modules, their script fallbacks and their licences into
-  `dist/pdfjs-<version>/` (the names are fixed by pdf.js, so the version is in
-  the folder) and serves them in dev; **every `getDocument()` spreads
-  `pdfjsDocOptions`** (`pdf/pdfjsOptions.ts`), which makes the folder absolute,
-  since the worker resolves a relative URL against its own script. A new
-  `getDocument()` that forgets it draws such pages blank — the `decoders` spec
-  catches it only on the paths it opens. `quickjs-eval` (a document's own
-  JavaScript) is deliberately not shipped.
+- **The legacy build, on purpose.** pdf.js 5's modern build calls the newest
+  built-ins unguarded, on the page and in its worker (`Uint8Array.prototype.toHex`
+  for every document's fingerprint, `Promise.try` in every message,
+  `Map.prototype.getOrInsertComputed` in `render`, `Math.sumPrecise` in font
+  building): any browser older than the last few releases failed to open every
+  file. `loader.ts`, `fontEmbed.ts` and the worker patch (`PDF_WORKER`) all use
+  `pdfjs-dist/legacy/build/`, which polyfills them; the `decoders` spec deletes
+  them on both sides and opens a file. Don't import `pdfjs-dist` bare.
+- **Scans and JPEG 2000 paint only through `wasmUrl`.** Since pdf.js 5 JPEG
+  2000 (OpenJPEG), JBIG2 *and fax-coded scans* (`CCITTFaxDecode`, one module
+  with JBIG2) are decoded by WebAssembly modules fetched at runtime from the
+  `wasmUrl` document option (by the page, which hands the bytes to the worker,
+  since the app doesn't set `useWorkerFetch`), falling back to script builds
+  fetched from the same place. Left unset, both fetches fail, pdf.js only
+  warns, and the image isn't painted: a scanned contract opens blank.
+  `pdfjsWasmPlugin` (vite.config.ts) copies the modules, their script
+  fallbacks and their licences into `dist/pdfjs-<version>/` (the names are
+  fixed by pdf.js, so the version is in the folder) and serves them in dev;
+  **every `getDocument()` spreads `pdfjsDocOptions`** (`pdf/pdfjsOptions.ts`),
+  which makes the folder absolute. A new `getDocument()` that forgets it draws
+  such pages blank — the `decoders` spec catches it only on the paths it
+  opens. Not shipped: `quickjs-eval` (a document's own JavaScript) and `qcms`
+  (ICC profiles), which pdf.js uses only with `useWorkerFetch`; ICC images
+  draw in their alternate colour space, as they did with pdf.js 4.
 - **`page.render` needs `canvas` as well as `canvasContext`** since pdf.js 5
   (type-checked, so a missing one fails the build).
-

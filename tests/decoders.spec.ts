@@ -53,3 +53,35 @@ test("a fax-coded scan and a JPEG 2000 image paint, decoded from the app's own f
   expect(w.external).toEqual([]);
   expect(w.errors).toEqual([]);
 });
+
+test("a browser without the newest built-ins still opens a file", async ({ page }) => {
+  // pdf.js 5's modern build calls these unguarded — on the page and in its
+  // worker — and only the newest browsers have them: elsewhere every file
+  // failed to open. The app uses the legacy build, which brings its own.
+  const strip = `
+    delete Uint8Array.prototype.toHex; delete Uint8Array.prototype.toBase64;
+    delete Uint8Array.fromHex; delete Uint8Array.fromBase64;
+    delete Promise.try; delete Math.sumPrecise;
+    delete Map.prototype.getOrInsertComputed; delete Map.prototype.getOrInsert;
+    delete WeakMap.prototype.getOrInsertComputed; delete WeakMap.prototype.getOrInsert;
+  `;
+  await page.addInitScript(strip);
+  await page.route(/pdf\.worker[^/]*\.mjs$/, async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, body: strip + (await res.text()) });
+  });
+  const w = watch(page);
+  const f = await fixtures();
+  await open(page, f.sample);
+  await expect(page.locator(".fragment").first()).toBeVisible();
+  expect(
+    await page.locator(".page canvas").first().evaluate((c) => {
+      const canvas = c as HTMLCanvasElement;
+      const d = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
+      for (let i = 0; i < d.length; i += 4) if (d[i] < 128) return true;
+      return false;
+    }),
+    "the page painted its text",
+  ).toBe(true);
+  expect(w.errors).toEqual([]);
+});

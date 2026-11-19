@@ -356,7 +356,9 @@ type-checking can't see, and each exists because it broke once:
   JPEG 2000 image (`codecs` fixture, a few dozen bytes each, written by an
   encoder once) paint — black square on white, flat red — with their
   WebAssembly fetched from the app's own origin and no script fallback needed.
-  Shown to fail (both blank) with `wasmUrl` left out of `getDocument()`;
+  Shown to fail (both blank) with `wasmUrl` left out of `getDocument()`. And a
+  browser without the newest built-ins (deleted on the page and in pdf.js's
+  worker) still opens and paints a file — failed on pdf.js 5's modern build;
 - `warm.spec.ts` — React 19.2's `<Activity>` keeps the last document mounted
   behind the one in front. Switching back shows the *same* canvas (marked
   before the switch) and never painted again, with its undo, where a rebuilt

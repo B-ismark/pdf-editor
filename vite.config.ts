@@ -25,10 +25,10 @@ const ocrAssetVersion = [
 /**
  * pdf.js's WebAssembly decoders, served from the app's own origin.
  *
- * pdf.js 5 decodes JPEG 2000 (OpenJPEG), JBIG2 and fax-coded scans (one module,
- * `jbig2`) and ICC colour profiles (qcms) with WebAssembly modules its worker
- * fetches at runtime from the `wasmUrl` document option, falling back to a
- * script build of each fetched from the same place. Unset, both fetches fail
+ * pdf.js 5 decodes JPEG 2000 (OpenJPEG) and JBIG2 and fax-coded scans (one
+ * module, `jbig2`) with WebAssembly modules fetched at runtime from the
+ * `wasmUrl` document option, falling back to a script build of each fetched
+ * from the same place. Unset, both fetches fail
  * and the image is quietly not painted — a scanned page opens blank. So the
  * modules ship as part of the app, under a folder named for the pdf.js version
  * (their file names are fixed by pdf.js, so the folder is what changes when
@@ -36,7 +36,10 @@ const ocrAssetVersion = [
  *
  * The script fallbacks ship too: browsers with WebAssembly switched off (e.g.
  * a hardened "no JIT" mode) still decode, just slower. Not `quickjs-eval`: that
- * runs a document's own JavaScript, which this app never does.
+ * runs a document's own JavaScript, which this app never does. Not `qcms` (ICC
+ * colour profiles) either: pdf.js uses it only when its worker fetches for
+ * itself (`useWorkerFetch`, which also wants CMap and standard-font folders),
+ * so ICC images keep drawing in their alternate colour space, as in pdf.js 4.
  */
 const pdfjsVersion: string = require("pdfjs-dist/package.json").version;
 const PDFJS_ASSET_DIR = `pdfjs-${pdfjsVersion}/`;
@@ -45,13 +48,10 @@ const PDFJS_WASM_FILES = [
   "openjpeg_nowasm_fallback.js",
   "jbig2.wasm",
   "jbig2_nowasm_fallback.js",
-  "qcms_bg.wasm",
   "LICENSE_OPENJPEG",
   "LICENSE_PDFJS_OPENJPEG",
   "LICENSE_JBIG2",
   "LICENSE_PDFJS_JBIG2",
-  "LICENSE_QCMS",
-  "LICENSE_PDFJS_QCMS",
 ];
 const pdfjsWasmFile = (name: string) => require.resolve(`pdfjs-dist/wasm/${name}`);
 
@@ -183,7 +183,7 @@ function cspPlugin(): Plugin {
  * emitted asset in the build, and on the fly in dev. If a pdf.js upgrade moves
  * the code, the build fails rather than silently dropping the fix.
  */
-const PDF_WORKER = /[\\/]pdfjs-dist[\\/]build[\\/]pdf\.worker\.min\.mjs$/;
+const PDF_WORKER = /[\\/]pdfjs-dist[\\/]legacy[\\/]build[\\/]pdf\.worker\.min\.mjs$/;
 /** `adjustMapping`'s ToUnicode lookup for a glyph whose text is more than one
  * UTF-16 unit: since pdf.js 5 a standard ligature (U+FB00–FB4F) gets its own
  * code point, and anything else falls back to the first code point. */

@@ -1,6 +1,10 @@
-import * as pdfjsLib from "pdfjs-dist";
+// pdf.js's legacy build: the same engine, with the polyfills its modern build
+// leaves out (`Uint8Array.prototype.toHex`, `Promise.try`,
+// `Map.prototype.getOrInsertComputed`, `Math.sumPrecise` …). Without them only
+// the newest browsers open a file at all; everything else fails on load.
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 // Vite resolves this to a hashed URL for the worker bundle.
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import type { TextItem, TextStyle } from "pdfjs-dist/types/src/display/api";
 import { cropOffset, shownSize } from "./pagePlan";
 import { pdfjsDocOptions } from "./pdfjsOptions";

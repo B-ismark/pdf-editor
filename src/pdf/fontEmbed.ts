@@ -88,7 +88,7 @@ export async function createSourceFontEmbedder(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let doc: any;
   try {
-    const pdfjs = await import("pdfjs-dist");
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     fontkit = (await import("@pdf-lib/fontkit")).default;
     out.registerFontkit(streamingSubsets(fontkit));
     doc = await pdfjs.getDocument({ ...pdfjsDocOptions, data: bytes.slice(0), fontExtraProperties: true, disableFontFace: true }).promise;
