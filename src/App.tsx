@@ -230,10 +230,10 @@ export function App() {
         void clearSession();
         void clearEngineCache();
         setStatus("ready");
-        setMessage("Stopped saving a copy on this device, and deleted the stored one.");
+        setMessage("Session copy off and deleted.");
       } else {
         setStatus("ready");
-        setMessage("Saving a copy on this device so a reload can't lose your work.");
+        setMessage("Session saved on this device.");
       }
       return !on;
     });

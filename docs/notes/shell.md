@@ -358,6 +358,24 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     `role="status"` / `role="alert"` regions announce them, as in the editor —
     a region that mounts with its text already in it often isn't read out.
   - Lines use `text-wrap: balance`, so none ends on one word.
+- **Show, don't tell (10f).** Words are kept for what the page can't show — a
+  consequence, an error, a state — not for how to use it. `show.spec` holds a
+  word budget per surface, so a reworded paragraph can't creep back.
+  - The Inspector carries no how-to: an image's panel is a labelled Delete (its
+    handles, badge and cursors are the instructions); a note's and a link's
+    hint lines are gone, leaving only a refused address or a deleted/out-of-range
+    page as words. `.props__empty:empty` takes no room, so a note element can
+    stay mounted for `aria-describedby` and its error role.
+  - Rotate was the gesture only that paragraph explained, so the rotate ring
+    now has its own cursor: a turning arrow, inline as an SVG data URI (the CSP
+    allows `data:` images), black on a white halo for either theme, with
+    `grab` / `grabbing` as the fallback.
+  - Several selected objects: the count as the heading, no paragraph — the bar
+    above the page shows the actions.
+  - Organise's line is the file name and where an added page lands (the one
+    thing the grid can't show); Split's disabled-option hints, the picture-only
+    page hint, the document panel's privacy line, the session-copy toasts and
+    the Protect / Sign / Patterns intros are cut to their consequence.
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is
   794px, centred, with margin — not stretched to the window. Below that it

@@ -445,13 +445,14 @@ export function Organize({
       </header>
 
       <p className="organize__hint body-small">
-        Reorder, rotate, or delete pages · tap a page to pick it ·{" "}
+        {/* The cards show reorder, rotate and delete themselves; the one
+            thing the grid can't show is where an added page will land. */}
+        {fileName} ·{" "}
         <span className="organize__at">
           {plan && insertAt < plan.length
             ? `new pages go after page ${insertAt}`
             : "new pages go at the end"}
         </span>
-        . {fileName}
       </p>
 
       {otherDocs.length > 0 && (

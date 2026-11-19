@@ -3073,10 +3073,6 @@ export const DocumentEditor = memo(function DocumentEditor({
         <h2 className="props__title title-medium">{multi.length} objects selected</h2>
         {hidePanel}
       </div>
-      <p className="props__empty body-medium">
-        Move them together by dragging, or use the bar above the page to arrange, duplicate or delete them. Select
-        one to change its properties.
-      </p>
     </div>
   );
 
@@ -3284,7 +3280,7 @@ export const DocumentEditor = memo(function DocumentEditor({
             <div className="picturehint" role="status">
               <Icon name="scan_text" size={18} />
               <span className="body-medium picturehint__text">
-                This page has no text to edit. If it's a scan or picture, recognise its text first.
+                No text to edit on this page.
               </span>
               <button className="btn btn--tonal" onClick={() => void runOcr()} disabled={busy}>
                 Recognise text

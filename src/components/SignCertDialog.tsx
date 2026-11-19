@@ -94,9 +94,8 @@ export function SignCertDialog({ onSign, onClose }: Props) {
               <input className="sigtype__input" value={org} onChange={(e) => setOrg(e.target.value)} disabled={busy} />
             </div>
             <p className="confirm__msg body-small">
-              A signing identity is generated on your device. Recipients can verify the file
-              hasn't changed since you signed it; because it isn't issued by a certificate
-              authority, readers show the identity as “not verified”.
+              Readers can check the file is unchanged since signing, but show a self-made
+              identity as “not verified”.
             </p>
           </>
         ) : (
@@ -123,7 +122,7 @@ export function SignCertDialog({ onSign, onClose }: Props) {
               <input className="sigtype__input" type="password" value={passphrase} onChange={(e) => setPassphrase(e.target.value)} disabled={busy} />
             </div>
             <p className="confirm__msg body-small">
-              Signing happens entirely on your device — the certificate and its passphrase never leave the browser.
+              The certificate and passphrase never leave this browser.
             </p>
           </>
         )}

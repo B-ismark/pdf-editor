@@ -917,6 +917,8 @@ body {
 }
 .props__title { color: var(--on-surface); margin: 0; }
 .props__empty { color: var(--on-surface-variant); margin: 8px 0; }
+/* A note with nothing to say (a link's address is fine) takes no room. */
+.props__empty:empty { display: none; }
 /* Inline validation copy (e.g. a link URL we refuse to export). */
 .props__warn { color: var(--error); }
 .props__section { display: flex; flex-direction: column; gap: 15px; }
@@ -1884,12 +1886,15 @@ body {
   height: 30px;
   transform: translate(-50%, -50%);
   border-radius: var(--radius-full);
-  cursor: grab;
+  /* The cursor is the instruction: a turning arrow says "twist here", so the
+     gesture needs no sentence in the Inspector. Inline (a data URI) — the CSP
+     allows data: images and nothing off-origin; grab is the fallback. */
+  cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4' stroke='white' stroke-width='4.5'/%3E%3Cpath d='M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4' stroke='black' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E") 12 12, grab;
   pointer-events: auto;
   touch-action: none;
   z-index: 1;
 }
-.rotate-zone:active { cursor: grabbing; }
+.rotate-zone:active { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'%3E%3Cg fill='none' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4' stroke='white' stroke-width='4.5'/%3E%3Cpath d='M19 12a7 7 0 1 1-2.05-4.95M19 4v4h-4' stroke='black' stroke-width='2'/%3E%3C/g%3E%3C/svg%3E") 12 12, grabbing; }
 
 /* Bigger touch targets on coarse pointers */
 @media (pointer: coarse) {

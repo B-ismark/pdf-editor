@@ -107,8 +107,8 @@ export function SplitDialog({ count, picked, busy, error, onSplit, onClose }: Pr
           {!canPick && (
             <p className="body-small split__hint">
               {picked.length > 0
-                ? "Each picked page starts a new file, and page 1 already does — pick a later page."
-                : "To split at pages of your choosing, pick them in the grid first."}
+                ? "Page 1 already starts a file — pick a later page."
+                : "Pick pages in the grid first."}
             </p>
           )}
         </div>

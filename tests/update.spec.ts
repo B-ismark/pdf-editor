@@ -221,7 +221,7 @@ test.describe("Picture-only pages", () => {
 
       await page.locator(".page").first().click({ position: { x: 150, y: 150 } });
       await expect(hint).toBeVisible();
-      await expect(hint).toContainText("no text to edit");
+      await expect(hint).toContainText(/no text to edit/i);
       await expect(hint.getByRole("button", { name: "Recognise text", exact: true })).toBeVisible();
 
       const a = (await hint.boundingBox())!;
