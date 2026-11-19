@@ -114,7 +114,8 @@ test("on a touch screen, an unpicked page's hidden controls take no tap", async 
   await openOrganise(page);
   const cards = page.locator(".organize .pcard");
   await expect(cards.first()).toBeVisible();
-  const rotate = cards.nth(1).getByRole("button", { name: "Rotate" });
+  // Hidden from everyone until the card is picked, assistive tech included.
+  const rotate = cards.nth(1).getByRole("button", { name: "Rotate", includeHidden: true });
   expect(await rotate.evaluate((el) => getComputedStyle(el).visibility)).toBe("hidden");
   // Pick it: its controls appear and work.
   await cards.nth(1).locator(".pcard__thumb").tap();
