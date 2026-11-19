@@ -181,7 +181,13 @@ test("a small redaction removes only the words under it", async ({ page }) => {
   await expect(items(page).nth(0).locator("del")).toHaveText("secret");
 });
 
-test("on a cropped page, a redaction still hides just its own words", async ({ page }) => {
+for (const [what, crop] of [
+  ["a cropped page", { x: 40, y: 600, width: 500, height: 150 }],
+  // Stored state can hold a crop past the page's edge; the exporter fits it
+  // (here to x 0), and the text must be read through the same fitted crop.
+  ["a crop stored past the page's edge", { x: -50, y: 600, width: 600, height: 150 }],
+] as const) {
+test(`on ${what}, a redaction still hides just its own words`, async ({ page }) => {
   const path = await makePdf("c.pdf", [["Keep this secret word here", "And a second line"]]);
   const doc = await PDFDocument.create();
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -192,7 +198,7 @@ test("on a cropped page, a redaction still hides just its own words", async ({ p
   // stored in the uncropped page's space.
   const edited = {
     ...EMPTY,
-    pages: [{ index: 0, rotate: 0, crop: { x: 40, y: 600, width: 500, height: 150 } }],
+    pages: [{ index: 0, rotate: 0, crop }],
     redactions: [{ id: "r1", pageIndex: 0, x: x0 + 1, y: 716, width: x1 - x0 - 2, height: 14, color: "#000000" }],
   };
   await seedStore(
@@ -215,6 +221,7 @@ test("on a cropped page, a redaction still hides just its own words", async ({ p
   await expect(summary(page)).toHaveText("1 change on 1 page");
   await expect(items(page).nth(0).locator("del")).toHaveText("secret");
 });
+}
 
 test("the word marks and Overlay stay legible in dark theme", async ({ page }) => {
   await page.emulateMedia({ colorScheme: "light" });
@@ -225,6 +232,13 @@ test("the word marks and Overlay stay legible in dark theme", async ({ page }) =
   await page.emulateMedia({ colorScheme: "dark" });
   // The page is white in both themes, so what's drawn on it keeps its colours.
   await expect.poll(() => mark.evaluate((n) => getComputedStyle(n).backgroundColor)).toBe(light);
+  // So does the ring round the current change.
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.getByRole("button", { name: "Next change" }).click();
+  const on = page.locator(".compare__mark--on").first();
+  const ring = await on.evaluate((n) => getComputedStyle(n).outlineColor);
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect.poll(() => on.evaluate((n) => getComputedStyle(n).outlineColor)).toBe(ring);
 
   await page.getByRole("radio", { name: "Overlay" }).click();
   const canvas = page.locator(".compare__row canvas").first();

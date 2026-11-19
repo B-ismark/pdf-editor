@@ -291,8 +291,8 @@ menu's *Compare documents*, disabled until a second tab is open.
   makes a page with a true redaction a picture, so reading the export would
   call every word on it removed. The text comes from a second export with only
   the whiteouts, and `textAsExported` hides the words under each true
-  redaction (moved by the crop's corner, which is where the exported view
-  starts) and adds the in-memory OCR layer back — the exporter never writes it,
+  redaction (moved by the crop's corner — fitted with `fitCrop`, as the
+  exporter fits it — which is where the exported view starts) and adds the in-memory OCR layer back — the exporter never writes it,
   and the unedited side is read with it. Marks and Overlay use the real export.
 - **Text is read the way Find reads it** (`joinPage`), so two writers that
   split a line into different runs still read the same. Words compare after
@@ -309,8 +309,8 @@ menu's *Compare documents*, disabled until a second tab is open.
 - **Pages pair by index.** A page inserted in After shifts the Overlay of every
   page after it; the text diff is unaffected (it runs over the whole document).
 - **Overlay** is an ink diff (luminance < 160): ink in both is drawn faint,
-  ink only in one in `--diff-removed-page` / `--diff-added-page`. Those, and the
-  word marks, never change with the theme — the page is white in both, and the
+  ink only in one in `--diff-removed-page` / `--diff-added-page`. Those, the
+  word marks and the current change's ring (`--diff-current-page`) never change with the theme — the page is white in both, and the
   dark theme's pastel `--diff-*` were under 2:1 on it. The themed pair is for
   the change list only.
 - Pages render only near the viewport (IntersectionObserver, 800px margin) and

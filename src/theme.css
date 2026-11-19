@@ -29,6 +29,7 @@
   /* On the page, which is white in either theme: these never change with it. */
   --diff-added-page: #146c2e;
   --diff-removed-page: #b3261e;
+  --diff-current-page: #6750a4;
 
   --surface: #fef7ff;
   --on-surface: #1d1b20;

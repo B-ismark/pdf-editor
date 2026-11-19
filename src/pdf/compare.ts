@@ -1,4 +1,5 @@
 import { joinPage } from "./find";
+import { fitCrop } from "./pagePlan";
 import { fragmentSize, isFragmentModified } from "./style";
 import type { Edits, PageData, PageRef, Redaction } from "./types";
 import { yieldToUI } from "./yield";
@@ -149,8 +150,10 @@ export function textAsExported(
     const ref = plan[i];
     const from = ref ? source[ref.index] : undefined;
     if (!ref || !from) return page;
-    const dx = ref.crop?.x ?? 0;
-    const dy = ref.crop?.y ?? 0;
+    // Fitted as the exporter fits it: a stored crop can hang off the page.
+    const crop = fitCrop(ref.crop, from.viewBox);
+    const dx = crop?.x ?? 0;
+    const dy = crop?.y ?? 0;
     const boxes = state.redactions
       .filter((r) => !r.cover && r.pageIndex === ref.index)
       .map((r) => ({ x: r.x - dx, y: r.y - dy, width: r.width, height: r.height }));

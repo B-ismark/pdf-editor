@@ -3069,7 +3069,7 @@ body {
 }
 .compare__mark--removed { background: color-mix(in srgb, var(--diff-removed-page) 28%, transparent); }
 .compare__mark--added { background: color-mix(in srgb, var(--diff-added-page) 28%, transparent); }
-.compare__mark--on { outline: 2px solid var(--primary); outline-offset: 1px; mix-blend-mode: normal; }
+.compare__mark--on { outline: 2px solid var(--diff-current-page); outline-offset: 1px; mix-blend-mode: normal; }
 .compare__mark--on.compare__mark--removed { background: color-mix(in srgb, var(--diff-removed-page) 40%, transparent); }
 .compare__mark--on.compare__mark--added { background: color-mix(in srgb, var(--diff-added-page) 40%, transparent); }
 .compare__only {
