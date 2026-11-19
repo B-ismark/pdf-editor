@@ -1102,8 +1102,16 @@ export function App() {
               <span className="restore-banner__icon"><Icon name="restore" size={22} /></span>
               <div className="restore-banner__text">
                 <b className="title-small">Restore last session?</b>
-                {/* A long list is cut short; the tooltip has it whole. */}
-                <span className="body-small restore-banner__files" data-tip={restorable.docs.map((d) => d.fileName).join(", ")}>
+                {/* A list or a long name is cut short; the tooltip has it whole.
+                    A short single name needs none. */}
+                <span
+                  className="body-small restore-banner__files"
+                  data-tip={
+                    restorable.docs.length > 1 || restorable.docs[0].fileName.length > 24
+                      ? restorable.docs.map((d) => d.fileName).join(", ")
+                      : undefined
+                  }
+                >
                   {restorable.docs.length === 1
                     ? restorable.docs[0].fileName
                     : `${plural(restorable.docs.length, "document")} · ${restorable.docs.map((d) => d.fileName).join(", ")}`}

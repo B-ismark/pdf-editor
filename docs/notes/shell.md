@@ -347,8 +347,9 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     min-content can't widen it past a phone (it scrolled sideways, clipping the
     headline). Its three buttons are one group
     (`.restore-banner__actions`) that moves below the text whole on a phone,
-    never Restore beside the text and the other two under it; the file list
-    carries its full names as a tooltip, since it is cut short.
+    never Restore beside the text and the other two under it (at 320 px that
+    takes the welcome's padding down to 16 px: the three need 245 px). A list
+    or a long name, cut short, carries the full names as a tooltip.
   - While a dialog is open (the password prompt from a first drop), a file
     over the window gets `dropEffect = "none"` and no surface, in the welcome
     and the editor alike: `openFiles` would refuse it behind the scrim. The

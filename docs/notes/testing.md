@@ -106,8 +106,11 @@ type-checking can't see, and each exists because it broke once:
   dragged text shows nothing; the button names photos and isn't the upload
   arrow; on a phone nothing mentions dragging, no line ends on one word, and
   the restore offer fits without sideways scroll, its buttons on one row; a
-  file over the window while a dialog is open is offered no drop; the loading
-  and error live regions are in the page before anything happens (slice 10e).
+  file over the window while a dialog is open is offered no drop, on the
+  welcome and over an open document (whose drop veil it also covers); the
+  loading and error live regions are in the page before anything happens, and
+  the visible line isn't read twice; at 320 px the restore buttons still share
+  a row (slice 10e).
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

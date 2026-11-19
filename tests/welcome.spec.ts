@@ -151,7 +151,33 @@ test("opening and failing are announced by live regions that were already there"
   await expect(page.locator(".app [role=status]")).toHaveCount(1);
   await drag(page, "drop", { file: { name: "notes.pdf", b64: Buffer.from("not a pdf at all").toString("base64") } });
   await expect(alert).not.toHaveText("", { timeout: 15_000 });
+  // Shown, but not read twice.
   await expect(page.locator(".dropzone__err")).toBeVisible();
+  await expect(page.locator(".dropzone__err")).toHaveAttribute("aria-hidden", "true");
+});
+
+test("over an open document, a file is offered a new tab, but not behind a dialog", async ({ page }) => {
+  await page.goto("/");
+  const file = { ...PDF, b64: (await readFile((await fixtures()).sample)).toString("base64") };
+  await drag(page, "drop", { file });
+  await expect(page.locator(".page__overlay").first()).toBeVisible({ timeout: 15_000 });
+  await drag(page, "dragover", { at: ".appbar", file });
+  await expect(page.locator(".dropveil")).toBeVisible();
+  await drag(page, "dragleave", { at: ".appbar", file });
+  await expect(page.locator(".dropveil")).toHaveCount(0);
+  await page.keyboard.press("Control+k");
+  await expect(page.locator("[aria-modal=true]")).toBeVisible();
+  const effect = await page.evaluate((b64) => {
+    const dt = new DataTransfer();
+    dt.items.add(new File([Uint8Array.from(atob(b64), (c) => c.charCodeAt(0))], "x.pdf", { type: "application/pdf" }));
+    const ev = new DragEvent("dragover", { bubbles: true, cancelable: true, dataTransfer: dt });
+    document.querySelector(".appbar")!.dispatchEvent(ev);
+    return { effect: dt.dropEffect, cancelled: ev.defaultPrevented };
+  }, file.b64);
+  // Cancelled, so the browser doesn't open the file itself; "none", so it says no.
+  expect(effect).toEqual({ effect: "none", cancelled: true });
+  await settle(page);
+  await expect(page.locator(".dropveil")).toHaveCount(0);
 });
 
 test.describe("on a phone", () => {
@@ -181,5 +207,22 @@ test.describe("on a phone", () => {
     // The three choices stay together on one row, not Restore by the text and
     // the other two below it.
     expect(new Set(boxes.map((b) => Math.round(b.y))).size).toBe(1);
+  });
+});
+
+test.describe("on the smallest phone", () => {
+  test.use({ viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true });
+  test("the restore offer's three choices still share one row", async ({ page }) => {
+    await page.goto("/");
+    await seedStore(page, [["doc:a", docRecord("a", "a-rather-long-file-name-for-a-phone.pdf", 0)]], [["bytes:a", (await fixtures()).sample]]);
+    await page.reload();
+    await expect(page.locator(".restore-banner")).toBeVisible();
+    const ys = [];
+    for (const name of ["Restore", "Not now", "Delete"]) {
+      const b = (await page.locator(".restore-banner").getByRole("button", { name }).boundingBox())!;
+      expect(b.x + b.width, name).toBeLessThanOrEqual(320);
+      ys.push(Math.round(b.y));
+    }
+    expect(new Set(ys).size).toBe(1);
   });
 });
