@@ -82,6 +82,11 @@ and is **mobile- and tablet-first**:
 - **Finishing touches** — a header and footer (page numbers, "Page 3 of 7",
   the date, the file name, Bates numbers like ACME-000001, or your own text,
   in any of six places), a diagonal watermark, or every page as a PNG image.
+- **Compare two versions** — with both open, *Compare documents* (⋯ menu)
+  lists every word added, removed or replaced, marks each on both versions'
+  pages side by side, and an Overlay view shows what moved or changed in the
+  pictures and layout. A version with unsaved edits is compared as it would
+  download.
 - **Several PDFs at once** — open more files (pick several, drop them on the
   page, <kbd>Ctrl/⌘</kbd>+<kbd>O</kbd>, or the **+** on the tab strip) and each
   gets its own tab with its own edits and undo history. Switching never costs a

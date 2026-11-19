@@ -23,6 +23,13 @@
   --on-error: #ffffff;
   --error-container: #f9dedc;
   --on-error-container: #410e0b;
+  /* Compare: what a newer version added, and what it took out. */
+  --diff-added: #146c2e;
+  --diff-removed: #b3261e;
+  /* On the page, which is white in either theme: these never change with it. */
+  --diff-added-page: #146c2e;
+  --diff-removed-page: #b3261e;
+  --diff-current-page: #6750a4;
 
   --surface: #fef7ff;
   --on-surface: #1d1b20;
@@ -143,6 +150,8 @@
   --on-error: #601410;
   --error-container: #8c1d18;
   --on-error-container: #f9dedc;
+  --diff-added: #6dd58c;
+  --diff-removed: #f2b8b5;
 
   --surface: #141218;
   --on-surface: #e6e0e9;

@@ -52,7 +52,7 @@ import { plural } from "./plural";
 import type { FormField, FormValue, PageNumberOptions, PageRef, WatermarkOptions } from "./pdf/types";
 import { useHistory } from "./hooks/useHistory";
 import { useCustomPattern } from "./hooks/useCustomPattern";
-import { EMPTY_DOC, aModalIsOpen, toAB, type EditorHandle, type LiveDoc, type OpenDoc, type SavedMark, type Status } from "./workspace";
+import { EMPTY_DOC, aModalIsOpen, parkedState, toAB, type EditorHandle, type LiveDoc, type OpenDoc, type SavedMark, type Status } from "./workspace";
 import { usePageArrays, usePageRecords, usePageSets } from "./hooks/usePageBuckets";
 import { DocTabs } from "./components/DocTabs";
 import { useMediaQuery } from "./hooks/useMediaQuery";
@@ -92,6 +92,7 @@ const CropDialog = lazyPart(() => import("./components/CropDialog").then((m) => 
 const HiddenInfoDialog = lazyPart(() => import("./components/HiddenInfoDialog").then((m) => m.HiddenInfoDialog));
 const ProtectDialog = lazyPart(() => import("./components/ProtectDialog").then((m) => m.ProtectDialog));
 const SignCertDialog = lazyPart(() => import("./components/SignCertDialog").then((m) => m.SignCertDialog));
+const CompareDialog = lazyPart(() => import("./components/CompareDialog").then((m) => m.CompareDialog));
 import type {
   Annotation,
   AnnotationTool,
@@ -589,6 +590,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   const [compressOpen, setCompressOpen] = useState(false);
   const [signCertOpen, setSignCertOpen] = useState(false);
   const [hiddenOpen, setHiddenOpen] = useState(false);
+  const [compareOpen, setCompareOpen] = useState(false);
   /** The shown position of the page the Crop dialog is open on. */
   const [cropAt, setCropAt] = useState<number | null>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -2736,6 +2738,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     { id: "autosave", group: "settings", label: "Save session on this device", icon: "save_local", keywords: "autosave restore remember", checked: autosaveOn, run: onToggleAutosave },
     { id: "lossless", group: "settings", label: "Lossless redacted pages", icon: "lossless", keywords: "redaction quality bit-exact png export setting", checked: losslessRaster, detail: "Redacted pages export bit-exact, at several times the file size", run: () => setLosslessRaster((v) => !v) },
 
+    { id: "compare", group: "file", label: "Compare documents", icon: "compare", keywords: "compare diff difference changes versions redline track two", opens: "dialog", disabled: tabs.length < 2, detail: tabs.length < 2 ? "Open the other version too, then compare" : undefined, run: () => { setSelection(null); setCompareOpen(true); } },
     { id: "open", group: "file", label: "Open another PDF", icon: "note_add", shortcut: "Ctrl+O", keywords: "new tab file image picture photo jpg jpeg png", run: onOpenAnother },
     { id: "close", group: "file", label: "Close document", icon: "close", keywords: "home start exit leave", run: goHome },
     { id: "palette", group: "file", label: "Search commands", icon: "command", shortcut: "Ctrl+K", keywords: "palette", opens: "dialog", hidden: cmdOpen, run: () => setCmdOpen(true) },
@@ -3532,6 +3535,60 @@ export const DocumentEditor = memo(function DocumentEditor({
               void download();
             }}
             onClose={() => setHiddenOpen(false)}
+          />
+        </Suspense>
+      )}
+
+      {compareOpen && pdf && (
+        <Suspense fallback={null}>
+          <CompareDialog
+            // Before is the document you came from — the tab before this one —
+            // and After this one; Swap trades them.
+            before={(tabs[tabs.findIndex((t) => t.id === activeId) - 1] ?? tabs.find((t) => t.id !== activeId))!.id}
+            after={activeId}
+            onClose={() => setCompareOpen(false)}
+            docs={tabs.map((t) => {
+              const front = t.id === activeId;
+              const state = front ? docHistory.state : parkedState(t);
+              const tabPdf = front ? pdf : t.pdf;
+              // Changes beyond what's already in the bytes (an Organise, a merge).
+              const edited = (front ? changeCount - baked : t.changeCount - t.baked) > 0;
+              return {
+                id: t.id,
+                name: t.fileName,
+                load: async () => {
+                  // Its own parse, which the tab draws from: never released here.
+                  if (!edited) return { pdf: tabPdf, text: tabPdf.pages, edited, release: () => {} };
+                  // As it would download, so the comparison reads what the file will.
+                  const [{ exportPdf }, { loadPdf, releaseDoc }, { textAsExported }] = await Promise.all([
+                    import("./pdf/exporter"),
+                    import("./pdf/loader"),
+                    import("./pdf/compare"),
+                  ]);
+                  const input = { ...EMPTY_DOC, ...state, losslessRaster };
+                  const copies: LoadedPdf[] = [];
+                  const release = () => copies.forEach((c) => releaseDoc(c.bytes));
+                  try {
+                    const shown = await loadPdf(toAB(await exportPdf(tabPdf, input)));
+                    copies.push(shown);
+                    // A true redaction makes its page a picture; read the text
+                    // from an export without them, and hide what they cover.
+                    const covers = input.redactions.filter((r) => r.cover);
+                    let read = shown;
+                    if (covers.length < input.redactions.length) {
+                      read = await loadPdf(toAB(await exportPdf(tabPdf, { ...input, redactions: covers })));
+                      copies.push(read);
+                    }
+                    const plan = resolvePlan(state.pages, tabPdf.pages.length);
+                    const { pages, hidden } = textAsExported(read.pages, tabPdf.pages, plan, input);
+                    return { pdf: shown, text: pages, hidden, edited, release };
+                  } catch (err) {
+                    release();
+                    throw err;
+                  }
+                },
+              };
+            })}
           />
         </Suspense>
       )}

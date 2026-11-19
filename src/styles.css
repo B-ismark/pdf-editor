@@ -2935,3 +2935,164 @@ body {
 /* A link's page: "[ 3 ] of 12". */
 .linkpage { display: flex; align-items: center; gap: 8px; color: var(--on-surface-variant); }
 .linkpage .numinput { width: 72px; }
+
+/* ---- Compare two documents -------------------------------------------- */
+.compare {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  padding-top: env(safe-area-inset-top);
+}
+.compare__docs {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 10px 16px 4px;
+}
+.compare__slot { display: inline-flex; align-items: center; gap: 8px; min-width: 0; flex-wrap: wrap; }
+.compare__slotlabel { color: var(--on-surface-variant); }
+.compare__name { max-width: 240px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compare__edited {
+  color: var(--on-secondary-container);
+  background: var(--secondary-container);
+  border-radius: var(--radius-full);
+  padding: 2px 8px;
+}
+.compare__status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 4px 16px 8px;
+  border-bottom: 1px solid var(--outline-variant);
+}
+.compare__summary { display: inline-flex; align-items: center; gap: 8px; }
+.compare__summary--err { color: var(--error); }
+.compare__rough { color: var(--on-surface-variant); }
+.compare__nav { display: inline-flex; align-items: center; gap: 2px; margin-left: auto; }
+.compare__count { min-width: 56px; text-align: center; font-variant-numeric: tabular-nums; }
+.compare__body { flex: 1; min-height: 0; display: flex; }
+.compare__list {
+  list-style: none;
+  margin: 0;
+  padding: 8px;
+  width: 300px;
+  flex: none;
+  overflow-y: auto;
+  border-right: 1px solid var(--outline-variant);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.compare__item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.compare__item:hover { background: color-mix(in srgb, var(--on-surface) calc(var(--state-hover) * 100%), transparent); }
+.compare__item--on { background: var(--secondary-container); color: var(--on-secondary-container); }
+.compare__item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.compare__text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.compare__kind { color: var(--on-surface-variant); }
+.compare__item--on .compare__kind { color: inherit; }
+.compare__del,
+.compare__ins { overflow-wrap: anywhere; text-decoration: none; padding-left: 10px; position: relative; }
+/* A rule in the side's colour, and the words struck or not: the kind reads
+   without the colour. */
+.compare__del { text-decoration: line-through; text-decoration-color: var(--diff-removed); }
+.compare__del::before,
+.compare__ins::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: 2px;
+  background: var(--diff-removed);
+}
+.compare__ins::before { background: var(--diff-added); }
+.compare__pages { flex: 1; min-width: 0; overflow-y: auto; padding: 0 16px 24px; }
+.compare__heads {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 8px 0;
+  background: var(--surface);
+  color: var(--on-surface-variant);
+}
+.compare__heads > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compare__legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--on-surface-variant); margin: 8px 0; }
+.compare__key { width: 12px; height: 12px; border-radius: 3px; display: inline-block; margin-left: 8px; }
+.compare__key:first-child { margin-left: 0; }
+.compare__key--removed { background: var(--diff-removed-page); }
+.compare__key--added { background: var(--diff-added-page); }
+.compare__row { margin-top: 12px; }
+.compare__pagenum { display: block; color: var(--on-surface-variant); margin-bottom: 4px; }
+.compare__pair { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: start; }
+.compare__page {
+  position: relative;
+  width: 100%;
+  background: #fff;
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+.compare__page--overlay { max-width: 900px; margin: 0 auto; }
+.compare__page--none {
+  aspect-ratio: 1 / 1.3;
+  display: grid;
+  place-items: center;
+  background: var(--surface-container);
+  box-shadow: none;
+  border: 1px dashed var(--outline-variant);
+  color: var(--on-surface-variant);
+}
+.compare__canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+.compare__mark {
+  position: absolute;
+  border-radius: 2px;
+  cursor: pointer;
+  mix-blend-mode: multiply;
+}
+.compare__mark--removed { background: color-mix(in srgb, var(--diff-removed-page) 28%, transparent); }
+.compare__mark--added { background: color-mix(in srgb, var(--diff-added-page) 28%, transparent); }
+.compare__mark--on { outline: 2px solid var(--diff-current-page); outline-offset: 1px; mix-blend-mode: normal; }
+.compare__mark--on.compare__mark--removed { background: color-mix(in srgb, var(--diff-removed-page) 40%, transparent); }
+.compare__mark--on.compare__mark--added { background: color-mix(in srgb, var(--diff-added-page) 40%, transparent); }
+.compare__only {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  background: var(--surface-container-highest);
+  color: var(--on-surface);
+}
+.compare__now { display: none; }
+@media (max-width: 719px) {
+  .compare__list { display: none; }
+  .compare__pages { padding: 0 8px 16px; }
+  .compare__pair, .compare__heads { gap: 8px; }
+  .compare__name { max-width: 140px; }
+  /* No room for the list: the change in hand shows at the foot instead. */
+  .compare__now {
+    display: block;
+    padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--outline-variant);
+    background: var(--surface-container);
+  }
+}
+.compare .segmented__btn { white-space: nowrap; }

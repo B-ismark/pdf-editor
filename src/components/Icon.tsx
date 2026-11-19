@@ -10,6 +10,8 @@ import {
   AlignVerticalJustifyEnd,
   AlignVerticalJustifyStart,
   ArrowDownToLine,
+  ArrowLeftRight,
+  GitCompareArrows,
   ArrowUpRight,
   MoveHorizontal,
   SquareDashed,
@@ -210,6 +212,10 @@ const MAP: Record<string, LucideIcon> = {
   restore: FileClock,
   /** Download a copy that needs a password to open. */
   protect: FileLock,
+  /** Set two documents side by side and see what changed between them. */
+  compare: GitCompareArrows,
+  /** Trade the two sides of a comparison (Before ⇄ After). */
+  swap_sides: ArrowLeftRight,
   /** A newer version of the app is out (the page was opened before a deploy).
    * Not a refresh arrow: that circle-of-arrows is `rotate`'s shape. */
   app_update: CircleFadingArrowUp,

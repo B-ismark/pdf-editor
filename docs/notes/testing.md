@@ -320,6 +320,19 @@ type-checking can't see, and each exists because it broke once:
   the page reads it, and Update with nothing touched keeps its size and Bates
   numbers; a date added later is today's, not a stored, unshown one; the
   preview's baselines match the exporter's; a page-number setting from before opens as its one place;
+- `compare.spec.ts` — Package 8g. The engine (a reflowed paragraph is one
+  change, not every line after it; typographic quotes and soft hyphens aren't
+  changes; the matcher is a longest common subsequence, checked against plain
+  dynamic programming, and gives up past its cap) and, in the app: each change
+  is listed with its kind, page and words, marked on Before's page (removed) and
+  After's (added) over the word itself, and nothing on a page that didn't
+  change; Next/Previous walk the list; Swap turns additions into removals;
+  Overlay draws ink only in one version in that version's colour, even when the
+  text is identical; a tab's unsaved edit is compared as it would download
+  ("with your edits"); a small redaction removes only the words under it, on a
+  cropped page too (the exporter rasterises that page); marks and Overlay keep
+  their colours in dark theme; closing Compare leaves a background tab's fonts
+  loaded; the command is disabled with one document open;
 - `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
   never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
   character WinAnsi can't encode instead of throwing, so `sanitize`

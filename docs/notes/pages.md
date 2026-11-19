@@ -274,6 +274,49 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
   *as shown* (`marginsOf` / `cropFromMargins`), which is what lets "All pages"
   apply one set of margins to pages of any size or turn.
 
+## Compare
+
+`CompareDialog.tsx` over `pdf/compare.ts`. Full-screen, like Organise; the ⋯
+menu's *Compare documents*, disabled until a second tab is open.
+
+- **Each side is the file as it would download.** A tab whose change count is
+  past what's baked into its bytes is run through `exportPdf` (with the same
+  input as Download, `losslessRaster` included) and re-read; otherwise its own
+  parse is used. On close only those exported copies are released — **never a
+  tab's own parse, front or parked**: destroying it drops its fonts from
+  `document.fonts`, and `fontInfo.ts` keeps the old `g_d…` names by bytes, so
+  that tab's edited text fell back to a generic face (the review of 8g caught
+  this; `compare.spec` guards it).
+- **What's drawn and what's read differ on a redacted page.** The exporter
+  makes a page with a true redaction a picture, so reading the export would
+  call every word on it removed. The text comes from a second export with only
+  the whiteouts, and `textAsExported` hides the words under each true
+  redaction (moved by the crop's corner — fitted with `fitCrop`, as the
+  exporter fits it — which is where the exported view starts) and adds the in-memory OCR layer back — the exporter never writes it,
+  and the unedited side is read with it. Marks and Overlay use the real export.
+- **Text is read the way Find reads it** (`joinPage`), so two writers that
+  split a line into different runs still read the same. Words compare after
+  `normalWord` (NFKC, plain quotes, no soft hyphens or zero-widths).
+- **Two passes, both Myers with a cap.** Lines first, then words only inside
+  the stretches of lines that differ — a reflowed paragraph is a block of
+  changed lines but one changed word. Past `MAX_LINE_D` the whole text goes to
+  the word pass; past `MAX_WORD_D` a stretch is reported replaced whole and the
+  result is marked rough (the status line says so). Memory is O(D²), not
+  O(N·M).
+- **Marks are approximate.** A word's box is its share of the run's advance
+  width — glyph widths aren't known here. Good enough to point at a word; never
+  used for anything that reaches a file.
+- **Pages pair by index.** A page inserted in After shifts the Overlay of every
+  page after it; the text diff is unaffected (it runs over the whole document).
+- **Overlay** is an ink diff (luminance < 160): ink in both is drawn faint,
+  ink only in one in `--diff-removed-page` / `--diff-added-page`. Those, the
+  word marks and the current change's ring (`--diff-current-page`) never change with the theme — the page is white in both, and the
+  dark theme's pastel `--diff-*` were under 2:1 on it. The themed pair is for
+  the change list only.
+- Pages render only near the viewport (IntersectionObserver, 800px margin) and
+  free their canvases when they leave it; Overlay's renders are cancelled too.
+  A failed load isn't cached, so Swap retries it.
+
 ## Known limits
 
 - OCR renders in user space. On a page whose own `/Rotate` turns sideways-scanned
