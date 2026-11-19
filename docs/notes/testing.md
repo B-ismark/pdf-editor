@@ -71,6 +71,13 @@ type-checking can't see, and each exists because it broke once:
   style's icon is on the control line; and with real scrollbars (launched
   without `--hide-scrollbars`) a short 1440px window keeps the desktop
   Inspector's labels beside their controls (slice 10b).
+- `paper.spec.ts` — thumbnails are white paper in the sidebar and Organise
+  (a run-together CSS rule dimmed them all the time); "Dim pages" softens the
+  pages and the thumbnails but still draws them (the same rule hid the page
+  canvas outright); Organise shows a page's controls only under the pointer,
+  picked or with the keyboard in it, without moving the card, keeps every
+  number, marks a pick with a tick, and on a touch screen an unpicked page's
+  hidden controls take no tap (slice 10c).
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

@@ -473,7 +473,7 @@ export function Organize({
               <button className="pcard__thumb" onClick={() => toggleSel(i)} aria-pressed={selected.has(i)}>
                 <Thumbnail bytes={sources.get(entry.sourceKey)!} index={entry.index} rotation={entry.rotation} crop={entry.crop} />
                 {selected.has(i) && (
-                  <span className="pcard__check"><Icon name="add" size={15} /></span>
+                  <span className="pcard__check"><Icon name="check" size={15} /></span>
                 )}
               </button>
               <div className="pcard__no label-medium">{i + 1}</div>

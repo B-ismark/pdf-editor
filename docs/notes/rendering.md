@@ -52,6 +52,9 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   empty, with the error mark beside it. When the canvas shared a parent with
   the mark, clearing the mark after a retry threw `removeChild`
   NotFoundError and unmounted the whole app (there is no error boundary).
+  The host is `display: contents` (so the canvas lays out as the frame's
+  child); keep that rule apart from Dim mode's filter — run together once, they
+  dimmed every thumbnail and hid the page canvas in Dim mode (`paper` spec).
 - **pdf-lib is lazy-loaded.** `exporter.ts`, `finishOps.ts`, and the
   `Organize`/`FinishDialog`/`SignatureDialog` components are `import()`-ed /
   `React.lazy`-ed on demand so pdf-lib stays out of the initial bundle. **Keep

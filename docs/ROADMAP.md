@@ -96,7 +96,7 @@ Read only the section a package points at, not the whole folder.
     - The ⋯ menu's section headers (large, tracked uppercase) are louder than its items, and the menu runs past the window (FILE is cut off). Quiet the labels; fit the menu to the window.
     - Inspector: uppercase labels, mixed alignment, a centred floating "Reset style", a bold number inside "Size 24". One rhythm for label / control rows.
     - Phone: the Download button is taller than its neighbours.
-  - [ ] **10c. Thumbnails and Organise.**
+  - [x] **10c. Thumbnails and Organise.** Guarded by the `paper` spec. (Built: the grey was a CSS rule run together with its neighbour in package 2, which dimmed every thumbnail and, with "Dim pages" on, blanked the pages themselves; both fixed. A picked page's mark is now a tick, not a plus.)
     - Thumbnails show grey paper (sidebar and Organise), which reads as disabled. White paper on the tinted surface, as on the canvas.
     - Organise puts four controls under every page; with 150 pages it is a field of icons. Show them for the page under the pointer or picked; keep the number.
   - [ ] **10d. Dialogs and focus.**
