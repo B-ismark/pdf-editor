@@ -327,6 +327,37 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     The input is a `combobox` whose `aria-activedescendant` names the active
     row; headings are `aria-hidden` (each group is labelled by its heading).
 
+- **The welcome (10e).** A greeting, not a form field: no dashed box at rest
+  (that is how an upload field looks), the privacy promise as the headline
+  ("Your PDFs stay on this device", the `on_device` icon), one short line, the
+  button. **Few words**: how to use it is shown, not written.
+  - The drag hint ("or drag & drop files here", which a phone was told too) is
+    gone. The handlers sit on the welcome's whole `.app` (the app bar too, as
+    in the editor), and while a drag *carrying files* is over it a solid
+    "Drop to open" surface covers the window (`position: fixed`, so a scrolled
+    welcome doesn't leave it hanging off the top). A dragged text selection
+    shows nothing. `dragleave` into one of its own children isn't leaving
+    (checked with `relatedTarget`), or the surface flickered.
+  - The button says "Choose PDF or photos": that line was the only place
+    starting a document from pictures was mentioned. Its icon is `open_file`
+    (a folder), not the upload arrow — under "No uploads" that contradicted the
+    headline.
+  - The restore offer and the welcome are one centred group
+    (`align-content: center`); the column is `minmax(0, 1fr)` so the offer's
+    min-content can't widen it past a phone (it scrolled sideways, clipping the
+    headline). Its three buttons are one group
+    (`.restore-banner__actions`) that moves below the text whole on a phone,
+    never Restore beside the text and the other two under it (at 320 px that
+    takes the welcome's padding down to 16 px: the three need 245 px). A list
+    or a long name, cut short, carries the full names as a tooltip.
+  - While a dialog is open (the password prompt from a first drop), a file
+    over the window gets `dropEffect = "none"` and no surface, in the welcome
+    and the editor alike: `openFiles` would refuse it behind the scrim. The
+    dragover is still cancelled, or the browser would open the file itself.
+  - The visible loading and error lines are `aria-hidden`; persistent `sr-only`
+    `role="status"` / `role="alert"` regions announce them, as in the editor —
+    a region that mounts with its text already in it often isn't read out.
+  - Lines use `text-wrap: balance`, so none ends on one word.
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is
   794px, centred, with margin — not stretched to the window. Below that it

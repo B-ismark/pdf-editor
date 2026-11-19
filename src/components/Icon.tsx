@@ -41,6 +41,7 @@ import {
   Highlighter,
   FileClock,
   FileLock,
+  FolderOpen,
   Image as ImageIcon,
   Images,
   LayoutGrid,
@@ -70,6 +71,7 @@ import {
   TextSearch,
   Search,
   SendToBack,
+  ShieldCheck,
   Shrink,
   Signature,
   SlidersHorizontal,
@@ -171,6 +173,8 @@ const MAP: Record<string, LucideIcon> = {
 
   // ---- files in & out ----
   upload_file: Upload,
+  /** Open a file from this device — not an upload: nothing leaves it. */
+  open_file: FolderOpen,
   /** The exported PDF — the primary output. */
   download: Download,
   /** A plain-text sidecar, not the PDF. */
@@ -221,6 +225,8 @@ const MAP: Record<string, LucideIcon> = {
   app_update: CircleFadingArrowUp,
   /** A part of the app couldn't be fetched because the connection failed. */
   offline: WifiOff,
+  /** The privacy promise: what you open stays on this device. */
+  on_device: ShieldCheck,
 
   // ---- chrome ----
   more_vert: MoreVertical,

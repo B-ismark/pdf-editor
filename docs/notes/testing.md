@@ -99,6 +99,18 @@ type-checking can't see, and each exists because it broke once:
   with certificate, and tapping the backdrop doesn't press what it covered (and a swipe there doesn't eat the next tap); a backdrop click returns focus to the opener; the arrows
   keep the active row with the pointer resting over the list; "Discard &
   close" leaves focus on the tab in front (slice 10d).
+- `welcome.spec.ts` — the first screen leads with the privacy promise as its
+  headline, in at most 14 words, with no box round it at rest; a file dragged
+  over the window (the app bar included) shows a drop surface covering it that
+  stays while the drag crosses the welcome's own text, and dropping opens it;
+  dragged text shows nothing; the button names photos and isn't the upload
+  arrow; on a phone nothing mentions dragging, no line ends on one word, and
+  the restore offer fits without sideways scroll, its buttons on one row; a
+  file over the window while a dialog is open is offered no drop, on the
+  welcome and over an open document (whose drop veil it also covers); the
+  loading and error live regions are in the page before anything happens, and
+  the visible line isn't read twice; at 320 px the restore buttons still share
+  a row (slice 10e).
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

@@ -193,7 +193,8 @@ test.describe("pictures become a PDF", () => {
     const fake = join(dir, "fake.jpg");
     writeFileSync(fake, Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00]), Buffer.from("not really")]));
     await page.setInputFiles("input[type=file]", fake);
-    await expect(page.getByText(/"fake\.jpg" isn't a JPEG or PNG picture this can read/)).toBeVisible();
+    // The visible line; a hidden live region announces the same words.
+    await expect(page.locator(".dropzone__err")).toHaveText(/"fake\.jpg" isn't a JPEG or PNG picture this can read/);
   });
 });
 
