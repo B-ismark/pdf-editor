@@ -184,17 +184,23 @@ test("a cut-short file name shows whole on hover; one that fits gets no tooltip"
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
   const sample = (await fixtures()).sample;
-  const hover = async (name: string) => {
+  const files = page.locator(".restore-banner__files");
+  const hover = async (name: string, width?: number) => {
     await seedStore(page, [["doc:a", docRecord("a", name, 0)]], [["bytes:a", sample]]);
     await page.reload();
+    // Where a short name is cut depends on the font; narrow the line to make
+    // it so on any machine.
+    if (width) await page.addStyleTag({ content: `.restore-banner__files { max-width: ${width}px }` });
     await page.mouse.move(0, 0);
-    await page.locator(".restore-banner__files").hover();
+    await files.hover();
     await page.waitForTimeout(900);
   };
-  // Short in characters, wide in letters: cut on a desktop banner.
-  await hover("WWWWWWWWWWWWWWWWWWWW.pdf");
-  await expect(page.getByRole("tooltip")).toHaveText("WWWWWWWWWWWWWWWWWWWW.pdf");
+  // Short in characters, but cut: a count of characters would say it fits.
+  await hover("WWWWWWWWWWWW.pdf", 60);
+  expect(await files.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+  await expect(page.getByRole("tooltip")).toHaveText("WWWWWWWWWWWW.pdf");
   await hover("notes.pdf");
+  expect(await files.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(false);
   await expect(page.getByRole("tooltip")).toHaveCount(0);
 });
 
