@@ -11,10 +11,9 @@ import { dragOnPage, open, openOrganise, pickSubTool, pickTool } from "./helpers
 
 const words = (s: string) => (s.match(/\S+/g) ?? []).length;
 
-/** Visible instruction notes in the Inspector (empty ones take no room). */
-async function inspectorNotes(page: Page): Promise<string[]> {
-  return page.locator("aside.inspector .props__empty:visible").allInnerTexts();
-}
+/** Every visible paragraph in the Inspector, whatever its class — so a how-to
+ * line brought back under another name still counts. */
+const inspectorProse = (page: Page) => () => page.locator("aside.inspector .props p:visible").allInnerTexts();
 
 test.describe("show, don't tell", () => {
   test.beforeEach(async ({ page }) => {
@@ -33,16 +32,17 @@ test.describe("show, don't tell", () => {
     await pickTool(page, "Select");
     await page.locator(".note").first().click({ position: { x: 4, y: 4 } });
     await expect(page.locator(".props__title")).toHaveText("Sticky note");
-    expect(await inspectorNotes(page)).toEqual([]);
+    await expect.poll(inspectorProse(page)).toEqual([]);
 
     // A link with a good address: the box on the page is the explanation.
     await pickTool(page, "Link");
     await dragOnPage(page, { x: 80, y: 420 }, { x: 280, y: 465 });
     await page.fill("#link-url", "https://example.com");
-    expect(await inspectorNotes(page)).toEqual([]);
-    // …and to a page: its tooltip on the page names the target.
+    await expect.poll(inspectorProse(page)).toEqual([]);
+    // …and to a page: its tooltip on the page names the target; the one line
+    // left is behaviour nothing on screen shows.
     await page.getByRole("radio", { name: "Page" }).click();
-    expect(await inspectorNotes(page)).toEqual([]);
+    await expect.poll(inspectorProse(page)).toEqual(["Follows the page if it moves."]);
     // A refused address still says why — errors stay words.
     await page.getByRole("radio", { name: "Web address" }).click();
     await page.fill("#link-url", "javascript:alert(1)");
@@ -67,16 +67,37 @@ test.describe("show, don't tell", () => {
     const stamp = (await page.locator(".stamp").first().boundingBox())!;
     await page.mouse.click(stamp.x + 8, stamp.y + stamp.height - 8);
     await expect(page.locator(".props__title")).toHaveText("Image");
-    expect(await inspectorNotes(page)).toEqual([]);
-    const words_ = await page.locator("aside.inspector .props").innerText();
-    expect(words(words_), words_).toBeLessThanOrEqual(4); // "Image", "Delete", chrome
+    const del = page.locator("aside.inspector .props").getByRole("button", { name: "Delete" });
+    await expect(del).toBeVisible();
+    await expect.poll(inspectorProse(page)).toEqual([]);
+    const text = await page.locator("aside.inspector .props").innerText();
+    expect(words(text), text).toBeLessThanOrEqual(2); // "Image", "Delete"
 
-    const cursor = await page
-      .locator(".rotate-zone")
-      .first()
-      .evaluate((el) => getComputedStyle(el).cursor);
+    // The rotate ring: a turning-arrow cursor (grab if the image can't be
+    // used), and one corner shows the arrow for a finger, which has no cursor.
+    const zones = page.locator(".rotate-zone");
+    const cursor = await zones.first().evaluate((el) => getComputedStyle(el).cursor);
     expect(cursor).toContain("url(");
-    expect(cursor).toMatch(/grab$/); // a fallback if the image can't be used
+    expect(cursor).toMatch(/grab$/);
+    await expect(page.locator(".rotate-zone--hint")).toHaveCount(1);
+    // The glyph must actually decode (a malformed SVG or a blocked image
+    // would leave the computed value intact and show nothing).
+    const size = await page.locator(".rotate-zone--hint").evaluate(async (el) => {
+      const bg = getComputedStyle(el).backgroundImage;
+      const url = bg.slice(bg.indexOf('"') + 1, bg.lastIndexOf('"'));
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      return img.naturalWidth;
+    });
+    expect(size).toBe(24);
+
+    // Delete from the keyboard keeps your place: focus lands on the panel
+    // that replaces it, not on the page body.
+    await del.focus();
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".stamp")).toHaveCount(0);
+    await expect(page.locator("aside.inspector .props__title")).toBeFocused();
   });
 
   test("several selected objects: a count, not a paragraph", async ({ page }) => {
@@ -105,11 +126,18 @@ test.describe("show, don't tell", () => {
     await open(page, f.sample);
 
     const doc = page.locator(".docpanel__note");
-    expect(words(await doc.innerText())).toBeLessThanOrEqual(6);
+    // The one claim the product makes, kept whole; no "everything here…".
+    expect(words(await doc.innerText())).toBeLessThanOrEqual(9);
 
     await openOrganise(page);
     const hint = page.locator(".organize__hint");
     await expect(hint).toContainText("new pages go at the end");
+    // That a page can be picked is shown on every card, not written.
+    const cards = page.locator(".pcard");
+    await expect(cards.first().locator(".pcard__check--off")).toBeVisible();
+    await cards.first().locator(".pcard__thumb").click();
+    await expect(cards.first().locator(".pcard__check--off")).toHaveCount(0);
+    await expect(cards.first().locator(".pcard__check svg")).toHaveCount(1);
     // The file's name plus where a new page lands — nothing about how to drag.
     expect(words(await hint.innerText())).toBeLessThanOrEqual(8);
     await page.keyboard.press("Escape");

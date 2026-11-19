@@ -161,7 +161,7 @@ test.describe("a link to a page", () => {
     await open(page, (await fixtures()).outlined);
     await linkOnFirstPage(page);
     await setLinkPage(page, "3");
-    await expect(page.locator("#link-page-note")).toBeEmpty();
+    await expect(page.locator("#link-page-note")).toHaveText("Follows the page if it moves.");
     await expect(page.locator(".linkbox")).toHaveAttribute("data-tip", "Page 3");
 
     // Out of range says so and changes nothing.

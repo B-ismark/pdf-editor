@@ -335,7 +335,7 @@ export function DocumentPanel({
 
       {/* The product's one real claim, somewhere calm and permanent. */}
       <p className="docpanel__note body-small">
-        Runs in this browser. Never uploaded.
+        Runs in this browser. Your file is never uploaded.
       </p>
     </div>
   );

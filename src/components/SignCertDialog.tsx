@@ -94,8 +94,8 @@ export function SignCertDialog({ onSign, onClose }: Props) {
               <input className="sigtype__input" value={org} onChange={(e) => setOrg(e.target.value)} disabled={busy} />
             </div>
             <p className="confirm__msg body-small">
-              Readers can check the file is unchanged since signing, but show a self-made
-              identity as “not verified”.
+              Your identity is made on this device. Readers can check the file is unchanged
+              since signing, but show the identity as “not verified”.
             </p>
           </>
         ) : (

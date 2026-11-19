@@ -112,11 +112,15 @@ type-checking can't see, and each exists because it broke once:
   the visible line isn't read twice; at 320 px the restore buttons still share
   a row (slice 10e).
 - `show.spec.ts` — show, don't tell (slice 10f): a selected image, note or
-  link has no visible how-to note in the Inspector (a refused link address
-  still says why); an image's panel is a working Delete and its rotate ring
-  has an image cursor with a `grab` fallback; several selected objects show a
-  count and no paragraph; Organise's line, the picture-only page hint and the
-  document panel's privacy line stay within a word budget.
+  link has no visible paragraph of any class in the Inspector beyond what it
+  must say (a link to a page: that it follows the page; a refused address
+  still says why); an image's panel is two words, its Delete works from the
+  keyboard and leaves focus on the Inspector's heading; its rotate ring has an
+  image cursor with a `grab` fallback, and one corner shows a glyph that
+  actually decodes; several selected objects show a count and no paragraph;
+  every Organise card shows an empty pick ring that fills when picked; the
+  Organise line, the picture-only hint and the privacy line stay within a
+  word budget.
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

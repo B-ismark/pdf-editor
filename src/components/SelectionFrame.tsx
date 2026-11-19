@@ -150,7 +150,7 @@ export function SelectionFrame({
         CORNERS.map((k) => (
           <div
             key={`rot-${k}`}
-            className="rotate-zone"
+            className={k === "nw" ? "rotate-zone rotate-zone--hint" : "rotate-zone"}
             style={{ left: POS[k].left, top: POS[k].top }}
             aria-label="Rotate"
             data-tip="Drag to rotate"

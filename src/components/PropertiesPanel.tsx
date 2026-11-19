@@ -106,6 +106,18 @@ export function PropertiesPanel({
               ? "Image"
               : "Properties";
 
+  // Deleting unmounts the button that had focus, which left a keyboard user on
+  // <body>. Land on the panel that takes its place (the Inspector's heading,
+  // focusable for this), so the next Tab continues from there.
+  const deleteKeepingPlace = () => {
+    const hadFocus = document.activeElement instanceof HTMLElement && !!document.activeElement.closest(".props");
+    onDelete();
+    if (!hadFocus) return;
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>("aside.inspector .props__title[tabindex]")?.focus();
+    });
+  };
+
   return (
     <div className="props">
       <div className="props__header">
@@ -123,7 +135,7 @@ export function PropertiesPanel({
           the panel offers only what the page can't: a labelled Delete. */}
       {!selection && stampSelected && (
         <div className="props__section">
-          <button className="btn btn--danger" onClick={onDelete}>
+          <button className="btn btn--danger" onClick={deleteKeepingPlace}>
             <Icon name="delete" size={16} /> Delete
           </button>
         </div>
@@ -135,7 +147,7 @@ export function PropertiesPanel({
             <span className="field__label label-medium">Fill colour</span>
             <ColorField value={redactionColor ?? "#000000"} onChange={onChangeRedactionColor} />
           </div>
-          <button className="btn btn--danger" onClick={onDelete}>
+          <button className="btn btn--danger" onClick={deleteKeepingPlace}>
             <Icon name="delete" size={16} /> Delete
           </button>
         </div>
@@ -219,7 +231,7 @@ export function PropertiesPanel({
           </p>
           </>
           )}
-          <button className="btn btn--danger" onClick={onDelete}>
+          <button className="btn btn--danger" onClick={deleteKeepingPlace}>
             <Icon name="delete" size={16} /> Delete
           </button>
         </div>
@@ -276,7 +288,7 @@ export function PropertiesPanel({
               </div>
             </div>
           )}
-          <button className="btn btn--danger" onClick={onDelete}>
+          <button className="btn btn--danger" onClick={deleteKeepingPlace}>
             <Icon name="delete" size={16} /> Delete
           </button>
         </div>
@@ -374,7 +386,7 @@ export function PropertiesPanel({
               </button>
             )}
             {selection.kind === "textbox" && (
-              <button className="btn btn--danger" onClick={onDelete}>
+              <button className="btn btn--danger" onClick={deleteKeepingPlace}>
                 <Icon name="delete" size={16} /> Delete
               </button>
             )}
@@ -458,7 +470,7 @@ function LinkPageField({ pos, count, onChange }: { pos: number | null; count: nu
           ? "The page this link went to was deleted, so the link is left out of the exported PDF. Pick another page."
           : out
             ? `Pick a page from 1 to ${count}.`
-            : null}
+            : "Follows the page if it moves."}
       </p>
     </>
   );

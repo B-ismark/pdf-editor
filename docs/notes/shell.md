@@ -367,15 +367,26 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     page as words. `.props__empty:empty` takes no room, so a note element can
     stay mounted for `aria-describedby` and its error role.
   - Rotate was the gesture only that paragraph explained, so the rotate ring
-    now has its own cursor: a turning arrow, inline as an SVG data URI (the CSP
-    allows `data:` images), black on a white halo for either theme, with
-    `grab` / `grabbing` as the fallback.
+    now has its own cursor: a turning arrow, inline as an SVG data URI
+    (`--rotate-glyph`; the CSP allows `data:` images), black on a white halo
+    for either theme, with `grab` / `grabbing` as the fallback. A cursor is no
+    help to a finger and the ring is invisible, so the top-left ring
+    (`.rotate-zone--hint`, away from the delete badge) also shows the arrow,
+    small, in its outer quarter — off the box, clear of the resize handle.
+  - Delete in the Inspector moves focus to the panel that replaces it (its
+    heading), not to `<body>` — the button that had it is gone.
   - Several selected objects: the count as the heading, no paragraph — the bar
     above the page shows the actions.
-  - Organise's line is the file name and where an added page lands (the one
-    thing the grid can't show); Split's disabled-option hints, the picture-only
+  - Organise's line is the file name and where an added page lands; that a
+    page can be picked is shown instead by an empty pick ring on every card
+    (`.pcard__check--off`), filled with a check once picked. Split's disabled-option hints, the picture-only
     page hint, the document panel's privacy line, the session-copy toasts and
-    the Protect / Sign / Patterns intros are cut to their consequence.
+    the Protect / Sign / Patterns intros are cut to their consequence — which
+    keeps the privacy facts (never uploaded, made on this device), where a
+    setting lives, what stays unchanged, and a toast says what *will* happen,
+    not that a save already did (a clean or password-opened tab isn't saved).
+    A link to a page keeps "Follows the page if it moves": behaviour, not a
+    how-to.
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is
   794px, centred, with margin — not stretched to the window. Below that it

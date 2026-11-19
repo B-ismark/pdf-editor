@@ -496,9 +496,11 @@ export function Organize({
                 aria-label={`Page ${i + 1}`}
               >
                 <Thumbnail bytes={sources.get(entry.sourceKey)!} index={entry.index} rotation={entry.rotation} crop={entry.crop} />
-                {selected.has(i) && (
-                  <span className="pcard__check"><Icon name="check" size={15} /></span>
-                )}
+                {/* Every card carries its pick ring, empty until picked: that a
+                    page can be picked is shown, not written in the hint. */}
+                <span className={`pcard__check${selected.has(i) ? "" : " pcard__check--off"}`} aria-hidden="true">
+                  {selected.has(i) && <Icon name="check" size={15} />}
+                </span>
               </button>
               <div className="pcard__no label-medium">{i + 1}</div>
               <div className="pcard__actions">
