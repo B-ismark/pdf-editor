@@ -285,8 +285,9 @@ test.describe("editing a turned page", () => {
     await page.getByRole("button", { name: "Show pages" }).click();
     const slot = page.locator(".pagenav__thumb").first();
     await expect(slot.locator("canvas")).toBeVisible({ timeout: 15_000 });
-    const s = (await slot.boundingBox())!;
     await expect.poll(async () => {
+      // Both read together: the rail slides in as it opens.
+      const s = (await slot.boundingBox())!;
       const c = (await slot.locator("canvas").boundingBox())!;
       return c.x >= s.x - 1 && c.y >= s.y - 1 && c.x + c.width <= s.x + s.width + 1 && c.y + c.height <= s.y + s.height + 1;
     }).toBe(true);
