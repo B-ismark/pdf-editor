@@ -272,7 +272,7 @@ test.describe("background text", () => {
       expect(downloads).toBe(1);
     });
 
-    test("a page whose text won't read stops the download instead of skipping the whiteout check", async ({ page }) => {
+    test("a page whose text won't read leaves nothing waiting, and a whiteout on it still warns", async ({ page }) => {
       const path = await threePages();
       await failText(page, 2);
       await page.goto("/");
@@ -280,12 +280,19 @@ test.describe("background text", () => {
       await seedStore(page, [["doc:a", docRecord("a", "three.pdf", 0, { doc: { ...EMPTY, redactions: [cover] } })]], [["bytes:a", path]]);
       await restoreSeeded(page);
       await painted(page);
+      // Not stuck reading it: the Inspector and Find settle.
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".docpanel")).not.toContainText("Reading text…");
+      await page.keyboard.press("Control+f");
+      await page.getByRole("textbox", { name: "Find in document" }).fill("needle");
+      await expect(page.locator(".findbar__count")).toHaveText("1/1");
+      await expect(page.locator(".findbar__redact")).toBeEnabled();
+      await page.keyboard.press("Escape");
+      // Not "no text on page three, so the whiteout hides nothing": warned.
       let downloaded = false;
       page.on("download", () => (downloaded = true));
       await page.click(".appbar__download");
-      // Not "no text on page three, so the whiteout hides nothing".
-      await expect(page.locator(".snackbar__msg")).toHaveText("Couldn't read the document's text. Please try again.");
-      await page.waitForTimeout(1_000);
+      await expect(page.getByRole("alertdialog")).toContainText("page 3");
       expect(downloaded).toBe(false);
     });
 

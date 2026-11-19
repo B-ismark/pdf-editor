@@ -78,10 +78,12 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     the whiteout check (`findUnsafeCovers` throws on a pending page, so a
     missed caller fails loudly), copy/export text, OCR, Compare, Download all.
     Reading a half-read document directly treats unread pages as having no text.
-  - **A page that won't read stays unread**, in the walk and in
-    `completeText` (which rejects): calling it "no text" would let a whiteout
-    over it pass the check. A download that waits on the text is busy from the
-    press, takes its saved mark at the press, and stops if the editor unmounts.
+  - **A page that won't read is `textUnreadable`**, in the walk and in
+    `completeText`: no fragments, not pending (so nothing waits on it for good,
+    and one bad page doesn't stop the document's export), and the whiteout
+    check treats any cover on it as over live text. A download that waits on
+    the text is busy from the press, takes its saved mark at the press, and
+    stops if the editor unmounts.
   - **No text *yet* isn't no text.** The Inspector says "Reading text…", the
     picture-page hint skips pending pages, and an edit restored onto an unread
     page counts as a change until its fragment can be compared.

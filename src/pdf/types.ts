@@ -144,6 +144,10 @@ export interface PageData {
    * and reads its text in the background (`textIndex.ts`); anything that needs
    * the whole document's text goes through `completeText` first. */
   textPending?: true;
+  /** Its text couldn't be read (pdf.js failed on it). It shows as having no
+   * text, but anything that needs to know there is none — the whiteout check
+   * — can't assume so. */
+  textUnreadable?: true;
   /** True once OCR has read this page (whether or not it found words), so the
    * Inspector stops offering to read it again. */
   ocrRead?: boolean;

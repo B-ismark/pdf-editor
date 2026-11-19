@@ -30,6 +30,9 @@ export function looksLikePdf(bytes: ArrayBuffer): boolean {
 export interface PageText {
   fragments: TextFragment[];
   fields: FormField[];
+  /** pdf.js couldn't read this page's text: it has none we know of — which is
+   * not the same as knowing it has none. */
+  unreadable?: true;
 }
 
 /**

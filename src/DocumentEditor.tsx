@@ -2551,17 +2551,21 @@ export const DocumentEditor = memo(function DocumentEditor({
           try {
             full = await completeText(pdf);
           } catch {
-            if (!alive.current) return;
-            setStatus("error");
-            setMessage("Couldn't read the document's text. Please try again.");
+            setStatus(alive.current ? "error" : "ready");
+            setMessage(alive.current ? "Couldn't read the document's text. Please try again." : "");
             return;
           }
-          if (!alive.current) return;
+          if (!alive.current) {
+            setStatus("ready");
+            setMessage("");
+            return;
+          }
+          // Leaving the busy state the wait set; the export sets its own.
+          setStatus("ready");
+          setMessage("");
         }
         const warn = findUnsafeCovers(full, redactions, planned);
         if (warn.count > 0) {
-          setStatus("ready");
-          setMessage("");
           setCoverWarn(warn);
           return;
         }

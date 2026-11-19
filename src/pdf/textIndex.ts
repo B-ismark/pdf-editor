@@ -92,11 +92,11 @@ export function indexText(pdf: LoadedPdf, onBatch: (read: Map<number, PageText>,
         } catch {
           // The parse was released (the tab closed or was replaced): stop.
           if (ix.stopped) return;
-          // A page that won't read stays unread — not "no text", which would
-          // let the whiteout check pass over whatever it really holds. An
-          // export asks for it again (`completeText`), and says so if it
-          // still fails.
-          continue;
+          // A page that won't read is marked so — not as "no text", which
+          // would let the whiteout check pass over whatever it really holds,
+          // and not left pending, which would leave Find and the Inspector
+          // waiting on it for good.
+          text = UNREADABLE;
         }
         batch.set(p, text);
         // The first page read goes straight over (it's the one in view); the
@@ -138,6 +138,8 @@ export function stopIndexing(bytes: ArrayBuffer): void {
  * has its text is left alone. Fragments a page gained while it waited (OCR's)
  * are kept after the read ones.
  */
+const UNREADABLE: PageText = { fragments: [], fields: [], unreadable: true };
+
 export function fillPages(pages: PageData[], read: Map<number, PageText>): PageData[] {
   let changed = false;
   const next = pages.map((pg) => {
@@ -146,7 +148,12 @@ export function fillPages(pages: PageData[], read: Map<number, PageText>): PageD
     changed = true;
     // eslint-disable-next-line @typescript-eslint/no-unused-vars -- dropped on purpose
     const { textPending, ...rest } = pg;
-    return { ...rest, fragments: [...text.fragments, ...pg.fragments], fields: text.fields };
+    return {
+      ...rest,
+      fragments: [...text.fragments, ...pg.fragments],
+      fields: text.fields,
+      ...(text.unreadable ? { textUnreadable: true as const } : {}),
+    };
   });
   return changed ? next : pages;
 }
@@ -170,9 +177,8 @@ export async function completeText(pdf: LoadedPdf): Promise<LoadedPdf> {
   const read = new Map<number, PageText>();
   await Promise.all(
     pending.map(async (p) => {
-      // A page that won't read fails the whole call: whatever reads the
-      // document must not take an unread page for one with no text.
-      read.set(p.pageIndex, await textOf(pdf.bytes, ix, p.pageIndex));
+      // As the walk marks it: one bad page doesn't stop the document.
+      read.set(p.pageIndex, await textOf(pdf.bytes, ix, p.pageIndex).catch(() => UNREADABLE));
     }),
   );
   return { ...pdf, pages: fillPages(pdf.pages, read) };
