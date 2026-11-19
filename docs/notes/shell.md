@@ -327,6 +327,15 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     The input is a `combobox` whose `aria-activedescendant` names the active
     row; headings are `aria-hidden` (each group is labelled by its heading).
 
+- **The welcome (10e).** A greeting, not a form field: no dashed box at rest
+  (that is how an upload field looks), the privacy promise as the headline
+  ("Your PDFs stay on this device", the `on_device` icon), one short line, the
+  button. **Few words**: how to use it is shown, not written. The drag hint
+  ("or drag & drop files here", which a phone was told too) is gone — the
+  whole window takes a drop and shows a solid drop surface while a file is
+  over it. `dragleave` into one of the welcome's own children isn't leaving
+  (checked with `relatedTarget`), or the surface flickered. Headline and
+  lines use `text-wrap: balance`, so none ends on one word.
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is
   794px, centred, with margin — not stretched to the window. Below that it

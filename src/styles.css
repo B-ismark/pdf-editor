@@ -1458,47 +1458,59 @@ body {
 }
 
 /* ============ Dropzone (empty state) ============ */
+/* A welcome, not a form field: no box at rest, and few words. The whole
+   window takes a drop and shows it only while a file is over it — the outline
+   says "drop here", so no line of text has to (one said "drag & drop" on a
+   phone, which can't). */
 .dropzone {
   flex: 1;
+  position: relative;
   display: grid;
   place-items: center;
   padding: 24px;
   overflow: auto;
-}
-.dropzone--active .dropzone__card {
-  border-color: var(--primary);
-  background: var(--primary-container);
 }
 .dropzone__card {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 10px;
-  max-width: 440px;
+  max-width: 460px;
   width: 100%;
-  padding: 40px 28px;
+  padding: 24px 8px;
   text-align: center;
-  border: 2px dashed var(--outline-variant);
-  border-radius: var(--radius-xl);
-  background: var(--surface-container-low);
-  transition: border-color var(--dur-short4) var(--ease-standard),
-    background var(--dur-short4) var(--ease-standard);
 }
 .dropzone__icon {
   display: grid;
   place-items: center;
-  width: 60px;
-  height: 60px;
-  border-radius: var(--radius-lg);
+  width: 72px;
+  height: 72px;
+  border-radius: var(--radius-xl);
   background: var(--primary-container);
   color: var(--on-primary-container);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
-.dropzone__card h1 { margin: 0; color: var(--on-surface); }
-.dropzone__sub { color: var(--on-surface-variant); margin: 0 0 8px; }
-.dropzone__hint { color: var(--on-surface-variant); margin: 4px 0 0; }
+.dropzone__card h1 { margin: 0; color: var(--on-surface); text-wrap: balance; }
+.dropzone__sub { color: var(--on-surface-variant); margin: 0 0 10px; text-wrap: balance; }
 .dropzone__note { color: var(--primary); font-weight: 600; }
-.dropzone__err { color: var(--error); font-weight: 600; }
+.dropzone__err { color: var(--error); font-weight: 600; text-wrap: balance; }
+.dropzone__drop {
+  position: absolute;
+  inset: 16px;
+  z-index: 1;
+  display: grid;
+  place-content: center;
+  grid-auto-flow: column;
+  align-items: center;
+  gap: 8px;
+  border: 2px dashed var(--primary);
+  border-radius: var(--radius-xl);
+  background: var(--primary-container);
+  color: var(--on-primary-container);
+  font: 500 1rem/1.5 var(--font-plain);
+  letter-spacing: 0.15px;
+  pointer-events: none;
+}
 
 /* ============ Editable fragments ============ */
 .fragment {

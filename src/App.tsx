@@ -1071,13 +1071,21 @@ export function App() {
             e.preventDefault();
             setDragging(true);
           }}
-          onDragLeave={() => setDragging(false)}
+          onDragLeave={(e) => {
+            // Leaving for one of its own children isn't leaving.
+            if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragging(false);
+          }}
           onDrop={(e) => {
             e.preventDefault();
             setDragging(false);
             void openFiles(e.dataTransfer.files);
           }}
         >
+          {dragging && (
+            <div className="dropzone__drop" aria-hidden="true">
+              <Icon name="upload_file" size={22} /> Drop to open
+            </div>
+          )}
           {restorable && (
             <div className="restore-banner">
               <span className="restore-banner__icon"><Icon name="restore" size={22} /></span>
@@ -1099,17 +1107,13 @@ export function App() {
           )}
           <div className="dropzone__card">
             <div className="dropzone__icon">
-              <Icon name="picture_as_pdf" size={30} />
+              <Icon name="on_device" size={30} />
             </div>
-            <h1 className="headline-small">Open a PDF to start editing</h1>
-            <p className="body-medium dropzone__sub">
-              Edit text, add notes, redact, and export — all on your device.
-              Nothing is uploaded.
-            </p>
+            <h1 className="headline-small">Your PDFs stay on this device</h1>
+            <p className="body-medium dropzone__sub">No uploads. No account.</p>
             <button className="btn btn--filled btn--lg" onClick={openAnother}>
               <Icon name="upload_file" size={18} /> Choose PDF
             </button>
-            <p className="body-small dropzone__hint">or drag &amp; drop files here · several open as tabs · photos (JPEG, PNG) become a PDF</p>
             {status === "loading" && (
               <p className="body-small dropzone__note">
                 <span className="spinner spinner--sm" aria-hidden="true" /> {message}
