@@ -358,7 +358,8 @@ type-checking can't see, and each exists because it broke once:
   editor painted new ones; typing before and after a switch is two undo steps;
   coming back by keyboard leaves focus on the strip, not in a text box that
   was being typed into; on a phone, Back's history entries belong to the
-  document in front;
+  document in front; and a window moved to a 2× screen while its document
+  waited repaints that document sharp on return (the paint key has the density);
   the document behind is off the page entirely (one tab strip, none of its
   canvases or text boxes findable); Ctrl+Z in front never reaches it; and a
   window resized while it waited fits it on return. The first failed on the
