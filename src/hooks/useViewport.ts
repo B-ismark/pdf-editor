@@ -36,7 +36,7 @@ export interface Fit {
   pageWidthPts: number;
 }
 
-export function useViewport(seed?: Fit | null) {
+export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
   // The scroll container is rendered conditionally (only once a PDF is open),
   // so it mounts *after* this hook first runs. A callback ref stores the node
   // in state the moment it attaches, which lets the effects below (resize
@@ -70,14 +70,28 @@ export function useViewport(seed?: Fit | null) {
     const node = elRef.current;
     if (node && node.clientWidth > 0) setFitWidth(node.clientWidth);
   }, []);
-  useEffect(() => {
-    if (!el) return;
-    if (!seeded.current) measure();
-    window.addEventListener("resize", measure);
-    return () => window.removeEventListener("resize", measure);
-  }, [el, measure]);
   // Re-fit when a new document sets its page width (panel is closed then).
   const fittedTo = useRef(seed?.pageWidthPts ?? null);
+  /** The surface this effect last ran on: running again on the same one means
+   * the document was hidden (kept warm behind another, see `App.tsx`) and is
+   * back. It then takes the workspace's fit, as a fresh editor is seeded with
+   * it — the window may have been resized meanwhile, or the panel hidden, and
+   * the document in front set the fit for both. */
+  const ranOn = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!el) return;
+    const back = ranOn.current === el ? carried?.() : null;
+    ranOn.current = el;
+    if (back && back.fitWidth > 0) {
+      seeded.current = true;
+      fittedTo.current = back.pageWidthPts;
+      setFitWidth(back.fitWidth);
+    } else if (!seeded.current) measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+    // `carried` is read when the effect runs, not tracked.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [el, measure]);
   useEffect(() => {
     if (seeded.current && pageWidthPts === fittedTo.current) return;
     seeded.current = false;

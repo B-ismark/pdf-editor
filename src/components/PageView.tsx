@@ -40,6 +40,7 @@ import { placeCaretEnd } from "../caret";
 import type { PreparedStamp } from "../pdf/imageStamp";
 import { placeAt, placedSize } from "../pdf/placement";
 import { FormFieldLayer } from "./FormFieldLayer";
+import { frontRoot } from "../frontRoot";
 
 /** Annotation spec minus the fields the App assigns (id, pageIndex). */
 export type AnnotSpec = Omit<Annotation, "id" | "pageIndex">;
@@ -1106,7 +1107,7 @@ function fragmentArrowNav(ev: React.KeyboardEvent, select?: (id: string) => void
   const back = ev.key === "ArrowUp" || (ev.key === "ArrowLeft" && (caretless || caretAt(el, "start")));
   const fwd = ev.key === "ArrowDown" || (ev.key === "ArrowRight" && (caretless || caretAt(el, "end")));
   if (!back && !fwd) return;
-  const all = Array.from(document.querySelectorAll<HTMLElement>(".page .fragment[tabindex]"));
+  const all = Array.from(frontRoot().querySelectorAll<HTMLElement>(".page .fragment[tabindex]"));
   const next = all[all.indexOf(el) + (fwd ? 1 : -1)];
   ev.preventDefault();
   ev.stopPropagation();

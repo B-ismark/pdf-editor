@@ -111,6 +111,7 @@ import type {
   Tool,
 } from "./pdf/types";
 import { IS_MAC } from "./platform";
+import { frontRoot } from "./frontRoot";
 
 type NavKey = Tool | "sign";
 
@@ -490,8 +491,8 @@ export const DocumentEditor = memo(function DocumentEditor({
   /** The shown position of the page most in view: what a command about "this
    * page" means. */
   const pageInView = (): number => {
-    const scroller = document.querySelector<HTMLElement>(".viewer__scroll");
-    const els = [...document.querySelectorAll<HTMLElement>(".page[data-page-pos]")];
+    const scroller = frontRoot().querySelector<HTMLElement>(".viewer__scroll");
+    const els = [...frontRoot().querySelectorAll<HTMLElement>(".page[data-page-pos]")];
     if (!scroller || els.length === 0) return 0;
     const view = scroller.getBoundingClientRect();
     let best = 0;
@@ -605,7 +606,7 @@ export const DocumentEditor = memo(function DocumentEditor({
   const exportListRef = useRef<HTMLDivElement>(null);
   const nextId = (prefix: string) => `${prefix}-${idCounter.current++}`;
 
-  const vp = useViewport(fitRef.current);
+  const vp = useViewport(fitRef.current, () => fitRef.current);
   const { fitWidth, pageWidthPts } = vp.fit;
   // A form box or radio keeps focus after a click, and keys go to it (Space
   // ticks, arrows move the choice). Selecting something else on the page
@@ -829,8 +830,8 @@ export const DocumentEditor = memo(function DocumentEditor({
       return;
     }
     if (activeMatch.id === scrolledTo.current) return;
-    const scroller = document.querySelector<HTMLElement>(".viewer__scroll");
-    const pageEl = document.querySelector<HTMLElement>(
+    const scroller = frontRoot().querySelector<HTMLElement>(".viewer__scroll");
+    const pageEl = frontRoot().querySelector<HTMLElement>(
       `[data-page-index="${activeMatch.pageIndex}"]`,
     );
     const page = shownBySource.get(activeMatch.pageIndex);
@@ -880,7 +881,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     // usable beside it): just go back to it. Starting over would quietly
     // re-tick every hit the person had chosen to keep.
     if (patternOpenRef.current) {
-      document.querySelector<HTMLElement>(".patterns input")?.focus();
+      frontRoot().querySelector<HTMLElement>(".patterns input")?.focus();
       return;
     }
     const active = document.activeElement;
@@ -905,7 +906,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       if (lost) {
         const back = patternOpener.current?.isConnected
           ? patternOpener.current
-          : document.querySelector<HTMLElement>('[aria-label="More actions"]');
+          : frontRoot().querySelector<HTMLElement>('[aria-label="More actions"]');
         back?.focus();
       }
       patternOpener.current = null;
@@ -1708,10 +1709,10 @@ export const DocumentEditor = memo(function DocumentEditor({
   useEffect(() => {
     if (!sheetSelId) return;
     const raf = requestAnimationFrame(() => {
-      const scroller = document.querySelector<HTMLElement>(".viewer__scroll");
-      const el = document.querySelector<HTMLElement>(`[data-el-id="${CSS.escape(sheetSelId)}"]`);
+      const scroller = frontRoot().querySelector<HTMLElement>(".viewer__scroll");
+      const el = frontRoot().querySelector<HTMLElement>(`[data-el-id="${CSS.escape(sheetSelId)}"]`);
       if (!scroller || !el) return;
-      const sheet = document.querySelector<HTMLElement>(".panel");
+      const sheet = frontRoot().querySelector<HTMLElement>(".panel");
       const scRect = scroller.getBoundingClientRect();
       // Sheet is bottom-anchored: derive its top from its height so the number
       // is right even mid slide-up (its transformed rect would read too low).
@@ -3134,8 +3135,8 @@ export const DocumentEditor = memo(function DocumentEditor({
           // The active tool, else the first: one selector list would return
           // whichever comes first in the DOM, which is always "Select".
           (
-            document.querySelector<HTMLElement>(".tooldock .tooldock__btn--on") ??
-            document.querySelector<HTMLElement>(".tooldock .tooldock__btn")
+            frontRoot().querySelector<HTMLElement>(".tooldock .tooldock__btn--on") ??
+            frontRoot().querySelector<HTMLElement>(".tooldock .tooldock__btn")
           )?.focus()
         }
       >

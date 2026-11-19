@@ -3096,3 +3096,8 @@ body {
   }
 }
 .compare .segmented__btn { white-space: nowrap; }
+
+/* One per mounted document (App.tsx): no box of its own, so the editor's parts
+   lay out in the shell as if it weren't there. A document kept warm behind the
+   one in front is hidden inside it by <Activity>. */
+.editor { display: contents; }
