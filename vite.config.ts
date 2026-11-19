@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
 
@@ -224,6 +225,10 @@ const SET_FONT_KEEPS_RUN = /if\((\w+)\.font&&(\w+)===\1\.fontName&&(\w+)===\1\.f
  * item: an edit of one word took the whole line with it, and a search hit
  * that spans runs (a phone number written as two) lost its runs. The `Tf` case
  * ends the item again; pdf.js 5's own check (on the next glyph) stays.
+ *
+ * Exactly pdf.js 4's rule, limits included: a `Tf` that re-sets the font and
+ * size already in force (no `Q` between) still doesn't split, and one issued
+ * mid-word after a `Q` splits the word into two fragments.
  */
 function splitRunsAtSetFont(code: string): string {
   return replaceOnce(code, SET_FONT_KEEPS_RUN, "getTextContent setFont", (_m, state, name, size) =>
@@ -286,7 +291,7 @@ function pdfWorkerPlugin(): Plugin {
 }
 
 /** @cantoo/pdf-lib's ES-module entry (its exports map hides the path). */
-const PDF_LIB_ESM = new URL("./node_modules/@cantoo/pdf-lib/es/index.js", import.meta.url).pathname;
+const PDF_LIB_ESM = fileURLToPath(new URL("./node_modules/@cantoo/pdf-lib/es/index.js", import.meta.url));
 
 export default defineConfig({
   plugins: [react(), cspPlugin(), pdfWorkerPlugin(), pdfjsWasmPlugin()],
