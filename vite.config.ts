@@ -208,7 +208,31 @@ function replaceOnce(code: string, re: RegExp, what: string, fn: (...m: string[]
  * `hasGlyph` rejects before `adjustMapping` ever sees it. */
 const CID_PREFILTER = /Max size of CID is 65,535"\);let (\w+)=-1;([^;]*);\1>=0&&\1<(\w+)&&hasGlyph\(\1\)&&\((\w+)\[(\w+)\]=\1\)/g;
 
+/** `getTextContent`'s `Tf` case, which returns early when the font and size
+ * are those already set and otherwise takes the new ones (`textState` is the
+ * 1st group, then the name and the size). */
+const SET_FONT_KEEPS_RUN = /if\((\w+)\.font&&(\w+)===\1\.fontName&&(\w+)===\1\.fontSize\)break;\1\.fontName=\2;/g;
+
+/**
+ * A run of text is a fragment of its own, as pdf.js 4 had it.
+ *
+ * pdf.js 4 ended the text item at every `Tf` that set a font other than the
+ * one in its state, and Word (like pdf-lib) writes each run as its own text
+ * object, inside `q … Q`, with its own `Tf`: so each run came out as an item,
+ * and this app edits a document run by run. pdf.js 5 ends an item only when
+ * the font really changes, so the runs of a line in one font join into one
+ * item: an edit of one word took the whole line with it, and a search hit
+ * that spans runs (a phone number written as two) lost its runs. The `Tf` case
+ * ends the item again; pdf.js 5's own check (on the next glyph) stays.
+ */
+function splitRunsAtSetFont(code: string): string {
+  return replaceOnce(code, SET_FONT_KEEPS_RUN, "getTextContent setFont", (_m, state, name, size) =>
+    `if(${state}.font&&${name}===${state}.fontName&&${size}===${state}.fontSize)break;flushTextContentItem();${state}.fontName=${name};`,
+  );
+}
+
 function patchPdfWorker(code: string): string {
+  code = splitRunsAtSetFont(code);
   // Composite fonts (Word's usual Identity-H): keep outline-less glyphs in the
   // table; `adjustMapping` already skips them for drawing (`hasGlyph` there),
   // and now gives a space its Unicode entry.
