@@ -233,6 +233,33 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   page area is wide enough, below it when not, centred on phones where the
   pill steps aside.
 
+- **Chrome hierarchy (10b).** Frame, heading, control — each in its own voice.
+  - The app bar drops its bottom rule when the tab strip follows it
+    (`.appbar:has(+ .doctabs)`): one surface, the tabs its lower row. The
+    strip's own rule is the one the active tab breaks.
+  - `.label-small` exists now (theme.css). The ⋯ menu's group labels named it
+    before it did, so they fell back to body size in capitals — louder than the
+    items. Labels are sentence case, smaller and lighter than rows.
+  - `.menu__list` scroll shades: two `local` covers in the menu's own colour
+    over two `scroll` shades. The covers travel with the content and hide the
+    shade at whichever end you're at. Its `background` is that whole stack —
+    keep the colour as its last layer if you change it.
+  - Inspector rows: `.props .field` is a grid, label in a 76px column, the
+    control starting beside it — the same column the Document facts use. Wide
+    controls (segmented, size row, slider, inputs) stretch; the rest sit at
+    the start. A value in a label (`<b>`) takes the label's weight. Quiet
+    actions (`.btn--text` in `.props__row-actions`) sit in the control column.
+    `.props` is a size container: at 264px of content or less (the 288px
+    Inspector of a 600–839px window; the 320px one stays above it even with a
+    15px scrollbar, which headless tests hide — see `hierarchy.spec`) labels go above their controls, which take the
+    whole width — beside them, the slider was 75px and "Web address" wrapped.
+    `.props .slider` zeroes the range input's own 2px margin.
+  - The scroll shade's colour is `--scroll-shade` (theme.css), much stronger
+    in dark: 16% black on a dark surface was a step of a few levels.
+  - Phone Download: a 44px hit area painting a 40px chip (`background-clip:
+    content-box`), the size of ⋯ beside it. Not 48px: at 360px the bar's row
+    is exactly full (see the phone rule).
+
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is
   794px, centred, with margin — not stretched to the window. Below that it

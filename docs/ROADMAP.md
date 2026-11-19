@@ -91,7 +91,7 @@ Read only the section a package points at, not the whole folder.
     - Opening the Pages sidebar leaves the page clipped under the Inspector. Refit when the room for the page changes. (Built: the Inspector refits too below the cap; clipping was judged worse than the rescale.)
     - The zoom pill sits on the page's top-right corner, and on a phone it covers the title. Give it a place of its own.
     - The "150 pages · 3750 text fragments" toast is engineer language and sits on the content. Plain words ("Ready · 150 pages"), placed clear of the page, gone quickly.
-  - [ ] **10b. Chrome hierarchy.**
+  - [x] **10b. Chrome hierarchy.** Guarded by the `hierarchy` spec; notes in `docs/notes/shell.md` (Chrome hierarchy). (Built: the menu already fit the window, capped and scrolling; what was missing was any sign that it scrolled, so it now shades the edge with more beyond.)
     - App bar and tab strip read as two stacked tinted bars. Make them one surface, with the tabs as its lower row.
     - The ⋯ menu's section headers (large, tracked uppercase) are louder than its items, and the menu runs past the window (FILE is cut off). Quiet the labels; fit the menu to the window.
     - Inspector: uppercase labels, mixed alignment, a centred floating "Reset style", a bold number inside "Size 24". One rhythm for label / control rows.
