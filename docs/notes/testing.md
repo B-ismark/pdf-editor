@@ -63,7 +63,11 @@ type-checking can't see, and each exists because it broke once:
   shades its scrolling edge; the Inspector's controls all start on one line
   beside their labels, a value in a label is in the label's weight, Reset
   style sits in the control column, and the Document panel's headings are
-  sentence case; on a phone Download's chip is the same size as ⋯ (slice 10b).
+  sentence case; on a phone Download's chip is the same size as ⋯. At a
+  700px window (the Inspector's narrowest, 288px) the size slider keeps
+  150px+, no control overruns its row and a link's "Web address" stays on one
+  line; a drawing's Width slider starts on the control line; the menu's shade
+  shows in dark; with no tab strip the app bar keeps its rule (slice 10b).
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

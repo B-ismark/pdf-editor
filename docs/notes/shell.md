@@ -249,6 +249,12 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     controls (segmented, size row, slider, inputs) stretch; the rest sit at
     the start. A value in a label (`<b>`) takes the label's weight. Quiet
     actions (`.btn--text` in `.props__row-actions`) sit in the control column.
+    `.props` is a size container: under 280px of content (the 288px Inspector
+    of a 600–839px window) labels go above their controls, which take the
+    whole width — beside them, the slider was 75px and "Web address" wrapped.
+    `.props .slider` zeroes the range input's own 2px margin.
+  - The scroll shade's colour is `--scroll-shade` (theme.css), much stronger
+    in dark: 16% black on a dark surface was a step of a few levels.
   - Phone Download: a 44px hit area painting a 40px chip (`background-clip:
     content-box`), the size of ⋯ beside it. Not 48px: at 360px the bar's row
     is exactly full (see the phone rule).

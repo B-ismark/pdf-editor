@@ -928,6 +928,18 @@ body {
 .props .field > .size-row,
 .props .field > .slider,
 .props .field > input { justify-self: stretch; }
+/* A range input brings a 2px margin of its own: stretched, it started 2px off
+   the control line and ran 2px past the row. */
+.props .slider { margin-inline: 0; }
+/* At its narrowest (288px, a window between phone and desktop) the Inspector's
+   control column was 167px: the size slider squeezed to 75px between its
+   steppers and "Web address" broke onto two lines. There, each label sits
+   above its control and the control has the whole width. */
+.props { container: props / inline-size; }
+@container props (max-width: 279px) {
+  .props .field { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
+  .props__row-actions > .btn--text { margin-left: 0; }
+}
 
 /* Segmented button */
 .segmented {
@@ -1188,8 +1200,8 @@ body {
   background:
     linear-gradient(var(--surface-container-high) 30%, transparent) top / 100% 32px no-repeat local,
     linear-gradient(transparent, var(--surface-container-high) 70%) bottom / 100% 32px no-repeat local,
-    radial-gradient(farthest-side at 50% 0, color-mix(in srgb, var(--shadow-color, #000) 16%, transparent), transparent) top / 100% 10px no-repeat scroll,
-    radial-gradient(farthest-side at 50% 100%, color-mix(in srgb, var(--shadow-color, #000) 16%, transparent), transparent) bottom / 100% 10px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 0, var(--scroll-shade), transparent) top / 100% 10px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, var(--scroll-shade), transparent) bottom / 100% 10px no-repeat scroll,
     var(--surface-container-high);
 }
 .menu__item {

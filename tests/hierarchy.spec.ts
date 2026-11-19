@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { fixtures } from "./fixtures";
-import { open, watch } from "./helpers";
+import { dragOnPage, open, pickSubTool, pickTool, watch } from "./helpers";
 
 /**
  * The chrome's hierarchy: what is the frame, what is a heading, what is a
@@ -130,5 +130,108 @@ test("on a phone, Download is the same size as its neighbours", async ({ browser
   expect(Math.abs(d.top - m.top), "on the same line").toBeLessThan(1);
   // Still a full touch target.
   expect((await page.locator(".appbar__download").boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  await ctx.close();
+});
+
+/** Each control in the Inspector's rows: where it starts, how wide it is. */
+const controls = (page: Page) =>
+  page.locator(".props .field").evaluateAll((fields) =>
+    fields.map((f) => {
+      const c = [...f.children].find((c) => !c.classList.contains("field__label"))!;
+      const r = c.getBoundingClientRect();
+      return { name: f.querySelector(".field__label")!.textContent!.trim(), x: r.x, w: r.width, right: r.right, field: f.getBoundingClientRect().right };
+    }),
+  );
+
+test.describe("on a narrow window, where the Inspector is at its narrowest", () => {
+  test.use({ viewport: { width: 700, height: 900 } });
+
+  test("the text controls keep a usable width", async ({ page }) => {
+    const w = watch(page);
+    await open(page, (await fixtures()).sample);
+    await page.locator(".fragment").first().click();
+    await expect(page.locator(".props__title")).toHaveText("Text");
+    // The size slider had shrunk to 75px: a nudge, not a control.
+    const slider = (await page.locator(".props .slider").first().boundingBox())!;
+    expect(slider.width, "size slider").toBeGreaterThanOrEqual(150);
+    for (const c of await controls(page)) expect(c.right, `${c.name} overruns its row`).toBeLessThanOrEqual(c.field + 0.5);
+    expect(w.errors).toEqual([]);
+  });
+
+  test("a link's choices read on one line", async ({ page }) => {
+    await open(page, (await fixtures()).sample);
+    await pickTool(page, "Link");
+    await dragOnPage(page, { x: 80, y: 120 }, { x: 280, y: 165 });
+    const radios = page.locator('.props [role="radio"]');
+    await expect(radios).toHaveCount(2);
+    for (const r of await radios.all()) {
+      const lines = await r.evaluate((el) => {
+        const lh = parseFloat(getComputedStyle(el).lineHeight) || 20;
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        return Math.round(range.getBoundingClientRect().height / lh);
+      });
+      expect(lines, `"${await r.textContent()}" wraps`).toBe(1);
+    }
+  });
+});
+
+test("a drawing's width slider starts on the control line", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await open(page, (await fixtures()).sample);
+  await pickSubTool(page, "Rectangle");
+  await dragOnPage(page, { x: 80, y: 120 }, { x: 280, y: 220 });
+  await pickTool(page, "Select");
+  const pb = (await page.locator(".page").first().boundingBox())!;
+  await page.mouse.click(pb.x + 80, pb.y + 170);
+  const slider = page.getByRole("slider", { name: "Stroke width" });
+  await expect(slider).toBeVisible();
+  const cs = await controls(page);
+  const width = cs.find((c) => c.name.startsWith("Width"))!;
+  const others = cs.filter((c) => c !== width);
+  expect(others.length).toBeGreaterThan(0);
+  expect(Math.abs(width.x - others[0].x), `width at ${width.x}, others at ${others[0].x}`).toBeLessThan(1);
+  expect(width.right).toBeLessThanOrEqual(width.field + 0.5);
+});
+
+test("in dark, the ⋯ menu's shade can be seen", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.setViewportSize({ width: 1024, height: 560 });
+  await open(page, (await fixtures()).sample);
+  await page.locator(".appbar__more").click();
+  const list = page.locator(".menu__list").first();
+  await expect(list).toBeVisible();
+  expect(await list.evaluate((el) => el.scrollHeight > el.clientHeight + 1)).toBe(true);
+  // The foot of the box against the menu's own surface, in a gap between items.
+  const shot = (await list.screenshot()).toString("base64");
+  // Read the pixels in a blank page, outside the app's CSP.
+  const scratch = await page.context().newPage();
+  const { surface, foot } = await scratch.evaluate(async (b64) => {
+    const img = new Image();
+    img.src = "data:image/png;base64," + b64;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = img.width;
+    c.height = img.height;
+    const g = c.getContext("2d")!;
+    g.drawImage(img, 0, 0);
+    const lum = (x: number, y: number) => {
+      const d = g.getImageData(x, y, 1, 1).data;
+      return 0.2126 * d[0] + 0.7152 * d[1] + 0.0722 * d[2];
+    };
+    return { surface: lum(4, Math.round(img.height / 2)), foot: lum(Math.round(img.width / 2), img.height - 2) };
+  }, shot);
+  await scratch.close();
+  expect(surface - foot, `surface ${surface}, foot ${foot}`).toBeGreaterThanOrEqual(10);
+});
+
+test("with no tab strip, the app bar keeps its rule", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const page = await ctx.newPage();
+  await open(page, (await fixtures()).sample);
+  await expect(page.locator(".doctabs")).toHaveCount(0);
+  const bar = await style(page, ".appbar", ["border-bottom-width", "border-bottom-color"]);
+  expect(bar["border-bottom-width"]).not.toBe("0px");
+  expect(bar["border-bottom-color"]).not.toMatch(/rgba\(.*,\s*0\)|transparent/);
   await ctx.close();
 });
