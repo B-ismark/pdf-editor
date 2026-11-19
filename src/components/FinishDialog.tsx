@@ -262,7 +262,7 @@ export function FinishDialog({
             <div className="props__section">
               <div className="field">
                 <span className="field__label label-medium">Text</span>
-                <input className="sigtype__input" value={text} onChange={(e) => setText(e.target.value)} />
+                <input className="sigtype__input" aria-label="Text" value={text} onChange={(e) => setText(e.target.value)} />
               </div>
               <div className="field field--row">
                 <span className="field__label label-medium">Colour</span>
@@ -270,15 +270,15 @@ export function FinishDialog({
               </div>
               <div className="field">
                 <span className="field__label label-medium">Opacity <b>{Math.round(opacity * 100)}%</b></span>
-                <input className="slider" type="range" min={5} max={80} value={opacity * 100} onChange={(e) => setOpacity(Number(e.target.value) / 100)} />
+                <input className="slider" type="range" aria-label="Opacity" min={5} max={80} value={opacity * 100} onChange={(e) => setOpacity(Number(e.target.value) / 100)} />
               </div>
               <div className="field">
                 <span className="field__label label-medium">Angle <b>{angle}°</b></span>
-                <input className="slider" type="range" min={-90} max={90} value={angle} onChange={(e) => setAngle(Number(e.target.value))} />
+                <input className="slider" type="range" aria-label="Angle" min={-90} max={90} value={angle} onChange={(e) => setAngle(Number(e.target.value))} />
               </div>
               <div className="field">
                 <span className="field__label label-medium">Size <b>{wmSize}</b></span>
-                <input className="slider" type="range" min={16} max={140} value={wmSize} onChange={(e) => setWmSize(Number(e.target.value))} />
+                <input className="slider" type="range" aria-label="Size" min={16} max={140} value={wmSize} onChange={(e) => setWmSize(Number(e.target.value))} />
               </div>
             </div>
           )}
