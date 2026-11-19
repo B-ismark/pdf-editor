@@ -107,6 +107,10 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   file. `loader.ts`, `fontEmbed.ts` and the worker patch (`PDF_WORKER`) all use
   `pdfjs-dist/legacy/build/`, which polyfills them; the `decoders` spec deletes
   them on both sides and opens a file. Don't import `pdfjs-dist` bare.
+  The price: about 21 kB more gzipped in the `pdfjs` chunk at start-up and 18 kB
+  in the worker. Its core-js polyfills are installed globally once the chunk
+  loads, so the spec can't catch the app's *own* code leaning on a new
+  built-in — don't.
 - **Scans and JPEG 2000 paint only through `wasmUrl`.** Since pdf.js 5 JPEG
   2000 (OpenJPEG), JBIG2 *and fax-coded scans* (`CCITTFaxDecode`, one module
   with JBIG2) are decoded by WebAssembly modules fetched at runtime from the
