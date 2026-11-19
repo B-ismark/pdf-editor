@@ -49,6 +49,7 @@ type Delivery =
 
 const DELIVERY_VERB: Record<Delivery["kind"], string> = { download: "Download", save: "Save", "save-as": "Save", share: "Share" };
 import { onStrayBack, pushHistory, unwindHistory, type HistoryEntry } from "./hooks/useModal";
+import { leaveRef, useLeavingRef } from "./leave";
 import { plural } from "./plural";
 import type { FormField, FormValue, PageNumberOptions, PageRef, WatermarkOptions } from "./pdf/types";
 import { useHistory } from "./hooks/useHistory";
@@ -339,7 +340,7 @@ export interface DocumentEditorProps {
   onToggleAutosave: () => void;
   losslessRaster: boolean;
   setLosslessRaster: Dispatch<SetStateAction<boolean>>;
-  theme: ReturnType<typeof useTheme>;
+  theme: Omit<ReturnType<typeof useTheme>, "resolved">;
 }
 
 /** One document, in front: everything that belongs to the file rather than to
@@ -603,6 +604,8 @@ export const DocumentEditor = memo(function DocumentEditor({
   const [exportOpen, setExportOpen] = useState(false);
   const exportBtnRef = useRef<HTMLButtonElement>(null);
   const exportListRef = useRef<HTMLDivElement>(null);
+  const exportListLeaving = useLeavingRef(exportListRef);
+  const menuListLeaving = useLeavingRef(menuListRef);
   const nextId = (prefix: string) => `${prefix}-${idCounter.current++}`;
 
   const vp = useViewport(fitRef.current, () => fitRef.current);
@@ -2974,7 +2977,7 @@ export const DocumentEditor = memo(function DocumentEditor({
                 {exportOpen && (
                   <>
                     <div className="menu__scrim" onClick={() => setExportOpen(false)} />
-                    <div className="menu__list" role="menu" aria-label="Export" ref={exportListRef} onKeyDown={onExportKeyDown}>
+                    <div className="menu__list" role="menu" aria-label="Export" ref={exportListLeaving} onKeyDown={onExportKeyDown}>
                       {inGroup("export")
                         .filter((c) => c.id !== "download-all")
                         .map((c) => menuRow(c, closeExport))}
@@ -2999,7 +3002,7 @@ export const DocumentEditor = memo(function DocumentEditor({
             {menuOpen && (
               <>
                 <div className="menu__scrim" onClick={() => setMenuOpen(false)} />
-                <div className="menu__list" role="menu" ref={menuListRef} onKeyDown={onMenuKeyDown}>
+                <div className="menu__list" role="menu" ref={menuListLeaving} onKeyDown={onMenuKeyDown}>
                   {/* Labelled groups, each the registry's rows for that group.
                       They were only separated by hairlines once, so the menu
                       read as one 13-item wall. On a phone there's no Export
@@ -3178,7 +3181,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       <div className="workspace">
         {navOpen && (
           <>
-            {compact && <div className="pagenav__scrim" onClick={() => setNavOpen(false)} />}
+            {compact && <div className="pagenav__scrim" ref={leaveRef} onClick={() => setNavOpen(false)} />}
             <PageNav
               bytes={pdf.bytes}
               pages={plan}
@@ -3472,8 +3475,8 @@ export const DocumentEditor = memo(function DocumentEditor({
               {/* Visual dim only (pointer-events:none in CSS). Dismiss the
                   on-demand sheet via its Close button, tapping the canvas
                   through the dim, or Esc. */}
-              <div className="scrim" aria-hidden="true" />
-              <aside className="panel">{propertiesPanel}</aside>
+              <div className="scrim" ref={leaveRef} aria-hidden="true" />
+              <aside className="panel" ref={leaveRef}>{propertiesPanel}</aside>
             </>
           )
         )}

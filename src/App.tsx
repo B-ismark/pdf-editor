@@ -1,4 +1,4 @@
-import { Activity, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Activity, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import { createPortal } from "react-dom";
 import { DocumentEditor } from "./DocumentEditor";
 import { ConfirmDialog } from "./components/ConfirmDialog";
@@ -7,7 +7,7 @@ import { Icon } from "./components/Icon";
 import { useAutosave } from "./hooks/useAutosave";
 import type { Fit } from "./hooks/useViewport";
 import { useMediaQuery } from "./hooks/useMediaQuery";
-import { usePersistentFlag } from "./hooks/usePrefs";
+import { usePersistentChoice, usePersistentFlag } from "./hooks/usePrefs";
 import { useTheme } from "./hooks/useTheme";
 import { downloadBytes } from "./download";
 import { plural } from "./plural";
@@ -156,9 +156,20 @@ export function App() {
   const isWide = useMediaQuery("(min-width: 600px)");
 
   // ---- Preferences ----
-  // Dim the (always-white) page canvas to cut glare, esp. in dark mode.
-  // Preview-only — never affects the exported PDF.
-  const [dimPages, setDimPages] = usePersistentFlag("pref.dimPages", false);
+  const theme = useTheme();
+  // Dim the (always-white) page canvas to cut glare. Preview-only — never
+  // affects the exported PDF. Until the person says otherwise it follows the
+  // theme: a full-white sheet on the near-black surround is the brightest
+  // thing on a dark screen by far, and a page that glares is a page people
+  // read less carefully. Their choice, once made, holds in either theme.
+  const [dimChoice, setDimChoice] = usePersistentChoice("pref.pageDim", "pref.dimPages");
+  const dimPages = dimChoice ?? theme.resolved === "dark";
+  const dimNow = useRef(dimPages);
+  dimNow.current = dimPages;
+  const setDimPages = useCallback(
+    (v: SetStateAction<boolean>) => setDimChoice(typeof v === "function" ? v(dimNow.current) : v),
+    [setDimChoice],
+  );
   // Autosave keeps a copy of the open document in IndexedDB so a crash or an
   // accidental reload doesn't lose the work. That is a real copy of a possibly
   // sensitive file sitting on the device, so it has to be the user's call — and
@@ -170,7 +181,6 @@ export function App() {
   // smaller on scans; this makes the raster bit-exact instead, for anyone who
   // needs the output to survive later analysis unaltered.
   const [losslessRaster, setLosslessRaster] = usePersistentFlag("pref.losslessRaster", false);
-  const theme = useTheme();
   // A new object every render; the editor is memo'd, so it gets one that only
   // changes with the mode.
   const { mode: themeMode, setMode: setThemeMode, cycle: cycleTheme } = theme;
