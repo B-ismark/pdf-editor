@@ -2520,6 +2520,15 @@ export const DocumentEditor = memo(function DocumentEditor({
   // handing back a file that looks redacted but isn't. True redactions
   // rasterise the page and are safe, so they never trip this.
   const delivering = useRef(false);
+  // A delivery that waits on the text can outlive the editor (the tab closed,
+  // or Organise replaced the document): it must not go on to export then.
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
   const deliver = useCallback(
     async (to: Delivery) => {
       if (!pdf || delivering.current) return;
@@ -2532,16 +2541,27 @@ export const DocumentEditor = memo(function DocumentEditor({
         // Held across the whiteout warning, so "… anyway" makes the same file,
         // sent the same place, that was asked for.
         pendingDelivery.current = to;
-        let full: LoadedPdf;
-        try {
-          full = await completeText(pdf);
-        } catch {
-          setStatus("error");
-          setMessage("Couldn't read the document's text. Please try again.");
-          return;
+        let full = pdf;
+        if (pagesPending(pdf) > 0) {
+          // Busy from the press, as the export itself is: a save, share or
+          // second download asked for meanwhile is refused the usual way, not
+          // dropped without a word.
+          setStatus("exporting");
+          setMessage("Reading the document's text…");
+          try {
+            full = await completeText(pdf);
+          } catch {
+            if (!alive.current) return;
+            setStatus("error");
+            setMessage("Couldn't read the document's text. Please try again.");
+            return;
+          }
+          if (!alive.current) return;
         }
         const warn = findUnsafeCovers(full, redactions, planned);
         if (warn.count > 0) {
+          setStatus("ready");
+          setMessage("");
           setCoverWarn(warn);
           return;
         }

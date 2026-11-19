@@ -51,6 +51,33 @@ async function slowText(page: Page, pageIndex: number, holdMs = HOLD_MS) {
   });
 }
 
+/** Serve pdf.js's worker so one page's text never reads: its `GetTextContent`
+ * request is answered, in the worker's place, with the stream's error. */
+async function failText(page: Page, pageIndex: number) {
+  await page.route(/\/assets\/pdf\.worker\.min-[\w-]{8}\.mjs$/, async (route) => {
+    const res = await route.fetch();
+    const prefix = `
+      {
+        const add = self.addEventListener.bind(self);
+        self.addEventListener = (type, fn, opts) => {
+          if (type !== "message") return add(type, fn, opts);
+          return add(type, (e) => {
+            const d = e.data;
+            if (d && d.action === "GetTextContent" && d.data && d.data.pageIndex === ${pageIndex}) {
+              // Answer for the worker: the stream failed.
+              self.postMessage({ sourceName: d.targetName, targetName: d.sourceName, stream: 5, streamId: d.streamId,
+                reason: { name: "UnknownErrorException", message: "unreadable page (test)" } });
+              return;
+            }
+            fn(e);
+          }, opts);
+        };
+      }
+    `;
+    await route.fulfill({ response: res, body: prefix + (await res.text()) });
+  });
+}
+
 /** Three pages of Helvetica, one line each. */
 async function threePages(): Promise<string> {
   const doc = await PDFDocument.create();
@@ -188,7 +215,8 @@ test.describe("background text", () => {
       const first = page.waitForEvent("download", { timeout: 3 * HOLD_MS + 10_000 });
       await page.click(".appbar__download");
       // Pressed again while the first is still waiting on page three's text.
-      await page.click(".appbar__download");
+      // (Forced: the button is busy, and Playwright would wait it out.)
+      await page.click(".appbar__download", { force: true });
       // And an edit on page one, made during the wait: the file is the
       // document as it was when Download was pressed, so this isn't in it.
       const frag = page.locator(".fragment", { hasText: "First page needle" }).first();
@@ -242,6 +270,23 @@ test.describe("background text", () => {
       await zip;
       await page.waitForTimeout(2_000);
       expect(downloads).toBe(1);
+    });
+
+    test("a page whose text won't read stops the download instead of skipping the whiteout check", async ({ page }) => {
+      const path = await threePages();
+      await failText(page, 2);
+      await page.goto("/");
+      const cover = { id: "r-1", pageIndex: 2, x: 0, y: 0, width: 2000, height: 2000, color: "#ffffff", cover: true };
+      await seedStore(page, [["doc:a", docRecord("a", "three.pdf", 0, { doc: { ...EMPTY, redactions: [cover] } })]], [["bytes:a", path]]);
+      await restoreSeeded(page);
+      await painted(page);
+      let downloaded = false;
+      page.on("download", () => (downloaded = true));
+      await page.click(".appbar__download");
+      // Not "no text on page three, so the whiteout hides nothing".
+      await expect(page.locator(".snackbar__msg")).toHaveText("Couldn't read the document's text. Please try again.");
+      await page.waitForTimeout(1_000);
+      expect(downloaded).toBe(false);
     });
 
     test("whiteout over a page not read yet still warns before download", async ({ page }) => {
