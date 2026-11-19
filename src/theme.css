@@ -191,6 +191,7 @@
 .body-small { font: 400 0.75rem/1.33 var(--font-plain); letter-spacing: 0.4px; }
 .label-large { font: 500 0.875rem/1.43 var(--font-plain); letter-spacing: 0.1px; }
 .label-medium { font: 500 0.75rem/1.33 var(--font-plain); letter-spacing: 0.5px; }
+.label-small { font: 500 0.6875rem/1.45 var(--font-plain); letter-spacing: 0.5px; }
 
 @media (prefers-reduced-motion: reduce) {
   :root {

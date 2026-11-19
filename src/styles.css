@@ -132,6 +132,11 @@ body {
   z-index: 20;
   flex: none;
 }
+/* With the tab strip under it, the bar and the strip are one surface: the
+   tabs are its lower row, not a second bar stacked on the first. The only
+   rule left is the strip's own, which the active tab breaks to join the
+   document. */
+.appbar:has(+ .doctabs) { border-bottom-color: transparent; }
 /* While its ⋯ menu is open the bar lifts above all floating chrome. The menu
    can't out-rank the zoom pill (55) from inside the bar's own layer (20), so on
    a phone, where the menu drops over the pill's corner, the pill swallowed taps
@@ -243,7 +248,7 @@ body {
   display: flex;
   align-items: flex-end;
   gap: 4px;
-  height: 40px;
+  height: 38px;
   padding: 0 8px;
   background: var(--surface-container);
   border-bottom: 1px solid var(--outline-variant);
@@ -897,11 +902,32 @@ body {
 .props__warn { color: var(--error); }
 .props__section { display: flex; flex-direction: column; gap: 15px; }
 .props__row-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+/* A quiet action sits in the control column, under the controls it resets,
+   not centred on its own. */
+.props__row-actions > .btn--text { align-self: flex-start; margin-left: 76px; }
 
 .field { display: flex; flex-direction: column; gap: 8px; }
 .field--row { flex-direction: row; align-items: center; justify-content: space-between; }
 .field__label { color: var(--on-surface-variant); }
-.field__label b { color: var(--on-surface); }
+/* A value in a label ("Size 24") is read, not shouted: the label's weight,
+   the text colour, figures that don't shift as it changes. */
+.field__label b { color: var(--on-surface); font-weight: inherit; font-variant-numeric: tabular-nums; }
+/* The Inspector's rows share one rhythm: label in a 76px column, control
+   starting at the same line beside it — as the Document facts are set. It had
+   labels above some controls and beside others, with the controls pushed to
+   either edge. */
+.props .field {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: center;
+  justify-items: start;
+}
+.props .field > :not(.field__label) { max-width: 100%; }
+.props .field > .segmented,
+.props .field > .size-row,
+.props .field > .slider,
+.props .field > input { justify-self: stretch; }
 
 /* Segmented button */
 .segmented {
@@ -1076,11 +1102,12 @@ body {
 .props__title[tabindex="-1"]:focus { outline: none; }
 .docpanel__group { display: flex; flex-direction: column; gap: 2px; margin-top: 20px; }
 .docpanel__label {
-  margin: 0 0 6px;
-  color: var(--on-surface-variant);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 500;
+  /* A group's heading in the panel's own voice: sentence case, the text
+     colour, a step above the rows — not capitals tracked out in grey. */
+  margin: 0 0 4px;
+  color: var(--on-surface);
+  font: 500 0.875rem/1.43 var(--font-plain);
+  letter-spacing: 0.1px;
 }
 .docpanel__layer {
   display: flex;
@@ -1155,6 +1182,15 @@ body {
   max-height: calc(100svh - 84px);
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* When it does scroll, say so: a soft shade at whichever edge has more
+     beyond it. The covers scroll with the content and hide the shades at the
+     ends; the shades stay put. */
+  background:
+    linear-gradient(var(--surface-container-high) 30%, transparent) top / 100% 32px no-repeat local,
+    linear-gradient(transparent, var(--surface-container-high) 70%) bottom / 100% 32px no-repeat local,
+    radial-gradient(farthest-side at 50% 0, color-mix(in srgb, var(--shadow-color, #000) 16%, transparent), transparent) top / 100% 10px no-repeat scroll,
+    radial-gradient(farthest-side at 50% 100%, color-mix(in srgb, var(--shadow-color, #000) 16%, transparent), transparent) bottom / 100% 10px no-repeat scroll,
+    var(--surface-container-high);
 }
 .menu__item {
   display: flex;
@@ -1210,10 +1246,11 @@ body {
 .menu__value { margin-left: auto; color: var(--on-surface-variant); }
 .menu__label {
   display: block;
-  padding: 10px 12px 4px;
+  /* A quiet signpost, smaller and lighter than the rows it heads — set in
+     capitals at body size (the class it names was never defined) it was the
+     loudest thing in the menu. */
+  padding: 12px 12px 4px;
   color: var(--on-surface-variant);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
 }
 
 /* "Dim pages" preview mode: soften the always-white page canvas to cut glare
@@ -2736,7 +2773,10 @@ body {
 
   /* Download stays in the app bar on every breakpoint (no more FAB) — icon-only
      on phones to save room. */
-  .appbar__download { padding: 0; width: 44px; height: 44px; }
+  /* The same 40px chip as ⋯ beside it, inside the same kind of hit area: at
+     44px filled edge to edge it stood taller than its neighbours. */
+  .appbar__download { padding: 2px; width: 44px; height: 44px; background-clip: content-box; }
+  .appbar__download::after { inset: 2px; border-radius: inherit; }
   .appbar__download span { display: none; }
   /* The 14px left inset exists to sit the wordmark off the edge; the wordmark is
      hidden here, so an icon-first bar wants the same 8px as the right side — and
