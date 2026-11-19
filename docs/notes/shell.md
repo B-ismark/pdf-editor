@@ -251,6 +251,10 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     that is the sidebar's last thumbnail, so it goes back to centre-above-the-
     cluster then; and a phone's open draw bar is two rows, so the toast steps
     up to 196px over it.
+  - **Anything scrolled into view stops clear of them** (`scroll-padding` on
+    `.viewer__scroll`: the dock's band at the bottom, the pill's at the top on
+    a narrow viewer). With the pill in the dock's row, an object brought into
+    view at the bottom edge was under it, and a click there hit the pill.
   - **The floating controls leave the page's opening lines clear.** On a viewer
     ≥880px wide (a container query) the zoom pill joins the dock's row at the
     bottom-right; narrower, it keeps the top-right and `.doc` starts 72px down,

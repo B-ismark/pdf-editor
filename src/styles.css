@@ -3124,6 +3124,14 @@ body {
 @container viewer (min-width: 880px) {
   .zoombar { top: auto; bottom: calc(17px + env(safe-area-inset-bottom)); }
 }
+/* Whatever is brought into view — a Find match, a tabbed-to box, a picked
+   object — stops clear of the floating controls rather than under them: the
+   dock's band at the bottom (and the pill in it), the pill at the top on a
+   narrow viewer. */
+.viewer__scroll { scroll-padding: 16px 0 calc(84px + env(safe-area-inset-bottom)); }
+@container viewer (max-width: 879.98px) {
+  .viewer__scroll { scroll-padding-top: 72px; }
+}
 @container viewer (max-width: 879.98px) {
   .doc { padding-top: 72px; }
 }
