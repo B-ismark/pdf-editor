@@ -259,12 +259,17 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   - Phone Download: a 44px hit area painting a 40px chip (`background-clip:
     content-box`), the size of ⋯ beside it. Not 48px: at 360px the bar's row
     is exactly full (see the phone rule).
-- **Organise's per-page controls (10c).** Shown by opacity, never by
-  `display`, so a card doesn't change height as they come: under the pointer,
-  on picked pages, and in the card the keyboard is in (`:focus-within`, so Tab
-  reaches them). Under `(hover: none)` an unpicked card's controls are also
-  `visibility: hidden` — an unseen button must not take a tap. The pick mark is
-  `check`, not `add`.
+- **Organise's per-page controls (10c).** Hidden at rest only under
+  `(hover: hover) and (pointer: fine)`, and by opacity, never by `display`, so
+  a card doesn't change height as they come: under the pointer, on picked
+  pages, and in the card the keyboard is in (`:focus-within`, so Tab and
+  Shift+Tab reach them). `(any-pointer: coarse)` puts them back: a touch
+  laptop hovers like a desktop, but a tap on an invisible Delete deleted the
+  page — and hiding them on a phone (`visibility`) took them out of the
+  accessibility tree and lost them after every move, since a move clears the
+  pick. After a move or delete, focus goes back to the moved page's same
+  control (or the next page's button): the card remounts, so focus fell to the
+  body. Page buttons are named "Page N"; the pick mark is `check`, not `add`.
 
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is

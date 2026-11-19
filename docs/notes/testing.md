@@ -74,10 +74,12 @@ type-checking can't see, and each exists because it broke once:
 - `paper.spec.ts` — thumbnails are white paper in the sidebar and Organise
   (a run-together CSS rule dimmed them all the time); "Dim pages" softens the
   pages and the thumbnails but still draws them (the same rule hid the page
-  canvas outright); Organise shows a page's controls only under the pointer,
-  picked or with the keyboard in it, without moving the card, keeps every
-  number, marks a pick with a tick, and on a touch screen an unpicked page's
-  hidden controls take no tap (slice 10c).
+  canvas outright), and an edit dims with its page; with a mouse, Organise
+  shows a page's controls only under the pointer, picked or with the keyboard
+  in it (Tab and Shift+Tab), without moving the card, keeps every number,
+  names each page button and marks a pick with a tick; after a move or a
+  delete the keyboard stays with the page; on a phone and on a touch laptop
+  every page's controls are in view, before and after a move (slice 10c).
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch
