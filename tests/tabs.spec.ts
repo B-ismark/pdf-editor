@@ -363,12 +363,18 @@ test.describe("document tabs", () => {
     // A browser without the file-access picker, where Ctrl+O is the file input
     // (the picker's own path is `saveto.spec`).
     await page.addInitScript(() => delete (window as { showOpenFilePicker?: unknown }).showOpenFilePicker);
+    // Listen before anything happens. Playwright only starts catching file
+    // choosers once something waits for one, and switching that on is a round
+    // trip to the browser; started just before the keypress it sometimes
+    // landed after it (about 1 run in 25 under load), the app's picker went
+    // to the real, headless dialog and the wait timed out. `open` fills the
+    // input directly, so it raises no chooser of its own.
+    const chooser = page.waitForEvent("filechooser");
     const f = await fixtures();
     await open(page, f.sample);
     const more = page.locator('.icon-btn[aria-label="More actions"]');
     await more.click();
     await expect(more).toHaveAttribute("aria-expanded", "true");
-    const chooser = page.waitForEvent("filechooser");
     await page.keyboard.press("Control+o");
     await chooser;
     await expect(more).toHaveAttribute("aria-expanded", "false");
