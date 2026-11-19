@@ -111,7 +111,6 @@ import type {
   Tool,
 } from "./pdf/types";
 import { IS_MAC } from "./platform";
-import { frontRoot } from "./frontRoot";
 
 type NavKey = Tool | "sign";
 
@@ -491,8 +490,8 @@ export const DocumentEditor = memo(function DocumentEditor({
   /** The shown position of the page most in view: what a command about "this
    * page" means. */
   const pageInView = (): number => {
-    const scroller = frontRoot().querySelector<HTMLElement>(".viewer__scroll");
-    const els = [...frontRoot().querySelectorAll<HTMLElement>(".page[data-page-pos]")];
+    const scroller = document.querySelector<HTMLElement>(".viewer__scroll");
+    const els = [...document.querySelectorAll<HTMLElement>(".page[data-page-pos]")];
     if (!scroller || els.length === 0) return 0;
     const view = scroller.getBoundingClientRect();
     let best = 0;
@@ -623,8 +622,17 @@ export const DocumentEditor = memo(function DocumentEditor({
     return () => document.removeEventListener("pointerdown", onDown, true);
   }, []);
 
+  /** The fit this editor last handed on. Only a change is handed on: coming
+   * back from behind another document re-runs this effect with the fit it had
+   * when it left, and writing that would overwrite the one it is about to
+   * take (the window may have been resized meanwhile, see `useViewport`). */
+  const handedOn = useRef("");
   useEffect(() => {
-    if (fitWidth > 0 && pageWidthPts > 0) fitRef.current = { fitWidth, pageWidthPts };
+    const at = `${fitWidth}:${pageWidthPts}`;
+    if (fitWidth > 0 && pageWidthPts > 0 && at !== handedOn.current) {
+      handedOn.current = at;
+      fitRef.current = { fitWidth, pageWidthPts };
+    }
   }, [fitRef, fitWidth, pageWidthPts]);
   // >=600px gets the persistent side panel + tool rail (Material Medium+);
   // <600px is the compact phone layout (contextual selection bar + on-demand
@@ -830,8 +838,8 @@ export const DocumentEditor = memo(function DocumentEditor({
       return;
     }
     if (activeMatch.id === scrolledTo.current) return;
-    const scroller = frontRoot().querySelector<HTMLElement>(".viewer__scroll");
-    const pageEl = frontRoot().querySelector<HTMLElement>(
+    const scroller = document.querySelector<HTMLElement>(".viewer__scroll");
+    const pageEl = document.querySelector<HTMLElement>(
       `[data-page-index="${activeMatch.pageIndex}"]`,
     );
     const page = shownBySource.get(activeMatch.pageIndex);
@@ -881,7 +889,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     // usable beside it): just go back to it. Starting over would quietly
     // re-tick every hit the person had chosen to keep.
     if (patternOpenRef.current) {
-      frontRoot().querySelector<HTMLElement>(".patterns input")?.focus();
+      document.querySelector<HTMLElement>(".patterns input")?.focus();
       return;
     }
     const active = document.activeElement;
@@ -906,7 +914,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       if (lost) {
         const back = patternOpener.current?.isConnected
           ? patternOpener.current
-          : frontRoot().querySelector<HTMLElement>('[aria-label="More actions"]');
+          : document.querySelector<HTMLElement>('[aria-label="More actions"]');
         back?.focus();
       }
       patternOpener.current = null;
@@ -1709,10 +1717,10 @@ export const DocumentEditor = memo(function DocumentEditor({
   useEffect(() => {
     if (!sheetSelId) return;
     const raf = requestAnimationFrame(() => {
-      const scroller = frontRoot().querySelector<HTMLElement>(".viewer__scroll");
-      const el = frontRoot().querySelector<HTMLElement>(`[data-el-id="${CSS.escape(sheetSelId)}"]`);
+      const scroller = document.querySelector<HTMLElement>(".viewer__scroll");
+      const el = document.querySelector<HTMLElement>(`[data-el-id="${CSS.escape(sheetSelId)}"]`);
       if (!scroller || !el) return;
-      const sheet = frontRoot().querySelector<HTMLElement>(".panel");
+      const sheet = document.querySelector<HTMLElement>(".panel");
       const scRect = scroller.getBoundingClientRect();
       // Sheet is bottom-anchored: derive its top from its height so the number
       // is right even mid slide-up (its transformed rect would read too low).
@@ -3135,8 +3143,8 @@ export const DocumentEditor = memo(function DocumentEditor({
           // The active tool, else the first: one selector list would return
           // whichever comes first in the DOM, which is always "Select".
           (
-            frontRoot().querySelector<HTMLElement>(".tooldock .tooldock__btn--on") ??
-            frontRoot().querySelector<HTMLElement>(".tooldock .tooldock__btn")
+            document.querySelector<HTMLElement>(".tooldock .tooldock__btn--on") ??
+            document.querySelector<HTMLElement>(".tooldock .tooldock__btn")
           )?.focus()
         }
       >

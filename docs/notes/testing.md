@@ -118,7 +118,7 @@ type-checking can't see, and each exists because it broke once:
   the tab cap, Delete from a second window, and a discarded tab each leave the
   device holding exactly what they should; Download all refuses a whiteout over
   live text in *any* tab; closing or arrowing between tabs by keyboard keeps
-  focus on the strip; and since each document gets a fresh editor, coming back
+  focus on the strip; and since a document can come back in a fresh editor, coming back
   lands at the scroll position it was left at, a switch keeps the page at the
   size it was shown (no re-fit after hiding the panel), and Ctrl+O closes the
   ⋯ menu;
@@ -352,6 +352,14 @@ type-checking can't see, and each exists because it broke once:
   redaction solid black and the photo intact. With the worker's script blocked
   the export still finishes on the page (and still as JPEG). The first three
   were shown to fail on the previous build;
+- `warm.spec.ts` — React 19.2's `<Activity>` keeps the last document mounted
+  behind the one in front. Switching back shows the *same* canvas (marked
+  before the switch), with its undo, where a rebuilt editor painted new ones;
+  the document behind is off the page entirely (one tab strip, none of its
+  canvases or text boxes findable); Ctrl+Z in front never reaches it; and a
+  window resized while it waited fits it on return. The first failed on the
+  previous build, the last before the editor stopped re-announcing its old fit
+  on coming back (280 px off);
 - `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
   never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
   character WinAnsi can't encode instead of throwing, so `sanitize`

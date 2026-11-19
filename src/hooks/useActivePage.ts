@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { frontRoot } from "../frontRoot";
 
 /**
  * Which page is most visible in the scroll surface: the rail highlights it and
@@ -16,7 +15,7 @@ export function useActivePage(pageCount: number, docKey: unknown): number {
     setActive(0);
     // By position in the shown order, not source page: after a reorder the
     // two differ, and the rail and page chip count positions.
-    const els = Array.from(frontRoot().querySelectorAll<HTMLElement>(".page[data-page-pos]"));
+    const els = Array.from(document.querySelectorAll<HTMLElement>(".page[data-page-pos]"));
     if (els.length === 0) return;
     const ratios = new Map<number, number>();
     const io = new IntersectionObserver(
@@ -46,6 +45,7 @@ export function useActivePage(pageCount: number, docKey: unknown): number {
 /** Bring the page at position `index` (0-based, shown order) to the top of
  * the scroll surface. */
 export function scrollToPage(index: number, smooth = true): void {
-  frontRoot().querySelector<HTMLElement>(`.page[data-page-pos="${index}"]`)
+  document
+    .querySelector<HTMLElement>(`.page[data-page-pos="${index}"]`)
     ?.scrollIntoView({ block: "start", behavior: smooth ? "smooth" : "auto" });
 }

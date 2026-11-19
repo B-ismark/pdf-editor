@@ -1,6 +1,6 @@
-import { Activity, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Activity, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { DocumentEditor } from "./DocumentEditor";
-import { frontRoot } from "./frontRoot";
 import { ConfirmDialog } from "./components/ConfirmDialog";
 import { TooltipHost } from "./components/TooltipHost";
 import { Icon } from "./components/Icon";
@@ -80,6 +80,24 @@ function useStable<A extends unknown[], R>(fn: (...args: A) => R): (...args: A) 
  * back-and-forth between a pair of files, which is most switching. */
 const WARM = 2;
 
+/**
+ * Where the editor in front sits in the shell. Each mounted editor renders into
+ * a box of its own (App's `hosts`), and only the front one's box is in the page:
+ * a document kept warm behind it is held off the page entirely, so nothing that
+ * looks the page up — its own code, a find, a test, assistive tech — can meet
+ * the hidden copy of an editor's controls. Its layout effect runs before the
+ * editors' (it comes first), so an editor coming to the front is already in the
+ * page when its own effects measure or focus anything.
+ */
+function EditorSlot({ host }: { host: HTMLElement }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const slot = ref.current;
+    if (slot && slot.firstChild !== host) slot.replaceChildren(host);
+  }, [host]);
+  return <div ref={ref} className="editors" />;
+}
+
 export function App() {
   // ---- Every open document, one tab each ----
   const [tabs, setTabs] = useState<OpenDoc[]>([]);
@@ -90,6 +108,8 @@ export function App() {
    * nothing per-document can leak into it; the same one for a switch back. */
   const [warm, setWarm] = useState<{ id: string; gen: number }[]>([]);
   const mounts = useRef(0);
+  /** Each mounted editor's box, by its key (see {@link EditorSlot}). */
+  const hosts = useRef(new Map<string, HTMLDivElement>());
   /** What the editor in front last reported. Only read when it is about the
    * tab in front ({@link LiveDoc.id}). */
   const [live, setLive] = useState<LiveDoc | null>(null);
@@ -1112,6 +1132,17 @@ export function App() {
     return t ? [{ t, gen: w.gen }] : [];
   });
   if (!mountedEditors.some((m) => m.t.id === front.id)) mountedEditors.unshift({ t: front, gen: 0 });
+  const hostFor = (key: string) => {
+    let h = hosts.current.get(key);
+    if (!h) {
+      h = document.createElement("div");
+      h.className = "editor";
+      hosts.current.set(key, h);
+    }
+    return h;
+  };
+  const keys = mountedEditors.map(({ t, gen }) => `${t.id}:${gen}`);
+  for (const k of hosts.current.keys()) if (!keys.includes(k)) hosts.current.delete(k);
   const hasFiles = (e: React.DragEvent) => [...e.dataTransfer.types].includes("Files");
   return (
     <div
@@ -1138,10 +1169,10 @@ export function App() {
       <TooltipHost />
       {/* The editor in front, and the one before it kept warm behind it: hidden
           by <Activity>, which keeps its state and pages and stops its effects,
-          so switching back is immediate and finds it as it was left. In front
-          first, so the front one is first in the page as well. */}
-      {mountedEditors.map(({ t, gen }) => (
-        <div key={`${t.id}:${gen}`} className="editor" data-front={t.id === front.id || undefined}>
+          so switching back is immediate and finds it as it was left — and held
+          off the page meanwhile (see EditorSlot). */}
+      <EditorSlot host={hostFor(`${front.id}:${mountedEditors.find((m) => m.t.id === front.id)!.gen}`)} />
+      {mountedEditors.map(({ t, gen }) => createPortal(
           <Activity mode={t.id === front.id ? "visible" : "hidden"}>
             <DocumentEditor
               entry={t}
@@ -1176,8 +1207,9 @@ export function App() {
               setLosslessRaster={setLosslessRaster}
               theme={editorTheme}
           />
-          </Activity>
-        </div>
+          </Activity>,
+          hostFor(`${t.id}:${gen}`),
+          `${t.id}:${gen}`,
       ))}
       {dragging && (
         <div className="dropveil" aria-hidden="true">
@@ -1238,7 +1270,7 @@ export function App() {
               setConfirmCloseId(null);
               // Back to the tab the close was asked from, not <body>.
               requestAnimationFrame(() =>
-                frontRoot().querySelector<HTMLElement>(`[data-doc-tab="${CSS.escape(id)}"]`)?.focus(),
+                document.querySelector<HTMLElement>(`[data-doc-tab="${CSS.escape(id)}"]`)?.focus(),
               );
             }}
           />
