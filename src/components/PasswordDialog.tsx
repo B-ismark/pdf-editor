@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 
 interface Props {
   fileName: string;
@@ -26,7 +26,7 @@ export function PasswordDialog({ fileName, wrong, checking, onSubmit, onCancel }
     if (wrong && !checking) input.current?.select();
   }, [wrong, checking]);
   return (
-    <div className="dialog-scrim" onPointerDown={onCancel}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onCancel)}>
       <div
         ref={ref}
         tabIndex={-1}
@@ -36,7 +36,7 @@ export function PasswordDialog({ fileName, wrong, checking, onSubmit, onCancel }
         aria-modal="true"
         aria-labelledby="pw-title"
       >
-        <span className="title-large" id="pw-title">This PDF is password-protected</span>
+        <h2 className="headline-small dialog__title" id="pw-title">This PDF is password-protected</h2>
         <form
           className="pwform"
           onSubmit={(e) => {

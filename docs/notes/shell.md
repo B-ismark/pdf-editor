@@ -270,6 +270,62 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   pick. After a move or delete, focus goes back to the moved page's same
   control (or the next page's button): the card remounts, so focus fell to the
   body. Page buttons are named "Page N"; the pick mark is `check`, not `add`.
+- **Dialogs (10d).**
+  - Where focus lands on opening (`useModal`): where a child's `autoFocus`
+    already put it; else a control marked `data-autofocus` (the crop frame);
+    else the first field; else the dialog box itself (`tabIndex={-1}`, no ring
+    drawn on it). Never "the first focusable" — Close leads the markup, so that
+    put a ring on "close" for anyone arriving by keyboard, and Enter closed it.
+    A "field" is a place to type, a `<select>`, or a radio group's *checked*
+    radio — not a checkbox or slider (Sign opened on "Remember this signature",
+    below the pad), not an unchosen radio. With a coarse pointer, places to type
+    are skipped: focusing one raises the on-screen keyboard over a dialog not
+    yet begun. So a dialog marks its field `data-autofocus`, not `autoFocus`
+    (which runs first and can't be told) — Download with password and Sign with
+    certificate did. The password to open a locked file keeps `autoFocus`:
+    typing it is all that dialog asks.
+  - **Opening a dialog must not change it.** A field that acts on focus is
+    marked `data-autofocus` on the spot that leaves things as they were:
+    Header & footer's chips type into the slot last focused, so it opens on
+    that slot (Footer, centre); Split's page-count box switches to "Every" on
+    focus, so with pages picked it opens on the "Before each picked page" radio.
+  - Focus goes back to the opener on close. `useModal` reads the opener while
+    rendering: by its effect a child's `autoFocus` has moved focus inside, and
+    restoring to that removed field dropped focus onto the page. A dialog
+    closing while another has already taken focus (Download with password
+    handing on to the covered-text warning) leaves focus there and hands its
+    opener on (`handedOn`); the new one adopts it when its own opener — a
+    button in the dialog now gone — is disconnected. With neither (an opener
+    gone and nothing handed on), it falls back to whatever held focus when its
+    effect ran, if that's outside the dialog.
+  - **A scrim closes on press, and the press lands nowhere** (`scrimPress`):
+    closing on pointerdown removes the scrim, so the mousedown that followed
+    reached the page behind and took focus off the opener just restored.
+    Every scrim cancels its pointerdown. A finger's tap sends its click
+    anyway, onto whatever was under the backdrop, so a touch or pen press also
+    swallows that click — only a real one at the spot pressed, within 600ms.
+    The guard stands down on `pointercancel` or a lift elsewhere: a swipe
+    sends no click, and an armed guard took the next real tap instead.
+  - Closing a tab from its "Discard & close" warning puts focus on the tab
+    now in front (the tab itself), not the page.
+  - Titles are `<h2 className="headline-small dialog__title">` (24px), every
+    dialog alike. Compare and Organise are full-screen surfaces with a bar
+    title, and keep `title-large`.
+  - Disabled `.btn` uses Material's disabled roles (on-surface 12% fill, 38%
+    label, no hover), not opacity — at 55% a filled button was itself, faded.
+    Except a button at work (a `.spinner` child): it keeps its own colours, so
+    the spinner shows and "Exporting…" reads as under way. The split button's
+    caret (`aria-disabled`, so focus isn't dropped) matches its Download half.
+  - The palette files rows under their group's heading (`role="group"` in the
+    listbox, groups in registry order); the right-hand column is a `<kbd>` for
+    a shortcut and nothing else. Arrow keys walk the flattened rows in the
+    order shown; moving by the arrows onto a group's first row scrolls its
+    heading into view too (not on hover — the list would slide under the
+    pointer). Hover follows `pointermove` with a real change of position, not
+    `pointerenter`: a row scrolled under a resting pointer fires an enter, and
+    that took the active row back from the arrows.
+    The input is a `combobox` whose `aria-activedescendant` names the active
+    row; headings are `aria-hidden` (each group is labelled by its heading).
 
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is

@@ -1,4 +1,4 @@
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 
 interface Props {
   title: string;
@@ -22,7 +22,7 @@ export function ConfirmDialog({
 }: Props) {
   const ref = useModal<HTMLDivElement>(onCancel);
   return (
-    <div className="dialog-scrim" onPointerDown={onCancel}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onCancel)}>
       <div
         ref={ref}
         tabIndex={-1}
@@ -32,7 +32,7 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-label={title}
       >
-        <span className="title-large">{title}</span>
+        <h2 className="headline-small dialog__title">{title}</h2>
         <p className="body-medium confirm__msg">{message}</p>
         <div className="dialog__actions">
           <button className="btn" onClick={onCancel}>{cancelLabel}</button>

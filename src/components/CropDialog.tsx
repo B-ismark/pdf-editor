@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 import { renderPageToCanvas } from "../pdf/loader";
 import { MIN_CROP, cropOffset, fitCrop, sheetSize, sheetToView, shownSize } from "../pdf/pagePlan";
 import type { CropRect, PageData } from "../pdf/types";
@@ -271,7 +271,7 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
   };
 
   return (
-    <div className="dialog-scrim" onPointerDown={onClose}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onClose)}>
       <div
         ref={ref}
         tabIndex={-1}
@@ -282,7 +282,7 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
         aria-labelledby={`${id}-title`}
         aria-describedby={`${id}-note`}
       >
-        <span className="title-large" id={`${id}-title`}>Crop page {position + 1}</span>
+        <h2 className="headline-small dialog__title" id={`${id}-title`}>Crop page {position + 1}</h2>
         <div className="crop__stage" ref={stage}>
           <div className="crop__page" style={{ width: sheet.width * k, height: sheet.height * k }}>
             <div ref={host} className="crop__host" />
@@ -294,6 +294,7 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
               aria-label="Crop frame"
               aria-describedby={`${id}-keys`}
               tabIndex={0}
+              data-autofocus
               data-tip="Drag to move the frame"
               onPointerDown={begin("frame")}
               onPointerMove={move}

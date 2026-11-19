@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 import { DEFAULT_BATES, MAX_BATES_DIGITS, MAX_START, POSITIONS, TOKENS, batesNumber, dateLabel, firstNumber, labelsFor, normalBates, slotsOf, textColor, textSize, uses } from "../pdf/headerFooter";
 import type { BatesOptions, NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/types";
 
@@ -145,7 +145,7 @@ export function FinishDialog({
   const stale = (usesDate && storedDate != null && storedDate !== today) || (usesFile && storedFile != null && storedFile !== fileName);
 
   return (
-    <div className="dialog-scrim" onPointerDown={onClose}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onClose)}>
       <div
         ref={modalRef}
         tabIndex={-1}
@@ -156,7 +156,7 @@ export function FinishDialog({
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="dialog__head">
-          <span className="title-large">Finishing touches</span>
+          <h2 className="headline-small dialog__title">Finishing touches</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">
             <Icon name="close" size={20} />
           </button>
@@ -186,6 +186,8 @@ export function FinishDialog({
                         }}
                         className="hf__slot"
                         aria-label={PLACE[p]}
+                        // Opens where the chips type, so opening moves nothing.
+                        data-autofocus={p === lastPlace.current || undefined}
                         placeholder={p.endsWith("left") ? "Left" : p.endsWith("right") ? "Right" : "Centre"}
                         value={slots[p] ?? ""}
                         onFocus={() => {
@@ -262,7 +264,7 @@ export function FinishDialog({
             <div className="props__section">
               <div className="field">
                 <span className="field__label label-medium">Text</span>
-                <input className="sigtype__input" value={text} onChange={(e) => setText(e.target.value)} />
+                <input className="sigtype__input" aria-label="Text" value={text} onChange={(e) => setText(e.target.value)} />
               </div>
               <div className="field field--row">
                 <span className="field__label label-medium">Colour</span>
@@ -270,15 +272,15 @@ export function FinishDialog({
               </div>
               <div className="field">
                 <span className="field__label label-medium">Opacity <b>{Math.round(opacity * 100)}%</b></span>
-                <input className="slider" type="range" min={5} max={80} value={opacity * 100} onChange={(e) => setOpacity(Number(e.target.value) / 100)} />
+                <input className="slider" type="range" aria-label="Opacity" min={5} max={80} value={opacity * 100} onChange={(e) => setOpacity(Number(e.target.value) / 100)} />
               </div>
               <div className="field">
                 <span className="field__label label-medium">Angle <b>{angle}°</b></span>
-                <input className="slider" type="range" min={-90} max={90} value={angle} onChange={(e) => setAngle(Number(e.target.value))} />
+                <input className="slider" type="range" aria-label="Angle" min={-90} max={90} value={angle} onChange={(e) => setAngle(Number(e.target.value))} />
               </div>
               <div className="field">
                 <span className="field__label label-medium">Size <b>{wmSize}</b></span>
-                <input className="slider" type="range" min={16} max={140} value={wmSize} onChange={(e) => setWmSize(Number(e.target.value))} />
+                <input className="slider" type="range" aria-label="Size" min={16} max={140} value={wmSize} onChange={(e) => setWmSize(Number(e.target.value))} />
               </div>
             </div>
           )}

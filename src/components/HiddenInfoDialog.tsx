@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { staleBuildMessage } from "../staleBuild";
 import { Icon } from "./Icon";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 import type { HiddenRow } from "../pdf/hiddenInfo";
 
 interface Props {
@@ -66,7 +66,7 @@ export function HiddenInfoDialog({ onInspect, onDownload, onClose, busy }: Props
   );
 
   return (
-    <div className="dialog-scrim" onPointerDown={onClose}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onClose)}>
       <div
         ref={modalRef}
         tabIndex={-1}
@@ -77,7 +77,7 @@ export function HiddenInfoDialog({ onInspect, onDownload, onClose, busy }: Props
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="dialog__head">
-          <span className="title-medium" id="hidden-title">Hidden information</span>
+          <h2 className="headline-small dialog__title" id="hidden-title">Hidden information</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">
             <Icon name="close" size={20} />
           </button>

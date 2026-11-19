@@ -10,6 +10,21 @@ const FOCUSABLE = [
   '[contenteditable="true"]',
 ].join(",");
 
+/** What counts as "a field" for where a dialog puts focus on opening. */
+/** A place to type. */
+const TYPING =
+  'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="range"])' +
+  ':not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="color"]),' +
+  ' textarea, [contenteditable="true"]';
+/**
+ * Where a dialog's work starts: a place to type, a list to pick from, or the
+ * option a radio group has chosen. Not a checkbox or a slider: those are
+ * settings that sit under the work (Sign's "Remember this signature" is below
+ * the pad), and not an unchosen radio, which a screen reader would announce as
+ * the choice.
+ */
+const FIELD = `${TYPING}, select, input[type="radio"]:checked`;
+
 /**
  * The app's own history entries, in one place. Dialogs push one so Back
  * closes them, and so does the editor's phone "Back puts the selection
@@ -107,6 +122,60 @@ function handlePop() {
 if (typeof window !== "undefined") window.addEventListener("popstate", handlePop);
 
 /**
+ * The opener of a dialog that closed while another took focus — one dialog
+ * handing on to the next (Download with password → the covered-text warning).
+ * The next one adopts it: its own opener, read as it rendered, was a button in
+ * the dialog now gone.
+ */
+let handedOn: HTMLElement | null = null;
+
+/**
+ * The scrim's press: closes the dialog without the press itself landing
+ * anywhere. Closing on pointerdown removes the scrim, so the mousedown that
+ * follows it went to the page behind and took focus off the button the dialog
+ * had just handed it back to. Cancelling the pointerdown cancels that mousedown.
+ */
+export function scrimPress(close: (() => void) | undefined) {
+  if (!close) return undefined;
+  return (e: { preventDefault(): void; pointerType?: string; clientX?: number; clientY?: number }) => {
+    e.preventDefault();
+    // A finger's tap still sends its click once the scrim is gone, and it
+    // pressed whatever sat under the backdrop. Swallow that one click.
+    if (e.pointerType && e.pointerType !== "mouse") swallowTapClick(e.clientX ?? 0, e.clientY ?? 0);
+    close();
+  };
+}
+
+/**
+ * Eat the click this tap is about to send — only that one: a real click at
+ * the spot pressed, soon. A press that turns into a swipe sends no click, and
+ * must not take the next tap with it (or a script's `.click()`), so the guard
+ * also stands down when the press is cancelled or lifts somewhere else.
+ */
+function swallowTapClick(x: number, y: number) {
+  const near = (ev: { clientX: number; clientY: number }) => Math.hypot(ev.clientX - x, ev.clientY - y) <= 16;
+  const eat = (ev: MouseEvent) => {
+    if (!ev.isTrusted || !near(ev)) return done();
+    ev.preventDefault();
+    ev.stopPropagation();
+    done();
+  };
+  const lift = (ev: PointerEvent) => {
+    if (!near(ev)) done();
+  };
+  const done = () => {
+    document.removeEventListener("click", eat, true);
+    document.removeEventListener("pointercancel", done, true);
+    document.removeEventListener("pointerup", lift, true);
+    clearTimeout(timer);
+  };
+  document.addEventListener("click", eat, true);
+  document.addEventListener("pointercancel", done, true);
+  document.addEventListener("pointerup", lift, true);
+  const timer = setTimeout(done, 600);
+}
+
+/**
  * Shared modal behaviour for dialogs and full-screen surfaces:
  *
  * - **Focus trap** — Tab / Shift+Tab cycle within the container (WCAG 2.4.3).
@@ -121,12 +190,26 @@ if (typeof window !== "undefined") window.addEventListener("popstate", handlePop
  */
 export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => void) {
   const containerRef = useRef<T | null>(null);
+  // Who had focus before the dialog: read while rendering, because by the time
+  // an effect runs a child's `autoFocus` has already moved it inside, and
+  // closing would hand focus back to a field that's gone — onto the page.
+  const opener = useRef<HTMLElement | null | undefined>(undefined);
+  if (opener.current === undefined) opener.current = document.activeElement as HTMLElement | null;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
   useEffect(() => {
     const container = containerRef.current;
-    const prevActive = document.activeElement as HTMLElement | null;
+    const placedAtOpen = document.activeElement as HTMLElement | null;
+    let prevActive = opener.current ?? null;
+    if (!prevActive?.isConnected) {
+      prevActive = handedOn?.isConnected
+        ? handedOn
+        : placedAtOpen && placedAtOpen !== document.body && !container?.contains(placedAtOpen)
+          ? placedAtOpen
+          : null;
+    }
+    handedOn = null;
     const token = Symbol("modal");
     const entry: ModalEntry = { token, onClose: () => onCloseRef.current(), history: pushHistory({ __modal: true }) };
     stack.push(entry);
@@ -140,9 +223,31 @@ export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => voi
       ).filter((el) => el.getClientRects().length > 0);
     };
 
-    // Move focus into the dialog (first focusable, else the container itself).
-    const items = focusables();
-    (items[0] ?? container)?.focus?.();
+    // Move focus into the dialog — to where the work starts, not to Close.
+    // Close leads the markup, so "the first focusable" put a ring on "close"
+    // as the first thing the eye met. In order:
+    // - where a child already put it (`autoFocus` runs before this effect);
+    // - a control marked `data-autofocus` (the crop frame);
+    // - the first field;
+    // - else the dialog itself, so a screen reader reads its title and Tab
+    //   goes on from the top.
+    // Where a finger is the pointer, never a place to type: focusing one raises
+    // the on-screen keyboard over a dialog the person hasn't started on yet.
+    // So a dialog marks its field `data-autofocus` rather than `autoFocus`,
+    // which would run first and can't be told. (The password to open a file
+    // keeps `autoFocus`: typing it is all that dialog asks.)
+    // Focus must not change anything either — a field that acts on focus (the
+    // header slot chips type into) is marked rather than found.
+    const placed = document.activeElement;
+    if (!(container && placed && placed !== container && container.contains(placed))) {
+      const finger = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+      const items = focusables().filter((el) => !(finger && el.matches(TYPING)));
+      const target =
+        items.find((el) => el.hasAttribute("data-autofocus")) ??
+        items.find((el) => el.matches(FIELD)) ??
+        container;
+      target?.focus?.();
+    }
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (!isTop()) return;
@@ -181,7 +286,13 @@ export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => voi
       // Closed via the UI (not the Back gesture): remove the entry it added,
       // without that pop closing anything else.
       unwindHistory(entry.history);
-      prevActive?.focus?.();
+      // Give focus back — unless something else already holds it: a dialog
+      // opening as this one closes. Taking it from that dialog left it on its
+      // box, and its own close then had nowhere to go. It inherits the opener.
+      const now = document.activeElement;
+      const free = !now || now === document.body || !now.isConnected || !!container?.contains(now);
+      if (free) prevActive?.focus?.();
+      else handedOn = prevActive;
     };
     // Run once for the modal's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps

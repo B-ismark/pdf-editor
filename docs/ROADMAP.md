@@ -99,7 +99,7 @@ Read only the section a package points at, not the whole folder.
   - [x] **10c. Thumbnails and Organise.** Guarded by the `paper` spec. (Built: the grey was a CSS rule run together with its neighbour in package 2, which dimmed every thumbnail and, with "Dim pages" on, blanked the pages themselves; both fixed. A picked page's mark is now a tick, not a plus.)
     - Thumbnails show grey paper (sidebar and Organise), which reads as disabled. White paper on the tinted surface, as on the canvas.
     - Organise puts four controls under every page; with 150 pages it is a field of icons. Show them for the page under the pointer or picked; keep the number.
-  - [ ] **10d. Dialogs and focus.**
+  - [x] **10d. Dialogs and focus.** Guarded by the `dialogs` spec; notes in `docs/notes/shell.md` (Dialogs). (Built: opened by mouse the ring already stayed hidden — focus still went to Close, so it showed from the keyboard and a stray Enter closed the dialog.)
     - A dialog opened by mouse shows a heavy focus ring on its close button, so the first thing the eye lands on is "close". Focus the first field, and show the ring for keyboard focus only.
     - Dialog titles are small for their weight on the page; the disabled primary button looks washed out rather than waiting.
     - The command palette's right column mixes shortcut keys (V, T) with categories (Draw). Group headings for categories; the column for keys.

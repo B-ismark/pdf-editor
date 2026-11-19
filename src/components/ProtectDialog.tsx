@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 import { Icon } from "./Icon";
 
 interface Props {
@@ -47,7 +47,7 @@ export function ProtectDialog({ onDownload, onClose, busy }: Props) {
   };
   const noSave = { autoComplete: "off", "data-1p-ignore": "", "data-lpignore": "true", "data-form-type": "other" } as const;
   return (
-    <div className="dialog-scrim" onPointerDown={onClose}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onClose)}>
       <div
         ref={ref}
         tabIndex={-1}
@@ -57,7 +57,7 @@ export function ProtectDialog({ onDownload, onClose, busy }: Props) {
         aria-modal="true"
         aria-labelledby="protect-title"
       >
-        <span className="title-large" id="protect-title">Download with password</span>
+        <h2 className="headline-small dialog__title" id="protect-title">Download with password</h2>
         <div className="pwform">
           <p className="body-medium confirm__msg">
             The copy you download asks for this password before it opens. It isn't kept anywhere, so if it's lost, so
@@ -74,7 +74,7 @@ export function ProtectDialog({ onDownload, onClose, busy }: Props) {
               onKeyDown={onEnter}
               aria-invalid={empty || undefined}
               aria-describedby={empty ? "protect-error" : undefined}
-              autoFocus
+              data-autofocus
             />
           </label>
           <label className="field">

@@ -1015,7 +1015,7 @@ test.describe("command registry", () => {
     await page.mouse.click(box.x + 150, box.y + 420);
     await expect(page.locator(".props__title")).toHaveText("Text box");
     await page.keyboard.press("Control+k");
-    await expect((await paletteRow(page, "delete", "Delete")).locator(".cmdk__hint")).not.toHaveText("Del");
+    await expect((await paletteRow(page, "delete", "Delete")).locator(".cmdk__hint", { hasText: "Del" })).toHaveCount(0);
     await page.keyboard.press("Escape");
   });
 

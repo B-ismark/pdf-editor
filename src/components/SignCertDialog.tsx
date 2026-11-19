@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { staleBuildMessage } from "../staleBuild";
 import { Icon } from "./Icon";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 import type { SignIdentity, SignMeta } from "../pdf/sign";
 
 interface Props {
@@ -45,7 +45,7 @@ export function SignCertDialog({ onSign, onClose }: Props) {
   };
 
   return (
-    <div className="dialog-scrim" onPointerDown={busy ? undefined : onClose}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(busy ? undefined : onClose)}>
       <div
         ref={modalRef}
         tabIndex={-1}
@@ -56,7 +56,7 @@ export function SignCertDialog({ onSign, onClose }: Props) {
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="dialog__head">
-          <span className="title-medium">Sign document</span>
+          <h2 className="headline-small dialog__title">Sign document</h2>
           <button className="icon-btn" onClick={onClose} disabled={busy} aria-label="Close" data-tip="Close">
             <Icon name="close" size={20} />
           </button>
@@ -87,7 +87,7 @@ export function SignCertDialog({ onSign, onClose }: Props) {
           <>
             <div className="field">
               <span className="field__label label-medium">Your name</span>
-              <input className="sigtype__input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ada Lovelace" autoFocus disabled={busy} />
+              <input className="sigtype__input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ada Lovelace" data-autofocus disabled={busy} />
             </div>
             <div className="field">
               <span className="field__label label-medium">Organisation (optional)</span>

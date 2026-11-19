@@ -80,6 +80,25 @@ type-checking can't see, and each exists because it broke once:
   names each page button and marks a pick with a tick; after a move or a
   delete the keyboard stays with the page; on a phone and on a touch laptop
   every page's controls are in view, before and after a move (slice 10c).
+- `dialogs.spec.ts` — a dialog opens on its first field, by mouse or from the
+  palette, never on Close (a stray Enter doesn't close it); one with no field
+  focuses itself with no ring; Crop opens on its frame; titles are level-2
+  headings at 24px; a disabled primary button is a neutral fill at full
+  opacity; the palette's key column holds only keys and its rows sit under one
+  heading per group, walked by the arrows in the order shown; opening a dialog
+  changes nothing in it (Header & footer's chips still type into Footer,
+  centre; Split with picked pages opens on that choice); Sign doesn't open on
+  its checkbox; closing gives focus back to the opener even when a field took
+  it first; a working Download keeps its colour and its spinner shows, caret
+  alike (the exporter chunk is held back to catch it at work); walking up the
+  palette, every group's first row shows its heading, but hovering one doesn't
+  scroll; the active row is named by `aria-activedescendant`; a dialog handing
+  on to another (password form → covered-text warning) leaves the warning on
+  its button and closing it returns to Export options; with a finger, no
+  dialog opens on a place to type — Watermark, Download with password, Sign
+  with certificate, and tapping the backdrop doesn't press what it covered (and a swipe there doesn't eat the next tap); a backdrop click returns focus to the opener; the arrows
+  keep the active row with the pointer resting over the list; "Discard &
+  close" leaves focus on the tab in front (slice 10d).
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

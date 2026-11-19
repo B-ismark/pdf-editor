@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 import { plural } from "../plural";
 import { Icon } from "./Icon";
 
@@ -62,7 +62,7 @@ export function SplitDialog({ count, picked, busy, error, onSplit, onClose }: Pr
   const ready = parts.length >= 2 && !busy;
 
   return (
-    <div className="dialog-scrim" onPointerDown={close}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(close)}>
       <div
         ref={ref}
         tabIndex={-1}
@@ -72,7 +72,7 @@ export function SplitDialog({ count, picked, busy, error, onSplit, onClose }: Pr
         aria-modal="true"
         aria-labelledby={`${id}-title`}
       >
-        <span className="title-large" id={`${id}-title`}>Split into files</span>
+        <h2 className="headline-small dialog__title" id={`${id}-title`}>Split into files</h2>
         <div className="split" role="radiogroup" aria-label="Where to split">
           <label className="split__row">
             <input type="radio" name={`${id}-mode`} checked={mode === "every"} onChange={() => setMode("every")} />
@@ -96,6 +96,9 @@ export function SplitDialog({ count, picked, busy, error, onSplit, onClose }: Pr
               type="radio"
               name={`${id}-mode`}
               checked={mode === "picked"}
+              // Opens on the choice made. The page-count box sits between the
+              // two radios, and focusing it would switch to "Every".
+              data-autofocus={mode === "picked" || undefined}
               disabled={!canPick}
               onChange={() => setMode("picked")}
             />

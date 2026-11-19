@@ -1260,7 +1260,13 @@ export function App() {
             }
             confirmLabel={downloaded ? "Close" : "Discard & close"}
             danger={!downloaded}
-            onConfirm={() => closeTab(confirmCloseId)}
+            onConfirm={() => {
+              closeTab(confirmCloseId);
+              // On to the tab now in front: the one asked from is gone.
+              requestAnimationFrame(() =>
+                document.querySelector<HTMLElement>(".doctab--active [data-doc-tab]")?.focus(),
+              );
+            }}
             onCancel={() => {
               const id = confirmCloseId;
               setConfirmCloseId(null);

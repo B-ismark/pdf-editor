@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useSignatures } from "../hooks/useSignatures";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 
 interface Props {
   onCreate: (sig: { dataUrl: string; w: number; h: number }) => void;
@@ -142,7 +142,7 @@ export function SignatureDialog({ onCreate, onClose }: Props) {
   const modalRef = useModal<HTMLDivElement>(onClose);
 
   return (
-    <div className="dialog-scrim" onPointerDown={onClose}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onClose)}>
       <div
         ref={modalRef}
         tabIndex={-1}
@@ -153,7 +153,7 @@ export function SignatureDialog({ onCreate, onClose }: Props) {
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="dialog__head">
-          <span className="title-large">Add signature</span>
+          <h2 className="headline-small dialog__title">Add signature</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">
             <Icon name="close" size={20} />
           </button>
