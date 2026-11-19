@@ -56,7 +56,7 @@ interface Props {
   geom: Geom;
   /** The rotated element the handles belong to; used to find the rotation
    * pivot (its bounding-box centre equals the true centre). */
-  containerRef: React.RefObject<HTMLElement>;
+  containerRef: React.RefObject<HTMLElement | null>;
   /** Smallest allowed edge, CSS px. */
   minSize?: number;
   /** If set (height / width), corner drags keep this aspect ratio. */
