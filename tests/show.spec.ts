@@ -91,6 +91,14 @@ test.describe("show, don't tell", () => {
       return img.naturalWidth;
     });
     expect(size).toBe(24);
+    // …and must be seen: an image's delete badge covered the top-left ring,
+    // so the glyph's own corner of the ring is what a point there hits.
+    const hz = (await page.locator(".rotate-zone--hint").boundingBox())!;
+    const hit = await page.evaluate(
+      ([x, y]) => document.elementFromPoint(x, y)?.className ?? "",
+      [hz.x + hz.width - 7, hz.y + hz.height - 7],
+    );
+    expect(hit).toContain("rotate-zone--hint");
 
     // Delete from the keyboard keeps your place: focus lands on the panel
     // that replaces it, not on the page body.

@@ -1897,11 +1897,11 @@ body {
 }
 .rotate-zone:active { cursor: var(--rotate-glyph) 12 12, grabbing; }
 /* A cursor is no help to a finger, and the ring itself is invisible: one
-   corner (top-left, away from the delete badge) carries the same turning
-   arrow, small, in the ring's outer quarter — off the box, clear of the
-   resize handle at the ring's centre. */
+   corner (bottom-right — an image's delete badge sits top-left) carries the
+   same turning arrow, small, in the ring's outer quarter — off the box, clear
+   of the resize handle at the ring's centre. */
 .rotate-zone--hint {
-  background: var(--rotate-glyph) no-repeat 0 0 / 14px 14px;
+  background: var(--rotate-glyph) no-repeat 100% 100% / 14px 14px;
 }
 
 /* Bigger touch targets on coarse pointers */
@@ -2815,9 +2815,13 @@ body {
   background: var(--primary);
   color: var(--on-primary);
 }
+/* It sits on the page picture, which is paper-white in either theme, so it
+   is drawn for paper — a white ring with a faint dark edge, as photo pickers
+   do — not in the theme's surface colour (a dark notch in dark mode). */
 .pcard__check--off {
-  background: color-mix(in srgb, var(--surface-container-lowest) 75%, transparent);
-  border: 2px solid var(--outline);
+  background: rgb(255 255 255 / 0.9);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.35), var(--shadow-1);
   box-sizing: border-box;
 }
 .pcard__no { color: var(--on-surface-variant); }

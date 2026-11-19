@@ -233,7 +233,7 @@ export function App() {
         setMessage("Stopped saving on this device, and deleted the copy.");
       } else {
         setStatus("ready");
-        setMessage("Saving edits on this device, so a reload can't lose them.");
+        setMessage("Saving edits on this device. Password-protected files aren't saved.");
       }
       return !on;
     });
