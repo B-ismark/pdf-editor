@@ -241,7 +241,16 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   the page's right edge under the panel; the scroll is anchored so the reader
   stays on the same page. The old "never refit on a panel toggle" rule was there
   to stop a jump — the cap does that now on wide windows, where a panel only
-  moves the margin.
+  moves the margin. Below the cap (a 1024px laptop) showing or hiding the
+  Inspector does rescale the page: a page cut off under a panel was judged the
+  worse of the two. The scroll is anchored at the top-left (the page you were
+  on stays in front); sideways, to where the reader had it before the room
+  changed — the browser clamps `scrollLeft` before the observer runs, so the
+  anchor is taken from the last scroll at the measured width (`across`).
+  - The toast's bottom-left place is the *window's* corner: with Pages open
+    that is the sidebar's last thumbnail, so it goes back to centre-above-the-
+    cluster then; and a phone's open draw bar is two rows, so the toast steps
+    up to 196px over it.
   - **The floating controls leave the page's opening lines clear.** On a viewer
     ≥880px wide (a container query) the zoom pill joins the dock's row at the
     bottom-right; narrower, it keeps the top-right and `.doc` starts 72px down,

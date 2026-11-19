@@ -31,8 +31,7 @@ export const ACTUAL_SIZE = 96 / 72;
  * single shell kept one for its whole life — so it is carried from the editor
  * going into the background to the one coming forward ({@link useViewport}'s
  * `seed`). Measured afresh, each switch drew one frame at the unmeasured scale
- * (and restored the scroll position against it), and re-fitted a page the
- * user had chosen to leave at its size by hiding the panel. */
+ * (and restored the scroll position against it). */
 export interface Fit {
   fitWidth: number;
   pageWidthPts: number;
@@ -83,6 +82,7 @@ export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
   // observer below, which outlives any one render.
   const lastWidth = useRef(fitWidth);
   lastWidth.current = fitWidth;
+  const across = useRef<number | null>(null);
   const pageWidthRef = useRef(pageWidthPts);
   pageWidthRef.current = pageWidthPts;
   // Re-fit when a new document sets its page width (panel is closed then).
@@ -110,12 +110,27 @@ export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
       const width = el.clientWidth;
       if (width <= 0 || width === lastWidth.current) return;
       const pts = pageWidthRef.current;
-      if (pts > 0 && lastWidth.current > 0 && fitFor(width, pts) !== fitFor(lastWidth.current, pts))
+      if (pts > 0 && lastWidth.current > 0 && fitFor(width, pts) !== fitFor(lastWidth.current, pts)) {
         captureAnchor(0, 0);
+        // Sideways, the browser has already clamped the scroll to the new
+        // width by now (a narrower page leaves less to scroll): anchor to
+        // where the reader had it before the room changed.
+        if (anchor.current && across.current !== null) anchor.current.rx = across.current;
+      }
       setFitWidth(width);
     });
     ro.observe(el);
-    return () => ro.disconnect();
+    // Where the reader is across the document, recorded only from scrolls at
+    // the measured width — not the browser's clamp when the room changes.
+    const onScroll = () => {
+      if (el.clientWidth === lastWidth.current && el.scrollWidth > 0)
+        across.current = el.scrollLeft / el.scrollWidth;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      ro.disconnect();
+      el.removeEventListener("scroll", onScroll);
+    };
     // `carried` is read when the effect runs, not tracked.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [el, measure]);

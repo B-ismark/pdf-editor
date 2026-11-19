@@ -113,3 +113,59 @@ for (const [name, size, mobile] of [
     await ctx.close();
   });
 }
+
+test("on a phone, the opening toast stays off an open draw bar", async ({ browser }) => {
+  // Bottom-anchored on phones, the toast sat on the draw bar's first row: the
+  // phone's bar is two rows tall.
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  const page = await ctx.newPage();
+  await open(page, (await fixtures()).sample);
+  await page.locator('.tooldock__btn[aria-label="Draw"]').tap();
+  await expect(page.locator(".drawbar:not(.drawbar--closed)")).toBeVisible();
+  await expect(page.locator(".snackbar")).toBeVisible();
+  const s = await rect(page, ".snackbar");
+  const d = await rect(page, ".drawbar");
+  expect(overlaps(s, d), `toast ${JSON.stringify(s)} vs draw bar ${JSON.stringify(d)}`).toBe(false);
+  await ctx.close();
+});
+
+test("on a wide window, the toast stays off the Pages sidebar", async ({ page }) => {
+  // Fixed to the window's bottom-left, it covered the sidebar's last
+  // thumbnail — and a busy toast (with Cancel) takes clicks.
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const f = await fixtures();
+  await open(page, f.long);
+  await page.locator('[aria-label="Show pages"]').first().click();
+  await expect(page.locator(".pagenav")).toBeVisible();
+  await page.setInputFiles("input[data-open-input]", f.sample);
+  await expect(page.locator(".snackbar__msg")).toHaveText("Opened · 12 pages");
+  const s = await rect(page, ".snackbar");
+  for (const sel of [".pagenav", ".tooldock", ".zoombar"]) {
+    const r = await rect(page, sel);
+    expect(overlaps(s, r), `toast ${JSON.stringify(s)} vs ${sel} ${JSON.stringify(r)}`).toBe(false);
+  }
+});
+
+test("zoomed in, a panel opening and closing leaves the view where it was across", async ({ page }) => {
+  // The browser clamps the sideways scroll as the room narrows before the
+  // refit sees it, so the refit anchored to the clamped place: open and close
+  // Pages and the view had drifted left.
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await open(page, (await fixtures()).long);
+  const scroller = page.locator(".viewer__scroll");
+  await page.locator('.icon-btn[aria-label="Zoom in"]').click();
+  await page.locator('.icon-btn[aria-label="Zoom in"]').click();
+  await expect.poll(() => scroller.evaluate((el) => el.scrollWidth > el.clientWidth + 100)).toBe(true);
+  // Most of the way across, where a narrower room would have to clamp.
+  await scroller.evaluate((el) => (el.scrollLeft = el.scrollWidth - el.clientWidth - 10));
+  await page.waitForTimeout(200);
+  const across = () => scroller.evaluate((el) => (el.scrollLeft + el.clientWidth / 2) / el.scrollWidth);
+  const before = await across();
+  await page.locator('[aria-label="Show pages"]').first().click();
+  await expect(page.locator(".pagenav")).toBeVisible();
+  await page.waitForTimeout(300);
+  await page.locator('[aria-label="Hide pages"]').first().click();
+  await expect(page.locator(".pagenav")).toHaveCount(0);
+  await page.waitForTimeout(300);
+  expect(Math.abs((await across()) - before), `across ${before} → ${await across()}`).toBeLessThan(0.02);
+});
