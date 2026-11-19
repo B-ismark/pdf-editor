@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { plural } from "../plural";
+import { DEFAULT_BATES, batesNumber, firstNumber, slotsOf, uses } from "../pdf/headerFooter";
 import type { NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/types";
 
 /** One shown page, as far as this panel cares: its size as displayed (points,
@@ -116,11 +117,22 @@ const POSITION: Record<NumberPosition, string> = {
   "bottom-right": "Bottom right",
 };
 
+/** One line for the header & footer: where text sits, and where numbering
+ * starts. A plain page number reads as it always has. */
+function headerFooterSummary(o: PageNumberOptions): string {
+  const slots = slotsOf(o);
+  if (slots.length === 1 && slots[0][1].trim().toLowerCase() === "{page}") {
+    return `${POSITION[slots[0][0]]} · from ${firstNumber(o)}`;
+  }
+  const where = slots.map(([p]) => POSITION[p]).join(", ");
+  return uses(o, "{bates}") ? `${where} · Bates ${batesNumber(o.bates ?? DEFAULT_BATES, 0)}` : where;
+}
+
 /**
  * The Inspector with nothing selected: the document's own properties.
  *
  * Facts first (what this file is), then the settings that apply to every page
- * and travel with the document (page numbers, watermark), then the one export
+ * and travel with the document (header & footer, watermark), then the one export
  * setting (an app preference, shown here too because it changes what this file
  * exports). Commands that make a file live in Export; commands that change the
  * pages live in the Pages sidebar and the ⋯ menu. This panel only *describes*,
@@ -237,8 +249,8 @@ export function DocumentPanel({
         <h3 className="docpanel__label label-medium" id="docpanel-every">On every page</h3>
         <Layer
           icon="page_numbers"
-          name="Page numbers"
-          value={pageNumbers ? `${POSITION[pageNumbers.position]} · from ${pageNumbers.start}` : null}
+          name="Header & footer"
+          value={pageNumbers && slotsOf(pageNumbers).length ? headerFooterSummary(pageNumbers) : null}
           onEdit={onEditNumbers}
           onClear={onClearNumbers}
         />

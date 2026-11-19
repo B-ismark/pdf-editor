@@ -33,7 +33,7 @@ test("the ⋯ menu, the Export menu and the palette mark the same actions", asyn
   await page.click('[aria-label="More actions"]');
   const menu = await page.locator(".menu__item").evaluateAll(marked);
   await page.keyboard.press("Escape");
-  expect(menu, "the ⋯ menu marks what opens a dialog").toEqual(["Add image", "Crop pages", "Hidden information", "Organise pages", "Page numbers", "Redact patterns", "Search commands", "Watermark"]);
+  expect(menu, "the ⋯ menu marks what opens a dialog").toEqual(["Add image", "Crop pages", "Header & footer", "Hidden information", "Organise pages", "Redact patterns", "Search commands", "Watermark"]);
   // "Search commands" is the palette itself, which doesn't list itself.
   const panel = menu.filter((l) => l !== "Search commands");
 
@@ -72,8 +72,8 @@ test("an action that acts immediately carries no mark", async ({ page }) => {
 
   // Opens a dialog.
   await page.click('[aria-label="More actions"]');
-  await expect(item("Page numbers").locator(".opens-mark")).toHaveCount(1);
-  await expect(item("Page numbers")).toHaveAttribute("aria-haspopup", "dialog");
+  await expect(item("Header & footer").locator(".opens-mark")).toHaveCount(1);
+  await expect(item("Header & footer")).toHaveAttribute("aria-haspopup", "dialog");
   // Runs there and then.
   await expect(item("Copy all text").locator(".opens-mark")).toHaveCount(0);
   await expect(item("Copy all text")).not.toHaveAttribute("aria-haspopup", /.*/);
@@ -86,7 +86,7 @@ test("an action that acts immediately carries no mark", async ({ page }) => {
   await expect(item("Export as images").locator(".opens-mark")).toHaveCount(0);
   await page.keyboard.press("Escape");
   // The Inspector's document settings mark their dialogs too.
-  const add = page.getByRole("button", { name: "Add page numbers" });
+  const add = page.getByRole("button", { name: "Add header & footer" });
   await expect(add.locator(".opens-mark")).toHaveCount(1);
   await expect(add).toHaveAttribute("aria-haspopup", "dialog");
   expectClean(w);

@@ -48,7 +48,7 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   (`DocumentPanel.tsx`): file, page count, page size (named paper where it
   matches, "Mixed · N sizes" otherwise), whether the text is searchable (with
   "Recognise text (OCR)" when some pages have none), the every-page layers —
-  page numbers and watermark, each with its state, Add/Edit (opens the Finish
+  header & footer and watermark, each with its state, Add/Edit (opens the Finish
   dialog) and Remove (an undoable edit) — and the lossless-redaction export
   setting. Deselecting (Escape, or a click on empty page) is the way back.
   It used to be two tabs, Document (a list of actions) and Properties, because
@@ -289,3 +289,42 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   - Playwright gets no `filechooser` for `showOpenFilePicker`, so a spec that
     opens through the input on Chromium deletes it first (`tabs.spec` Ctrl+O),
     and `saveto.spec` stubs the pickers.
+
+- **Header & footer is the old page numbers, grown.** Six places (three in
+  the header, three in the footer), each a line of text with tokens —
+  `{page}`, `{pages}`, `{date}`, `{file}`, `{bates}` — filled in per page by
+  `pdf/headerFooter.ts` (`labelsFor`). That one resolver feeds the on-page
+  preview (`FinishPreview`), the dialog's "Page 1 reads" line and the exporter,
+  so none of them can disagree; the margin (`HF_MARGIN`) is shared the same
+  way. It's still stored as `DocState.pageNumbers` with the same type: a
+  setting without `slots` (any session from before) reads as `"{page}"` at
+  its `position`, and the Inspector still calls that "Bottom centre · from 1".
+  `{pages}` is the *last page's number* (start + count − 1), so "Page 3 of 7"
+  holds when numbering starts elsewhere. `{date}` and `{file}` are fixed into
+  the setting at Apply — the preview, every page and a later export (or a
+  restored session, or a renamed file) read the same thing. Update keeps them
+  too, unless the person ticks "Use today's date and this file's name" (shown
+  only when that would change a page) — but only a value that was *on* the
+  pages is kept: Apply stores a date even for a "{page}" setting, and adding
+  `{date}` months later must not surface that never-shown one. The date is
+  written in the reader's language only when Helvetica can draw it
+  (`dateLabel`: "18 novembre 2026"), in English otherwise — a Japanese or
+  Russian date would reach the file as fragments while the preview showed it
+  whole. Bates is prefix + a zero-padded count from its own start, one per
+  page as arranged, and keeps counting past its digits rather than wrapping. Text
+  goes through `sanitize` like a watermark: a character Helvetica can't write
+  is dropped and reported, not drawn as "?". Token chips in the dialog take
+  `preventDefault` on mousedown so the caret stays in the place being typed,
+  and put the caret back in the same task (`flushSync`), not a frame later —
+  a fast keystroke in between lands at the end. The number fields hold what
+  was typed and clamp on blur; clamping per keystroke made "6 → backspace → 2"
+  read 12. The preview places each label by its *baseline* (`text-box:
+  trim-end text alphabetic` makes the span's bottom the baseline): the
+  exporter's footer baseline is on the margin, the header's a text size below
+  it. Stored values are read defensively (`slotsOf`, `firstNumber`): restore
+  doesn't validate `DocState`, and a non-text slot must not stop the page
+  rendering, nor a non-numeric size the export. The dialog opens on the same
+  reading (`normalBates`), so Update with nothing touched renumbers nothing;
+  it keeps the stored text size too, having no size control of its own. Both
+  first numbers (page and Bates) cap at `MAX_START`, twelve digits — page and
+  dialog alike, and far enough below 2^53 that no two pages share a number.

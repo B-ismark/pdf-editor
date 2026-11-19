@@ -210,28 +210,28 @@ test.describe("inspector", () => {
     expectClean(w);
   });
 
-  test("page numbers and watermark are set, shown and removed from here, and undo", async ({ page }) => {
+  test("header & footer and watermark are set, shown and removed from here, and undo", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 860 });
     await open(page, (await fixtures()).sample);
     const panel = page.locator("aside.inspector");
     const layer = (name: string) => panel.locator(".docpanel__layer", { hasText: name });
-    await expect(layer("Page numbers")).toContainText("Off");
+    await expect(layer("Header & footer")).toContainText("Off");
 
-    await panel.getByRole("button", { name: "Add page numbers" }).click();
+    await panel.getByRole("button", { name: "Add header & footer" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible();
     await dialog.locator(".btn--filled").click();
     await expect(dialog).toHaveCount(0);
-    await expect(layer("Page numbers")).toContainText("Bottom centre · from 1");
-    await expect(panel.getByRole("button", { name: "Edit page numbers" })).toBeVisible();
+    await expect(layer("Header & footer")).toContainText("Bottom centre · from 1");
+    await expect(panel.getByRole("button", { name: "Edit header & footer" })).toBeVisible();
 
-    await panel.getByRole("button", { name: "Remove page numbers" }).click();
-    await expect(layer("Page numbers")).toContainText("Off");
+    await panel.getByRole("button", { name: "Remove header & footer" }).click();
+    await expect(layer("Header & footer")).toContainText("Off");
     // The button that had focus is gone; focus lands on the one replacing it,
     // not on the page body.
-    await expect(panel.getByRole("button", { name: "Add page numbers" })).toBeFocused();
+    await expect(panel.getByRole("button", { name: "Add header & footer" })).toBeFocused();
     await page.keyboard.press("Control+z");
-    await expect(layer("Page numbers")).toContainText("Bottom centre");
+    await expect(layer("Header & footer")).toContainText("Bottom centre");
 
     // The watermark opens the same dialog on its own tab.
     await panel.getByRole("button", { name: "Add watermark" }).click();

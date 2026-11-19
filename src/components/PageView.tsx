@@ -1,3 +1,4 @@
+import { HF_MARGIN, labelsFor, textColor, textSize } from "../pdf/headerFooter";
 import { memo, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { renderPage, isRenderCancelled } from "../pdf/loader";
 import { useRenderWindow } from "../hooks/useRenderWindow";
@@ -68,6 +69,8 @@ interface Props {
   /** Document-wide finishing layers, previewed live (drawn for real at export). */
   pageNumbers: PageNumberOptions | null;
   watermark: WatermarkOptions | null;
+  /** How many pages the document has as shown: `{pages}` in a header or footer. */
+  pageTotal: number;
   /** Ids currently in a multi-selection (highlighted, not individually chromed). */
   multiIds: Set<string>;
   /** The image or signature waiting to be placed, or null. While set, a layer
@@ -128,7 +131,7 @@ export const PageView = memo(PageViewInner);
 function PageViewInner(props: Props) {
   const {
     bytes, page, position, scale, tool, drawTool, drawStyle, edits, textBoxes, redactions,
-    annotations, stamps, links, pagePos, formValues, pageNumbers, watermark, multiIds, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, onSelect, onEditText, onFinishEdit,
+    annotations, stamps, links, pagePos, formValues, pageNumbers, watermark, pageTotal, multiIds, placing, findMatches, activeFindId, selection, autoFocusId, editingId, compact, onSelect, onEditText, onFinishEdit,
     onChangeFragmentText, onChangeTextBoxText, onChangeTextBox, onChangeRedaction, onChangeLink,
     onChangeNoteText, onMoveAnnotation, onChangeStamp, onDeleteStamp, onAddTextBox, onAddRedaction, onAddLink, onChangeFormValue, onMarquee, onMoveMulti, onAddAnnotation,
     onPlaceStamp, onSpill,
@@ -519,7 +522,8 @@ function PageViewInner(props: Props) {
           <FinishPreview
             pageNumbers={pageNumbers}
             watermark={watermark}
-            pageNumber={(pageNumbers?.start ?? 1) + position}
+            position={position}
+            total={pageTotal}
             scale={scale}
             box={
               page.crop
@@ -779,39 +783,32 @@ function PageViewInner(props: Props) {
   );
 }
 
-/** Non-interactive on-canvas preview of page numbers + watermark. Positions
- * mirror the exporter (28pt margins, centred watermark). Screen y is down, so
- * the watermark rotates by the negated PDF angle. */
+/** Non-interactive on-canvas preview of the header & footer + watermark.
+ * The text comes from the exporter's own resolver (`labelsFor`) and sits at its
+ * margins; the watermark is centred. Screen y is down, so the watermark
+ * rotates by the negated PDF angle. */
 function FinishPreview({
   pageNumbers,
   watermark,
-  pageNumber,
+  position,
+  total,
   scale,
   box,
 }: {
   pageNumbers: PageNumberOptions | null;
   watermark: WatermarkOptions | null;
-  pageNumber: number;
+  /** This page's place in the document as shown, and how many there are. */
+  position: number;
+  total: number;
   scale: number;
-  /** The crop window on the page, in overlay pixels: the exporter places page
-   * numbers and the watermark against what the reader sees. Whole page if
+  /** The crop window on the page, in overlay pixels: the exporter places the
+   * header, footer and watermark against what the reader sees. Whole page if
    * absent. */
   box?: { left: number; top: number; width: number; height: number };
 }) {
-  if (!pageNumbers && !(watermark && watermark.text.trim())) return null;
-  const m = 28 * scale;
-  const numStyle: React.CSSProperties = { position: "absolute", lineHeight: 1 };
-  if (pageNumbers) {
-    if (pageNumbers.position.startsWith("top")) numStyle.top = m;
-    else numStyle.bottom = m;
-    if (pageNumbers.position.endsWith("left")) numStyle.left = m;
-    else if (pageNumbers.position.endsWith("right")) numStyle.right = m;
-    else {
-      numStyle.left = 0;
-      numStyle.right = 0;
-      numStyle.textAlign = "center";
-    }
-  }
+  const labels = pageNumbers ? labelsFor(pageNumbers, position, total) : [];
+  if (!labels.length && !(watermark && watermark.text.trim())) return null;
+  const m = HF_MARGIN * scale;
   return (
     <div className="finishlayer" aria-hidden="true" style={box ? { inset: "auto", ...box } : undefined}>
       {watermark && watermark.text.trim() && (
@@ -827,11 +824,31 @@ function FinishPreview({
           {watermark.text}
         </span>
       )}
-      {pageNumbers && (
-        <span className="finishlayer__num" style={{ ...numStyle, color: pageNumbers.color, fontSize: pageNumbers.size * scale }}>
-          {pageNumber}
-        </span>
-      )}
+      {pageNumbers &&
+        labels.map(({ position: at, text }) => {
+          const style: React.CSSProperties = {
+            position: "absolute",
+            color: textColor(pageNumbers),
+            fontSize: textSize(pageNumbers) * scale,
+          };
+          // Placed by the baseline, as the exporter draws it: the footer's
+          // sits on the margin, the header's one text size below it. The
+          // span's box ends at its baseline (`text-box`, in the stylesheet).
+          const size = textSize(pageNumbers) * scale;
+          style.bottom = at.startsWith("top") ? `calc(100% - ${m + size}px)` : m;
+          if (at.endsWith("left")) style.left = m;
+          else if (at.endsWith("right")) style.right = m;
+          else {
+            style.left = 0;
+            style.right = 0;
+            style.textAlign = "center";
+          }
+          return (
+            <span key={at} className="finishlayer__num" data-place={at} style={style}>
+              {text}
+            </span>
+          );
+        })}
     </div>
   );
 }

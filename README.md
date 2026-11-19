@@ -79,8 +79,9 @@ and is **mobile- and tablet-first**:
   PDF, a page each, in the order picked. Photos stand the right way up, and
   what the camera recorded (location, device, time, comments) is left out of
   the file.
-- **Finishing touches** — add page numbers, stamp a diagonal watermark, or
-  export every page as a PNG image.
+- **Finishing touches** — a header and footer (page numbers, "Page 3 of 7",
+  the date, the file name, Bates numbers like ACME-000001, or your own text,
+  in any of six places), a diagonal watermark, or every page as a PNG image.
 - **Several PDFs at once** — open more files (pick several, drop them on the
   page, <kbd>Ctrl/⌘</kbd>+<kbd>O</kbd>, or the **+** on the tab strip) and each
   gets its own tab with its own edits and undo history. Switching never costs a
@@ -219,7 +220,7 @@ it's measured server-side by GitHub Pages — nothing is added to the app itself
 | **Redact** | Drag a rectangle over the content to remove. Pick its fill colour in the properties panel. |
 
 The overflow menu (⋮) holds document tools: **Organize pages**, **Add image**,
-**Page numbers**, **Watermark**, and **Export as images** — plus **Open another
+**Header & footer**, **Watermark**, and **Export as images** — plus **Open another
 PDF** and **Close document**.
 
 To leave a document, click the **PDF Editor** brand in the app bar (or use
@@ -241,7 +242,8 @@ src/
     loader.ts     parse + render pages with PDF.js (+ document cache)
     exporter.ts   write edits/text/redactions/annotations/stamps with pdf-lib
     pageOps.ts    reorder/rotate/delete/merge/extract via pdf-lib
-    finishOps.ts  page numbers, watermark, render-to-image
+    finishOps.ts  render-to-image
+    headerFooter.ts  header & footer tokens and Bates numbers, for preview and export
   hooks/
     useHistory.ts undo/redo stack with gesture coalescing
     useDrag.ts    pointer-drag helper + shared drag lock
@@ -258,7 +260,7 @@ src/
     StampItem.tsx         a placed signature/image (draggable/resizable)
     DrawToolbar.tsx       contextual draw sub-toolbar
     SignatureDialog.tsx   draw / type / upload a signature
-    FinishDialog.tsx      page numbers + watermark options
+    FinishDialog.tsx      header & footer + watermark options
     Organize.tsx          page thumbnail organizer
     Thumbnail.tsx         a page thumbnail
     PropertiesPanel.tsx   contextual controls (M3)
@@ -321,8 +323,9 @@ A pragmatic, client-side editor — worth knowing where the seams are:
 - **Printing is at 150 dpi.** The pages are drawn as pictures for the print
   dialog, as browsers' own PDF viewers do — sharp on paper, but text in a
   "Save as PDF" from the print dialog isn't selectable. Download for that.
-- **Page numbers / watermark / organize** rebuild the document, so they bake in
-  (and reset) the current text edits — do them as a finishing step.
+- **Header & footer and watermark text is Helvetica, Western characters
+  only.** A character outside that set is left out of the file, and you're
+  told which.
 - **Password-protected PDFs open, and download without a password unless you
   ask for one.** The file is unlocked once, in your browser, when you type its
   password (an owner-only lock opens without asking); a plain download is
