@@ -280,9 +280,20 @@ anything that walks pages in order, or anything that maps a pointer onto a page.
 menu's *Compare documents*, disabled until a second tab is open.
 
 - **Each side is the file as it would download.** A tab whose change count is
-  past what's baked into its bytes is run through `exportPdf` and re-read;
-  otherwise its own parse is used. Every parse the dialog made is released on
-  close (`releaseDoc`) — never the front document's own.
+  past what's baked into its bytes is run through `exportPdf` (with the same
+  input as Download, `losslessRaster` included) and re-read; otherwise its own
+  parse is used. On close only those exported copies are released — **never a
+  tab's own parse, front or parked**: destroying it drops its fonts from
+  `document.fonts`, and `fontInfo.ts` keeps the old `g_d…` names by bytes, so
+  that tab's edited text fell back to a generic face (the review of 8g caught
+  this; `compare.spec` guards it).
+- **What's drawn and what's read differ on a redacted page.** The exporter
+  makes a page with a true redaction a picture, so reading the export would
+  call every word on it removed. The text comes from a second export with only
+  the whiteouts, and `textAsExported` hides the words under each true
+  redaction (moved by the crop's corner, which is where the exported view
+  starts) and adds the in-memory OCR layer back — the exporter never writes it,
+  and the unedited side is read with it. Marks and Overlay use the real export.
 - **Text is read the way Find reads it** (`joinPage`), so two writers that
   split a line into different runs still read the same. Words compare after
   `normalWord` (NFKC, plain quotes, no soft hyphens or zero-widths).
@@ -298,9 +309,13 @@ menu's *Compare documents*, disabled until a second tab is open.
 - **Pages pair by index.** A page inserted in After shifts the Overlay of every
   page after it; the text diff is unaffected (it runs over the whole document).
 - **Overlay** is an ink diff (luminance < 160): ink in both is drawn faint,
-  ink only in one in `--diff-removed` / `--diff-added`, read from the theme.
+  ink only in one in `--diff-removed-page` / `--diff-added-page`. Those, and the
+  word marks, never change with the theme — the page is white in both, and the
+  dark theme's pastel `--diff-*` were under 2:1 on it. The themed pair is for
+  the change list only.
 - Pages render only near the viewport (IntersectionObserver, 800px margin) and
-  free their canvases when they leave it.
+  free their canvases when they leave it; Overlay's renders are cancelled too.
+  A failed load isn't cached, so Swap retries it.
 
 ## Known limits
 

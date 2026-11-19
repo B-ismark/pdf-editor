@@ -3556,13 +3556,36 @@ export const DocumentEditor = memo(function DocumentEditor({
               return {
                 id: t.id,
                 name: t.fileName,
-                front,
                 load: async () => {
-                  if (!edited) return { pdf: tabPdf, edited };
+                  // Its own parse, which the tab draws from: never released here.
+                  if (!edited) return { pdf: tabPdf, text: tabPdf.pages, edited, release: () => {} };
                   // As it would download, so the comparison reads what the file will.
-                  const [{ exportPdf }, { loadPdf }] = await Promise.all([import("./pdf/exporter"), import("./pdf/loader")]);
-                  const bytes = await exportPdf(tabPdf, { ...EMPTY_DOC, ...state });
-                  return { pdf: await loadPdf(toAB(bytes)), edited };
+                  const [{ exportPdf }, { loadPdf, releaseDoc }, { textAsExported }] = await Promise.all([
+                    import("./pdf/exporter"),
+                    import("./pdf/loader"),
+                    import("./pdf/compare"),
+                  ]);
+                  const input = { ...EMPTY_DOC, ...state, losslessRaster };
+                  const copies: LoadedPdf[] = [];
+                  const release = () => copies.forEach((c) => releaseDoc(c.bytes));
+                  try {
+                    const shown = await loadPdf(toAB(await exportPdf(tabPdf, input)));
+                    copies.push(shown);
+                    // A true redaction makes its page a picture; read the text
+                    // from an export without them, and hide what they cover.
+                    const covers = input.redactions.filter((r) => r.cover);
+                    let read = shown;
+                    if (covers.length < input.redactions.length) {
+                      read = await loadPdf(toAB(await exportPdf(tabPdf, { ...input, redactions: covers })));
+                      copies.push(read);
+                    }
+                    const plan = resolvePlan(state.pages, tabPdf.pages.length);
+                    const { pages, hidden } = textAsExported(read.pages, tabPdf.pages, plan, input);
+                    return { pdf: shown, text: pages, hidden, edited, release };
+                  } catch (err) {
+                    release();
+                    throw err;
+                  }
                 },
               };
             })}

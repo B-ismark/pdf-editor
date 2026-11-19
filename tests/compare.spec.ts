@@ -1,7 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
-import { open, watch, expectClean } from "./helpers";
+import { open, watch, expectClean, pickTool, dragOnPage, seedStore, docRecord, restoreSeeded, EMPTY } from "./helpers";
 import { fixtures } from "./fixtures";
 import { compareText, docText, matchPairs } from "../src/pdf/compare";
 import type { PageData } from "../src/pdf/types";
@@ -156,6 +156,117 @@ test("a document's unsaved edits are part of what's compared", async ({ page }) 
   await expect(summary(page)).toHaveText("1 change on 1 page");
   await expect(items(page).nth(0)).toContainText("Added · page 1");
   await expect(items(page).nth(0).locator("ins")).toHaveText("Freshly typed");
+});
+
+test("a small redaction removes only the words under it", async ({ page }) => {
+  const words = "Keep this secret word here";
+  const path = await makePdf("r.pdf", [[words]]);
+  await openBoth(page, path, path);
+  // A redaction over "secret" alone, on the copy in front.
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const x0 = 60 + font.widthOfTextAtSize("Keep this ", 14);
+  const x1 = x0 + font.widthOfTextAtSize("secret", 14);
+  const box = (await page.locator(".page").first().boundingBox())!;
+  const k = box.width / 612;
+  await pickTool(page, "Redact");
+  await dragOnPage(page, { x: (x0 + 1) * k, y: (792 - 720 - 12) * k }, { x: (x1 - 1) * k, y: (792 - 720 + 3) * k });
+  await pickTool(page, "Select");
+
+  await openCompare(page);
+  // The exporter turns a redacted page into a picture; the comparison still
+  // reads the rest of its words.
+  await expect(summary(page)).toHaveText("1 change on 1 page");
+  await expect(items(page).nth(0)).toContainText("Removed · page 1");
+  await expect(items(page).nth(0).locator("del")).toHaveText("secret");
+});
+
+test("on a cropped page, a redaction still hides just its own words", async ({ page }) => {
+  const path = await makePdf("c.pdf", [["Keep this secret word here", "And a second line"]]);
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const x0 = 60 + font.widthOfTextAtSize("Keep this ", 14);
+  const x1 = x0 + font.widthOfTextAtSize("secret", 14);
+  await page.goto("/");
+  // The crop moves the exported page's corner to (40, 600); the redaction is
+  // stored in the uncropped page's space.
+  const edited = {
+    ...EMPTY,
+    pages: [{ index: 0, rotate: 0, crop: { x: 40, y: 600, width: 500, height: 150 } }],
+    redactions: [{ id: "r1", pageIndex: 0, x: x0 + 1, y: 716, width: x1 - x0 - 2, height: 14, color: "#000000" }],
+  };
+  await seedStore(
+    page,
+    [
+      ["doc:a", docRecord("a", "plain.pdf", 0)],
+      ["doc:b", docRecord("b", "cropped.pdf", 1, { doc: edited })],
+    ],
+    [
+      ["bytes:a", path],
+      ["bytes:b", path],
+    ],
+  );
+  await restoreSeeded(page);
+  await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+  await page.locator(".doctab", { hasText: "cropped.pdf" }).click();
+  await page.waitForSelector(".page canvas");
+  await openCompare(page);
+  await expect(page.locator(".compare__edited")).toHaveCount(1);
+  await expect(summary(page)).toHaveText("1 change on 1 page");
+  await expect(items(page).nth(0).locator("del")).toHaveText("secret");
+});
+
+test("the word marks and Overlay stay legible in dark theme", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await openBoth(page, await makePdf("a.pdf", [["One removed word."]], { x: 100 }), await makePdf("b.pdf", [["One word."]], { x: 400 }));
+  await openCompare(page);
+  const mark = page.locator(".compare__mark--removed").first();
+  const light = await mark.evaluate((n) => getComputedStyle(n).backgroundColor);
+  await page.emulateMedia({ colorScheme: "dark" });
+  // The page is white in both themes, so what's drawn on it keeps its colours.
+  await expect.poll(() => mark.evaluate((n) => getComputedStyle(n).backgroundColor)).toBe(light);
+
+  await page.getByRole("radio", { name: "Overlay" }).click();
+  const canvas = page.locator(".compare__row canvas").first();
+  await expect
+    .poll(
+      () =>
+        canvas.evaluate((c: HTMLCanvasElement) => {
+          const ctx = c.getContext("2d")!;
+          const at = (fx: number, fy: number) => ctx.getImageData(Math.round(c.width * fx), Math.round(c.height * fy), 1, 1).data;
+          const lum = (d: Uint8ClampedArray) => (d[0] * 299 + d[1] * 587 + d[2] * 114) / 1000;
+          const a = at(160 / 612, 1 - 360 / 792);
+          const b = at(460 / 612, 1 - 360 / 792);
+          // At least 3:1 against white is a luminance well under ~150.
+          return { aRed: a[0] > a[1] + 60 && lum(a) < 120, bGreen: b[1] > b[0] + 40 && lum(b) < 120 };
+        }),
+      { timeout: 20_000 },
+    )
+    .toEqual({ aRed: true, bGreen: true });
+});
+
+test("closing Compare leaves a background tab's own fonts alone", async ({ page }) => {
+  const f = await fixtures();
+  await openBoth(page, f.ligatures, f.sample);
+  await openCompare(page);
+  await page.getByRole("dialog", { name: "Compare" }).getByRole("button", { name: "Close", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Compare" })).toBeHidden();
+
+  // Back to the first tab: a selected run still draws in the document's face.
+  await page.locator(".doctab").first().click();
+  await page.waitForSelector(".page canvas");
+  const run = page.locator(".fragment").first();
+  const id = await run.getAttribute("data-id");
+  const el = page.locator(`.fragment[data-id="${id}"]`);
+  await el.click();
+  await expect.poll(() => el.evaluate((n) => getComputedStyle(n).fontFamily)).toMatch(/^"?g_/);
+  const family = await el.evaluate((n) => getComputedStyle(n).fontFamily);
+  const loaded = await page.evaluate(async (family) => {
+    const name = family.split(",")[0].trim().replace(/^"|"$/g, "");
+    await document.fonts.load(`20px ${family}`);
+    return [...document.fonts].some((ff) => ff.family.replace(/^"|"$/g, "") === name && ff.status === "loaded");
+  }, family);
+  expect(loaded, `${family} is no longer loaded`).toBe(true);
 });
 
 test("Compare waits for a second document", async ({ page }) => {

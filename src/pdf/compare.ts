@@ -1,6 +1,6 @@
 import { joinPage } from "./find";
-import { fragmentSize } from "./style";
-import type { PageData } from "./types";
+import { fragmentSize, isFragmentModified } from "./style";
+import type { Edits, PageData, PageRef, Redaction } from "./types";
 import { yieldToUI } from "./yield";
 
 /**
@@ -76,8 +76,9 @@ export function normalWord(s: string): string {
     .replace(/[­​-‍﻿]/g, "");
 }
 
-/** Every word of a document, in reading order, with where it sits. */
-export function docText(pages: PageData[]): DocText {
+/** Every word of a document, in reading order, with where it sits. A word
+ * whose middle is under one of `hidden`'s boxes for its page is left out. */
+export function docText(pages: PageData[], hidden?: Map<number, Box[]>): DocText {
   const words: Word[] = [];
   const lines: DocText["lines"] = [];
   for (const page of pages) {
@@ -107,11 +108,63 @@ export function docText(pages: PageData[]): DocText {
       }
       const t = normalWord(m[0]);
       if (!t) continue;
+      const under = hidden?.get(page.pageIndex);
+      if (under && boxes.some((b) => under.some((h) => inside(b, h)))) continue;
       words.push({ text: t, shown: m[0], page: page.pageIndex, boxes });
     }
     endLine();
   }
   return { words, lines };
+}
+
+/** Whether `b`'s middle is inside `h`. */
+function inside(b: Box, h: Box): boolean {
+  const x = b.x + b.width / 2;
+  const y = b.y + b.height / 2;
+  return x >= h.x && x <= h.x + h.width && y >= h.y && y <= h.y + h.height;
+}
+
+/**
+ * The text of a document as it would download, from an export made with its
+ * true redactions left out (`exported`, one page per entry of `plan`).
+ *
+ * Exporting with them would be simpler and wrong: the exporter turns a page
+ * with a true redaction into a picture, so every word on it would read as
+ * removed. Instead the words under each redaction are hidden here — the same
+ * rectangles, moved into the exported page's view space, which starts at its
+ * crop's corner.
+ *
+ * The OCR layer is added back the same way: it lives only in memory (the
+ * exporter doesn't write it), but it's what a scan says, and the version
+ * without edits is compared with it.
+ */
+export function textAsExported(
+  exported: PageData[],
+  source: PageData[],
+  plan: PageRef[],
+  state: { edits: Edits; redactions: Redaction[] },
+): { pages: PageData[]; hidden: Map<number, Box[]> } {
+  const hidden = new Map<number, Box[]>();
+  const pages = exported.map((page, i) => {
+    const ref = plan[i];
+    const from = ref ? source[ref.index] : undefined;
+    if (!ref || !from) return page;
+    const dx = ref.crop?.x ?? 0;
+    const dy = ref.crop?.y ?? 0;
+    const boxes = state.redactions
+      .filter((r) => !r.cover && r.pageIndex === ref.index)
+      .map((r) => ({ x: r.x - dx, y: r.y - dy, width: r.width, height: r.height }));
+    if (boxes.length) hidden.set(page.pageIndex, boxes);
+    // An edited OCR word is written into the file by the exporter already.
+    const ocr = from.fragments
+      .filter((f) => f.id.startsWith("ocr:") && !isFragmentModified(f, state.edits[f.id]))
+      .map((f) => {
+        const [a, b, c, d, e, g] = f.transform;
+        return { ...f, pageIndex: page.pageIndex, transform: [a, b, c, d, e - dx, g - dy] };
+      });
+    return ocr.length ? { ...page, fragments: [...page.fragments, ...ocr] } : page;
+  });
+  return { pages, hidden };
 }
 
 /** The box round a share [s, e) of a run, from its baseline transform. Glyph

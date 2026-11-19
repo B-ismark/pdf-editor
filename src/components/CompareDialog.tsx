@@ -4,7 +4,7 @@ import { useModal } from "../hooks/useModal";
 import { staleBuildMessage } from "../staleBuild";
 import { segmentKey } from "../segmentKey";
 import { plural } from "../plural";
-import { getCachedDoc, isRenderCancelled, releaseDoc } from "../pdf/loader";
+import { getCachedDoc, isRenderCancelled } from "../pdf/loader";
 import { compareText, docText, quote, type Box, type Change, type Comparison } from "../pdf/compare";
 import type { LoadedPdf, PageData } from "../pdf/types";
 
@@ -13,9 +13,20 @@ export interface CompareDoc {
   id: string;
   name: string;
   /** The document as it would download: its edits baked in when it has any. */
-  load: () => Promise<{ pdf: LoadedPdf; edited: boolean }>;
-  /** The document in front, whose parse the editor behind is still drawing from. */
-  front: boolean;
+  load: () => Promise<Loaded>;
+}
+
+export interface Loaded {
+  /** What's drawn: the file as it would download. */
+  pdf: LoadedPdf;
+  /** What's read: its pages' text, and the boxes on each page (by index) whose
+   * words are gone from the file. See `textAsExported`. */
+  text: PageData[];
+  hidden?: Map<number, Box[]>;
+  edited: boolean;
+  /** Let go of any copy made for the comparison — never a tab's own parse,
+   * which that tab still draws from, front or not. */
+  release: () => void;
 }
 
 interface Props {
@@ -26,10 +37,8 @@ interface Props {
   onClose: () => void;
 }
 
-interface Side {
+interface Side extends Loaded {
   doc: CompareDoc;
-  pdf: LoadedPdf;
-  edited: boolean;
 }
 
 type Mode = "side" | "overlay";
@@ -53,17 +62,14 @@ export function CompareDialog({ docs, before, after, onClose }: Props) {
   const rowRefs = useRef(new Map<number, HTMLDivElement>());
   const listRefs = useRef(new Map<number, HTMLButtonElement>());
 
-  // Each document is read once however often the sides are swapped; every
-  // parse made here is let go on close (the front one's only if it was a
-  // copy with edits baked in — the editor behind still draws the original).
+  // Each document is read once however often the sides are swapped, and the
+  // copies made for it are let go on close.
   const loads = useRef(new Map<string, Promise<Side>>());
   useEffect(() => {
     const all = loads.current;
     return () => {
       for (const p of all.values()) {
-        void p.then((s) => {
-          if (!s.doc.front || s.edited) releaseDoc(s.pdf.bytes);
-        }, () => {});
+        void p.then((s) => s.release(), () => {});
       }
     };
   }, []);
@@ -73,6 +79,11 @@ export function CompareDialog({ docs, before, after, onClose }: Props) {
       const doc = docs.find((d) => d.id === id)!;
       p = doc.load().then((r) => ({ doc, ...r }));
       loads.current.set(id, p);
+      // A failure isn't kept: Swap, or picking it again, tries afresh.
+      const tried = p;
+      p.catch(() => {
+        if (loads.current.get(id) === tried) loads.current.delete(id);
+      });
     }
     return p;
   };
@@ -87,7 +98,7 @@ export function CompareDialog({ docs, before, after, onClose }: Props) {
       .then(async ([a, b]) => {
         if (!live) return;
         setSides({ a, b });
-        const r = await compareText(docText(a.pdf.pages), docText(b.pdf.pages));
+        const r = await compareText(docText(a.text, a.hidden), docText(b.text, b.hidden));
         if (live) setResult(r);
       })
       .catch((err) => {
@@ -464,7 +475,7 @@ function drawPage(bytes: ArrayBuffer, index: number, cssWidth: number, canvas: H
 }
 
 /** Render a page offscreen at an exact scale (PDF unit → px). */
-async function pagePixels(bytes: ArrayBuffer, index: number, scale: number, signal: { stopped: boolean }) {
+async function pagePixels(bytes: ArrayBuffer, index: number, scale: number, signal: Signal) {
   const doc = await getCachedDoc(bytes);
   const page = await doc.getPage(index + 1);
   const viewport = page.getViewport({ scale });
@@ -475,8 +486,26 @@ async function pagePixels(bytes: ArrayBuffer, index: number, scale: number, sign
   if (!ctx || signal.stopped) return null;
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, c.width, c.height);
-  await page.render({ canvasContext: ctx, viewport }).promise;
+  const task = page.render({ canvasContext: ctx, viewport });
+  signal.tasks.push(task);
+  try {
+    await task.promise;
+  } catch (err) {
+    c.width = c.height = 0;
+    if (isRenderCancelled(err)) return null;
+    throw err;
+  }
+  if (signal.stopped) {
+    c.width = c.height = 0;
+    return null;
+  }
   return c;
+}
+
+/** Scrolling an Overlay page away stops its renders. */
+interface Signal {
+  stopped: boolean;
+  tasks: { cancel: () => void }[];
 }
 
 function PagePane({
@@ -508,8 +537,13 @@ function PagePane({
       return;
     }
     const job = drawPage(bytes, page.pageIndex, box.clientWidth || 400, canvas);
-    job.done.then(() => setDrawn(true), () => {});
-    return () => job.cancel();
+    // A draw stopped by scrolling away still resolves: it isn't drawn.
+    let live = true;
+    job.done.then(() => live && setDrawn(true), () => {});
+    return () => {
+      live = false;
+      job.cancel();
+    };
   }, [near, bytes, page, ref]);
 
   if (!page) {
@@ -560,7 +594,7 @@ function OverlayPane({ a, b, index }: { a: LoadedPdf; b: LoadedPdf; index: numbe
       canvas.width = canvas.height = 0;
       return;
     }
-    const signal = { stopped: false };
+    const signal: Signal = { stopped: false, tasks: [] };
     const scale = ((box.clientWidth || 400) * (window.devicePixelRatio || 1)) / w;
     void (async () => {
       const [ca, cb] = await Promise.all([
@@ -588,8 +622,8 @@ function OverlayPane({ a, b, index }: { a: LoadedPdf; b: LoadedPdf; index: numbe
       const da = read(ca);
       const db = read(cb);
       const css = getComputedStyle(box);
-      const removed = rgb(css.getPropertyValue("--diff-removed")) ?? [179, 38, 30];
-      const added = rgb(css.getPropertyValue("--diff-added")) ?? [20, 108, 46];
+      const removed = rgb(css.getPropertyValue("--diff-removed-page")) ?? [179, 38, 30];
+      const added = rgb(css.getPropertyValue("--diff-added-page")) ?? [20, 108, 46];
       canvas.width = W;
       canvas.height = H;
       const ctx = canvas.getContext("2d");
@@ -619,6 +653,7 @@ function OverlayPane({ a, b, index }: { a: LoadedPdf; b: LoadedPdf; index: numbe
     })().catch(() => {});
     return () => {
       signal.stopped = true;
+      for (const t of signal.tasks) t.cancel();
     };
   }, [near, a, b, index, pa, pb, w, h, ref]);
 

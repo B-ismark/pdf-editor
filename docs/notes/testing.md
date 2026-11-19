@@ -329,7 +329,10 @@ type-checking can't see, and each exists because it broke once:
   change; Next/Previous walk the list; Swap turns additions into removals;
   Overlay draws ink only in one version in that version's colour, even when the
   text is identical; a tab's unsaved edit is compared as it would download
-  ("with your edits"); the command is disabled with one document open;
+  ("with your edits"); a small redaction removes only the words under it, on a
+  cropped page too (the exporter rasterises that page); marks and Overlay keep
+  their colours in dark theme; closing Compare leaves a background tab's fonts
+  loaded; the command is disabled with one document open;
 - `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
   never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
   character WinAnsi can't encode instead of throwing, so `sanitize`
