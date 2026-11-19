@@ -139,6 +139,11 @@ export interface PageData {
    * Null when pdf.js has no reference for it (a page stored as a direct
    * object), which the exporter refuses rather than guesses. */
   ref: { num: number; gen: number } | null;
+  /** Set while the page's text hasn't been read yet: `fragments` and `fields`
+   * are empty for now, not empty for good. A file opens with its layout only
+   * and reads its text in the background (`textIndex.ts`); anything that needs
+   * the whole document's text goes through `completeText` first. */
+  textPending?: true;
   /** True once OCR has read this page (whether or not it found words), so the
    * Inspector stops offering to read it again. */
   ocrRead?: boolean;

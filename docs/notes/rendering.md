@@ -65,6 +65,25 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   `pdf-lib` to the fork; `sign.spec.ts` verifies a real signature and fails if
   the alias goes. Upstream `pdf-lib` stays only as a devDependency for the
   tests, which deliberately read the output with a different library.
+- **A page's text arrives after the page.** `loadLayout` (`loader.ts`) reads
+  page sizes, turns and references only, and every page starts `textPending`
+  with no fragments or fields. `textIndex.ts` then reads the text one page at a
+  time from the same parse the pages render from, hands it over in batches
+  (the first page at once, the rest on a ~120 ms timer), and `App` merges each
+  batch into every tab showing those bytes with `fillPages`, which keeps OCR's
+  words and leaves unchanged pages the same objects. A page scrolled into view
+  is read next (`wantText`, from `PageView`). The rules:
+  - **Anything that reads the whole document goes through `completeText`
+    first**: export (the exporter does it itself, so every caller is covered),
+    the whiteout check (`findUnsafeCovers` throws on a pending page, so a
+    missed caller fails loudly), copy/export text, OCR, Compare, Download all.
+    Reading a half-read document directly treats unread pages as having no text.
+  - **No text *yet* isn't no text.** The Inspector says "Reading text…", the
+    picture-page hint skips pending pages, and an edit restored onto an unread
+    page counts as a change until its fragment can be compared.
+  - **Live views keep up instead of waiting**: Find and the patterns search
+    what has arrived; Redact all and the patterns' Redact wait for every page.
+  - Fragment ids are `page:item`, so they're the same whenever a page is read.
 - **Long loops yield through `yieldToUI` (`pdf/yield.ts`), never `setTimeout(0)`.**
   Nested timeouts clamp to ≥4 ms, which made a 150-page export spend most of
   its time asleep. `yieldToUI` only gives the browser a turn once ~12 ms of work

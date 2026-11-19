@@ -15,6 +15,9 @@ export interface PageFacts {
   ocr: number;
   /** OCR has already read this page; offering it again would find nothing new. */
   ocrRead?: boolean;
+  /** Its text hasn't been read yet (the file is still being read in the
+   * background): no text *yet*, so neither "no text layer" nor an OCR case. */
+  pending?: boolean;
 }
 
 interface Props {
@@ -161,14 +164,17 @@ export function DocumentPanel({
   const withText = pages.filter((p) => p.text + p.ocr > 0).length;
   const recognised = pages.some((p) => p.ocr > 0);
   // Pages OCR could still help: no text, and not already read.
-  const unread = pages.filter((p) => p.text + p.ocr === 0 && !p.ocrRead).length;
+  const unread = pages.filter((p) => !p.pending && p.text + p.ocr === 0 && !p.ocrRead).length;
+  const reading = pages.filter((p) => p.pending).length;
   const one = count === 1;
   // No claim that a page is a scan: a blank page, or one drawn only in
   // vector shapes, has no text either (the same rule as the picture hint).
   const textStatus =
     count === 0
       ? "—"
-      : withText === count
+      : reading > 0
+        ? `Reading text… ${count - reading} of ${count} pages`
+        : withText === count
         ? one
           ? "Searchable"
           : "Searchable on every page"

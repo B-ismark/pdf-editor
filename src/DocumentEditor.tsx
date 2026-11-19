@@ -36,6 +36,7 @@ import { PATTERN_PRESETS, customMatcher } from "./pdf/patterns";
 import { fitCrop, isIdentityPlan, quarterTurn, resolvePlan, samePlan, shownToUserDelta, shownPages, shownSize, uprightFor, userToShown, userToShownBox } from "./pdf/pagePlan";
 import { boxCX, boxCY } from "./pdf/bbox";
 import { findUnsafeCovers, type CoverWarning } from "./pdf/redactionSafety";
+import { completeText, pagesPending } from "./pdf/textIndex";
 import { downloadBytes, downloadText } from "./download";
 import { canSaveAs, canShareFiles, mayWrite, pdfFile, pickSaveTarget, sameFile, shareFile, writeTo, type FileHandle } from "./fileAccess";
 
@@ -446,7 +447,7 @@ export const DocumentEditor = memo(function DocumentEditor({
         const { width, height } = shownSize(p);
         let ocr = 0;
         for (const f of p.fragments) if (f.id.startsWith("ocr:")) ocr++;
-        return { width, height, text: p.fragments.length - ocr, ocr, ocrRead: !!p.ocrRead };
+        return { width, height, text: p.fragments.length - ocr, ocr, ocrRead: !!p.ocrRead, ...(p.textPending ? { pending: true } : {}) };
       }),
     [shown],
   );
@@ -666,15 +667,23 @@ export const DocumentEditor = memo(function DocumentEditor({
   const fragmentPageOf = useCallback((id: string) => fragmentById.get(id)?.pageIndex, [fragmentById]);
   const editsByPage = usePageRecords(edits, fragmentPageOf);
 
-  const editedFragmentCount = useMemo(
-    () =>
-      pdf
-        ? [...fragmentById.values()].filter((f) =>
-            shownBySource.has(f.pageIndex) && isFragmentModified(f, edits[f.id]),
-          ).length
-        : 0,
-    [pdf, fragmentById, edits, shownBySource],
-  );
+  const editedFragmentCount = useMemo(() => {
+    if (!pdf) return 0;
+    let n = [...fragmentById.values()].filter((f) =>
+      shownBySource.has(f.pageIndex) && isFragmentModified(f, edits[f.id]),
+    ).length;
+    // An edit restored onto a page whose text hasn't been read yet: its
+    // fragment isn't known, so it can't be compared with the original — count
+    // it, so the document doesn't read as unchanged (and closable without a
+    // word) until its text arrives.
+    const pending = new Set(pdf.pages.filter((p) => p.textPending).map((p) => p.pageIndex));
+    if (pending.size)
+      for (const id of Object.keys(edits)) {
+        const at = Number(id.slice(0, id.indexOf(":")));
+        if (!fragmentById.has(id) && pending.has(at) && shownBySource.has(at)) n++;
+      }
+    return n;
+  }, [pdf, fragmentById, edits, shownBySource]);
   // Only what ships: markup on a deleted page stays in the state (undo brings
   // the page back with it) but isn't a change to the file.
   const shippedOverlays = useMemo(
@@ -738,6 +747,10 @@ export const DocumentEditor = memo(function DocumentEditor({
       extra: customRun.spans ? { kind: "custom", spans: customRun.spans } : null,
     });
   }, [pdf, patternOpen, patternJoined, patternKinds, customRun.spans, shown, edits, fontFor]);
+  // Pages whose text is still being read in the background. Find and the
+  // patterns search what has arrived and keep up as more does, but redacting
+  // "every match" waits until every page can have one.
+  const reading = useMemo(() => pagesPending(pdf), [pdf]);
   const patternTooMany = patternResult.tooMany || customRun.tooMany;
   const patternHits: PatternHit[] = patternTooMany ? [] : patternResult.hits;
   const matches: FindMatch[] = useMemo(() => {
@@ -957,23 +970,26 @@ export const DocumentEditor = memo(function DocumentEditor({
     if (!pdf) return;
     setMenuOpen(false);
     try {
-      await navigator.clipboard.writeText(extractText(shown, edits));
+      // Every page's text, read or not yet.
+      const full = await completeText(pdf);
+      await navigator.clipboard.writeText(extractText(shownPages(full.pages, plan), edits));
       setStatus("ready");
       setMessage("Document text copied to clipboard.");
     } catch {
       setStatus("error");
       setMessage("Couldn't copy — your browser blocked clipboard access.");
     }
-  }, [pdf, shown, edits]);
+  }, [pdf, plan, edits]);
 
   /** Download all document text as a .txt file. */
-  const exportTextFile = useCallback(() => {
+  const exportTextFile = useCallback(async () => {
     if (!pdf) return;
     setMenuOpen(false);
-    downloadText(extractText(shown, edits), fileName.replace(/\.pdf$/i, "") + ".txt");
+    const full = await completeText(pdf);
+    downloadText(extractText(shownPages(full.pages, plan), edits), fileName.replace(/\.pdf$/i, "") + ".txt");
     setStatus("ready");
     setMessage("Text exported.");
-  }, [pdf, shown, edits, fileName]);
+  }, [pdf, plan, edits, fileName]);
 
   // The fit-to-width base follows the widest page *as shown*: turning a
   // portrait page sideways in Organise (or undoing it) changes it. Measured
@@ -1192,7 +1208,9 @@ export const DocumentEditor = memo(function DocumentEditor({
       // a text layer lays a second copy of every word over the first.
       // And only pages still in the document: one deleted in the page plan
       // isn't shown, so reading it is work (and a progress count) for nothing.
-      const unread = pdf.pages.filter(
+      // Which pages have text of their own needs every page's text read.
+      const full = await completeText(pdf);
+      const unread = full.pages.filter(
         (pg) => shownBySource.has(pg.pageIndex) && !pg.fragments.some((f) => !f.id.startsWith("ocr:")),
       );
       if (unread.length === 0) {
@@ -1215,7 +1233,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       // Pages OCR actually read (with or without words). One that failed isn't
       // marked, so the Inspector goes on offering it.
       const read = new Set(perPage.keys());
-      const pages = pdf.pages.map((pg) => {
+      const pages = full.pages.map((pg) => {
         if (!read.has(pg.pageIndex)) return pg;
         const extra = perPage.get(pg.pageIndex) ?? [];
         added += extra.length;
@@ -2402,9 +2420,11 @@ export const DocumentEditor = memo(function DocumentEditor({
     const flattened = new Set(redactions.filter((r) => !r.cover).map((r) => r.pageIndex));
     const stays = (i: number) => kept.has(i) && !flattened.has(i);
     const info = await inspectHidden(pdf.bytes, stays);
+    // Every page's text, read or not yet.
+    const full = await completeText(pdf);
     // Whiteouts over text, by the same measure as the download warning.
-    let covered = findUnsafeCovers(pdf, redactions.filter((r) => stays(r.pageIndex)), planned).count;
-    for (const pg of pdf.pages) {
+    let covered = findUnsafeCovers(full, redactions.filter((r) => stays(r.pageIndex)), planned).count;
+    for (const pg of full.pages) {
       if (!stays(pg.pageIndex)) continue;
       covered += pg.fragments.filter((f) => isFragmentModified(f, edits[f.id])).length;
     }
@@ -2500,7 +2520,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       // Held across the whiteout warning, so "… anyway" makes the same file,
       // sent the same place, that was asked for.
       pendingDelivery.current = to;
-      const warn = findUnsafeCovers(pdf, redactions, planned);
+      const warn = findUnsafeCovers(await completeText(pdf), redactions, planned);
       if (warn.count > 0) {
         setCoverWarn(warn);
         return;
@@ -3007,7 +3027,7 @@ export const DocumentEditor = memo(function DocumentEditor({
             ? "That pattern takes too long to run. Make it more specific."
             : null
       }
-      pending={customRun.pending}
+      pending={customRun.pending || reading > 0}
       tooMany={patternTooMany}
       hits={patternHits}
       excluded={patternExcluded}
@@ -3136,7 +3156,8 @@ export const DocumentEditor = memo(function DocumentEditor({
                 const el = target.closest<HTMLElement>(".page");
                 const idx = Number(el?.dataset.pageIndex);
                 const pg = pdf.pages.find((p) => p.pageIndex === idx);
-                if (pg && pg.fragments.length === 0) setPictureHint("shown");
+                // Not a page still being read: no text *yet* isn't a picture.
+                if (pg && !pg.textPending && pg.fragments.length === 0) setPictureHint("shown");
               }}
             >
             {shown.map((page, position) => (
@@ -3282,6 +3303,7 @@ export const DocumentEditor = memo(function DocumentEditor({
               query={findQuery}
               count={matches.length}
               active={matches.length ? activeIndex + 1 : 0}
+              reading={reading > 0}
               onQuery={(q) => {
                 setFindQuery(q);
                 setFindActive(0);
@@ -3558,7 +3580,10 @@ export const DocumentEditor = memo(function DocumentEditor({
                 name: t.fileName,
                 load: async () => {
                   // Its own parse, which the tab draws from: never released here.
-                  if (!edited) return { pdf: tabPdf, text: tabPdf.pages, edited, release: () => {} };
+                  if (!edited) {
+                    const full = await completeText(tabPdf);
+                    return { pdf: full, text: full.pages, edited, release: () => {} };
+                  }
                   // As it would download, so the comparison reads what the file will.
                   const [{ exportPdf }, { loadPdf, releaseDoc }, { textAsExported }] = await Promise.all([
                     import("./pdf/exporter"),
@@ -3580,7 +3605,7 @@ export const DocumentEditor = memo(function DocumentEditor({
                       copies.push(read);
                     }
                     const plan = resolvePlan(state.pages, tabPdf.pages.length);
-                    const { pages, hidden } = textAsExported(read.pages, tabPdf.pages, plan, input);
+                    const { pages, hidden } = textAsExported(read.pages, (await completeText(tabPdf)).pages, plan, input);
                     return { pdf: shown, text: pages, hidden, edited, release };
                   } catch (err) {
                     release();
@@ -3621,7 +3646,7 @@ export const DocumentEditor = memo(function DocumentEditor({
             bakeMain={async (finishing) => {
               // The same guard as Download: baked in, a whiteout cover stops
               // being an object, and nothing would flag the text under it.
-              const warn = findUnsafeCovers(pdf, redactions, planned);
+              const warn = findUnsafeCovers(await completeText(pdf), redactions, planned);
               if (warn.count > 0) {
                 throw Object.assign(
                   new Error(`Whiteout sits over live text on page ${warn.pages.join(", ")}. Redact it instead, then try again.`),
@@ -3672,7 +3697,7 @@ export const DocumentEditor = memo(function DocumentEditor({
                   const state = t.history ? t.history.entries[t.history.index] : EMPTY_DOC;
                   // The same guard as Download: a whiteout over live text would
                   // be merged in looking redacted while the text stays readable.
-                  const warn = findUnsafeCovers(t.pdf, state.redactions, state.pages);
+                  const warn = findUnsafeCovers(await completeText(t.pdf), state.redactions, state.pages);
                   if (warn.count > 0) {
                     throw Object.assign(
                       new Error(`"${t.fileName}" has whiteout over live text (page ${warn.pages.join(", ")}). Redact it instead, then add its pages.`),

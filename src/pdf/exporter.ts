@@ -2,6 +2,7 @@ import { HF_MARGIN, labelsFor, textColor, textSize } from "./headerFooter";
 import { LineCapStyle, PDFArray, PDFCatalog,  PDFDict, PDFDocument, PDFHexString, PDFInvalidObject, PDFName, PDFPage, PDFPageLeaf, PDFPageTree, PDFRef, PDFStream, PDFString,  StandardFonts, concatTransformationMatrix, degrees, popGraphicsState, pushGraphicsState, rgb, type PDFFont } from "@cantoo/pdf-lib";
 import { fitScale, roomAfter } from "./lineFit";
 import { renderPageToCanvas } from "./loader";
+import { completeText } from "./textIndex";
 import { sanitizeDocument } from "./sanitize";
 import { sanitize } from "./standardText";
 import { preparePassword } from "./password";
@@ -496,10 +497,14 @@ function drawRasterAnnots(
  * redacted page from surviving by some other route.
  */
 export async function exportPdf(
-  loaded: LoadedPdf,
+  given: LoadedPdf,
   input: ExportInput,
   onProgress?: (page: number, total: number) => void,
 ): Promise<Uint8Array> {
+  // Every page's text, including pages the background read hasn't reached:
+  // an edit on one is redrawn only if its fragment is known, and a page with
+  // no fragments *yet* would otherwise ship as if it had no text.
+  const loaded = await completeText(given);
   const { edits, textBoxes, redactions, annotations, stamps, links = [], formValues = {}, pageNumbers, watermark, losslessRaster = false } = input;
   // Characters a standard font couldn't draw, left out of the file.
   const dropped = new Set<string>();

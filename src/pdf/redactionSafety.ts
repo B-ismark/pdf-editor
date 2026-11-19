@@ -31,6 +31,9 @@ export interface CoverWarning {
 export function findUnsafeCovers(loaded: LoadedPdf, redactions: Redaction[], plan?: PageRef[]): CoverWarning {
   const pages = new Set<number>();
   let count = 0;
+  // A page not read yet has no fragments *yet*: a cover over its text would
+  // pass. Callers read the whole text first (`completeText`).
+  if (loaded.pages.some((p) => p.textPending)) throw new Error("findUnsafeCovers needs every page's text read");
   const byPage = new Map<number, TextFragment[]>();
   for (const p of loaded.pages) byPage.set(p.pageIndex, p.fragments);
   // Pages are named by where they now sit, and a deleted page's cover doesn't
