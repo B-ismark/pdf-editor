@@ -1,8 +1,8 @@
 /**
  * Give the browser a turn between chunks of CPU-heavy work (per-page
- * rasterisation and encoding), so it can paint progress and handle input. This
- * doesn't move the work off the main thread — a Web Worker / OffscreenCanvas
- * migration would — but it turns one long freeze into short bursts.
+ * rasterisation), so it can paint progress and handle input. This doesn't move
+ * the work off the main thread — image encoding is in a worker (`codec.ts`) —
+ * but it turns one long freeze into short bursts.
  *
  * It used to be `setTimeout(0)` on every page. Browsers clamp nested timeouts
  * to at least 4 ms, so a long vector export (where a page takes well under a

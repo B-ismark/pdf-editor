@@ -343,6 +343,15 @@ type-checking can't see, and each exists because it broke once:
   it counts as a change and is drawn in the download; a restored whiteout over
   it still warns before download. Each was shown to fail with its
   `completeText` (or count) removed;
+- `codec.spec.ts` — Package 9b. Image encoding runs in `codecWorker.ts`. A
+  redacted page exports (smaller-of-JPEG-and-lossless, and lossless) and
+  Compress + Keep text run with no main-thread long task over 250 ms, measured
+  with the Long Tasks API (before: 1.1–1.2 s in one task per redacted page),
+  and the codec worker is seen to start. The lossless raster is read back
+  independently — DeviceRGB, `/Predictor 15`, every row's filter a PNG one, the
+  redaction solid black and the photo intact. With the worker's script blocked
+  the export still finishes on the page (and still as JPEG). The first three
+  were shown to fail on the previous build;
 - `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
   never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
   character WinAnsi can't encode instead of throwing, so `sanitize`

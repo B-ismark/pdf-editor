@@ -1,5 +1,5 @@
 import { PDFArray, PDFDict, PDFName, PDFNumber, PDFRawStream, PDFRef, type PDFDocument } from "@cantoo/pdf-lib";
-import { loadJpegEncoder } from "./jpeg";
+import { recodeImage } from "./codec";
 import { yieldToUI } from "./yield";
 
 export interface OptimizeImagesResult {
@@ -128,94 +128,6 @@ function classify(stream: PDFRawStream): { filter: ImageFilter; comps: number } 
   return { filter, comps };
 }
 
-/** Inflate a FlateDecode stream. PDF writes zlib-wrapped deflate, but raw
- *  deflate turns up in the wild, so try both before giving up. Returns null if
- *  neither works or the platform has no DecompressionStream. */
-async function inflate(bytes: Uint8Array): Promise<Uint8Array | null> {
-  if (typeof DecompressionStream === "undefined") return null;
-  for (const format of ["deflate", "deflate-raw"] as const) {
-    try {
-      const stream = new Blob([bytes.slice() as BlobPart])
-        .stream()
-        .pipeThrough(new DecompressionStream(format));
-      return new Uint8Array(await new Response(stream).arrayBuffer());
-    } catch {
-      /* try the next format */
-    }
-  }
-  return null;
-}
-
-/**
- * Undo the row predictor a Flate stream may have been filtered with.
- *
- * Predictors are what make flate worth applying to images at all, so most real
- * image streams carry one — ignoring `/Predictor` wouldn't produce a slightly
- * wrong image, it would produce noise. Returns null for anything unsupported so
- * the caller leaves the image untouched.
- */
-function unpredict(
-  raw: Uint8Array,
-  predictor: number,
-  colors: number,
-  bpc: number,
-  columns: number,
-): Uint8Array | null {
-  if (predictor <= 1) return raw;
-  const bpp = Math.max(1, Math.ceil((colors * bpc) / 8));
-  const rowLen = Math.ceil((colors * bpc * columns) / 8);
-  if (rowLen <= 0) return null;
-
-  // TIFF predictor: horizontal differencing, no per-row prefix byte.
-  if (predictor === 2) {
-    if (bpc !== 8) return null;
-    const out = raw.slice();
-    const rows = Math.floor(out.length / rowLen);
-    for (let r = 0; r < rows; r++) {
-      const off = r * rowLen;
-      for (let i = colors; i < rowLen; i++) out[off + i] = (out[off + i] + out[off + i - colors]) & 0xff;
-    }
-    return out;
-  }
-
-  // PNG predictors (10..15): each row is prefixed with its filter type.
-  const rows = Math.floor(raw.length / (rowLen + 1));
-  const out = new Uint8Array(rows * rowLen);
-  let prev = new Uint8Array(rowLen);
-  for (let r = 0; r < rows; r++) {
-    const head = r * (rowLen + 1);
-    const type = raw[head];
-    const src = raw.subarray(head + 1, head + 1 + rowLen);
-    // A view into `out`, so writing through it fills the output directly.
-    const cur = out.subarray(r * rowLen, (r + 1) * rowLen);
-    for (let i = 0; i < rowLen; i++) {
-      const a = i >= bpp ? cur[i - bpp] : 0;
-      const b = prev[i];
-      const c = i >= bpp ? prev[i - bpp] : 0;
-      let v = src[i];
-      switch (type) {
-        case 0: break;
-        case 1: v += a; break;
-        case 2: v += b; break;
-        case 3: v += (a + b) >> 1; break;
-        case 4: {
-          const p = a + b - c;
-          const pa = Math.abs(p - a);
-          const pb = Math.abs(p - b);
-          const pc = Math.abs(p - c);
-          v += pa <= pb && pa <= pc ? a : pb <= pc ? b : c;
-          break;
-        }
-        default:
-          return null; // unknown filter type — don't guess
-      }
-      cur[i] = v & 0xff;
-    }
-    prev = cur;
-  }
-  return out;
-}
-
 /** Resolved `/DecodeParms` values, in the units `unpredict` needs. */
 interface FlateParms {
   predictor: number;
@@ -277,53 +189,6 @@ function flateParms(stream: PDFRawStream): FlateParms | null {
   return { predictor, colors, bpc, columns };
 }
 
-/** Decode a FlateDecode image stream to a canvas we can draw from, or null if
- *  anything about it doesn't line up. */
-async function decodeFlate(
-  stream: PDFRawStream,
-  w: number,
-  h: number,
-  comps: number,
-): Promise<HTMLCanvasElement | null> {
-  const parms = flateParms(stream);
-  if (!parms) return null;
-  // With prediction in play the parms describe the exact sample layout, so they
-  // have to agree with the image dictionary. A disagreement means one of the two
-  // isn't what we think it is — skip rather than unfilter against a guess.
-  if (parms.predictor > 1 && (parms.colors !== comps || parms.bpc !== 8 || parms.columns !== w)) {
-    return null;
-  }
-
-  const inflated = await inflate(stream.contents);
-  if (!inflated) return null;
-
-  const samples = unpredict(inflated, parms.predictor, parms.colors, parms.bpc, parms.columns);
-  // Short data means we misread the layout somewhere — bail rather than
-  // re-encode a half-decoded image over the original.
-  if (!samples || samples.length < w * h * comps) return null;
-
-  const img = new ImageData(w, h);
-  const d = img.data;
-  for (let px = 0, s = 0, o = 0; px < w * h; px++, s += comps, o += 4) {
-    if (comps === 1) {
-      d[o] = d[o + 1] = d[o + 2] = samples[s];
-    } else {
-      d[o] = samples[s];
-      d[o + 1] = samples[s + 1];
-      d[o + 2] = samples[s + 2];
-    }
-    d[o + 3] = 255;
-  }
-
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return null;
-  ctx.putImageData(img, 0, 0);
-  return canvas;
-}
-
 /**
  * Shrink a PDF by downsampling and re-encoding its oversized images in place,
  * leaving all vector/text content — and every image we can't safely touch —
@@ -342,11 +207,6 @@ export async function optimizeImages(
   doc: PDFDocument,
   opts: OptimizeImagesOptions,
 ): Promise<OptimizeImagesResult> {
-  const encode = await loadJpegEncoder(opts.quality);
-  const canvas = document.createElement("canvas");
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return { changed: 0, saved: 0 };
-
   let changed = 0;
   let saved = 0;
 
@@ -367,51 +227,39 @@ export async function optimizeImages(
     // Only bother when the image is large enough that downsampling helps.
     if (longest <= opts.maxDim && obj.contents.length < 40_000) continue;
 
-    // Decoding and re-encoding a full-size image is the expensive part, and it
-    // is all synchronous once it starts — let the UI breathe between images so a
-    // scan-heavy document doesn't freeze the tab.
-    await yieldToUI();
-
-    // Decode to something drawable. Either step can bail on an image it can't
-    // read; that just leaves the original in place.
-    let source: CanvasImageSource;
-    let release: (() => void) | null = null;
-    if (kind.filter === "DCTDecode") {
-      try {
-        const bitmap = await createImageBitmap(
-          new Blob([obj.contents.slice() as BlobPart], { type: "image/jpeg" }),
-        );
-        source = bitmap;
-        release = () => bitmap.close?.();
-      } catch {
-        continue; // undecodable → leave untouched
-      }
-    } else {
-      let decoded: HTMLCanvasElement | null = null;
-      try {
-        decoded = await decodeFlate(obj, w, h, kind.comps);
-      } catch {
-        decoded = null; // out of memory on a huge image, say — one image failing
-      } //                 to decode must not fail the whole document
-      if (!decoded) continue;
-      source = decoded;
+    // With prediction in play the parms describe the exact sample layout, so
+    // they have to agree with the image dictionary. A disagreement means one of
+    // the two isn't what we think it is — skip rather than unfilter against a
+    // guess. (Read here because it needs pdf-lib's objects; the decode itself
+    // runs in the codec worker.)
+    let parms: FlateParms | null = null;
+    if (kind.filter === "FlateDecode") {
+      parms = flateParms(obj);
+      if (!parms) continue;
+      if (parms.predictor > 1 && (parms.colors !== kind.comps || parms.bpc !== 8 || parms.columns !== w)) continue;
     }
 
     const factor = longest > opts.maxDim ? opts.maxDim / longest : 1;
     const nw = Math.max(1, Math.round(w * factor));
     const nh = Math.max(1, Math.round(h * factor));
-    canvas.width = nw;
-    canvas.height = nh;
-    ctx.clearRect(0, 0, nw, nh);
-    ctx.drawImage(source, 0, 0, nw, nh);
-    release?.();
 
-    let encoded: Uint8Array;
-    try {
-      encoded = await encode(canvas);
-    } catch {
-      continue;
-    }
+    // Decode, downsample and re-encode, off the page (`codec.ts`). Null means
+    // it couldn't be read or written, which just leaves the original in place.
+    // Still yield between images: the page side of each is small, but a
+    // document with hundreds of them shouldn't hold the tab for all of them.
+    await yieldToUI();
+    const encoded = await recodeImage({
+      filter: kind.filter,
+      bytes: obj.contents,
+      width: w,
+      height: h,
+      comps: kind.comps,
+      parms,
+      targetWidth: nw,
+      targetHeight: nh,
+      quality: opts.quality,
+    });
+    if (!encoded) continue;
     // Never grow a stream: keep the original if re-encoding didn't help.
     if (encoded.length >= obj.contents.length) continue;
 

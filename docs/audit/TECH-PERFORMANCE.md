@@ -159,6 +159,8 @@ Measured: **150 of 150** `PageView`s render per keystroke and per selection chan
 - **Impact:** roughly halves vector export on long documents. **Effort:** XS. **Risk:** none.
 
 ### 2.7 Raster work stays on the main thread (P1)
+> **Done (roadmap 9b).** Encoding moved to `codecWorker.ts`; the lossless raster is embedded as a raw flate stream; `isolatePageResources` stopped inflating images. One redacted page now exports with no main-thread task over 50 ms (was 1.0–1.2 s). Guarded by `codec.spec`.
+
 A single redacted page froze the UI for **540 ms** (t150) and **1,145 ms** (rich150). The page is rendered at 3× (about 4.5 MP), then three things run on the main thread:
 - `getImageData` for colour sampling;
 - `getImageData` again plus the **mozjpeg WASM encode**;

@@ -211,6 +211,10 @@ export default defineConfig({
     // devDependency only, as the tests' independent reader.
     alias: [{ find: /^pdf-lib$/, replacement: "@cantoo/pdf-lib" }],
   },
+  // Workers are created with `{ type: "module" }`, and the codec worker
+  // lazy-loads MozJPEG with a dynamic import, which only an ES-module worker
+  // bundle can split out.
+  worker: { format: "es" },
   define: {
     __OCR_ASSET_VERSION__: JSON.stringify(ocrAssetVersion),
   },
