@@ -82,7 +82,7 @@ export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
   // observer below, which outlives any one render.
   const lastWidth = useRef(fitWidth);
   lastWidth.current = fitWidth;
-  const across = useRef<{ rx: number; sw: number } | null>(null);
+  const across = useRef<number | null>(null);
   const pageWidthRef = useRef(pageWidthPts);
   pageWidthRef.current = pageWidthPts;
   // Re-fit when a new document sets its page width (panel is closed then).
@@ -115,14 +115,12 @@ export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
         // Sideways, the browser has already clamped the scroll to the new
         // width by now (a narrower page leaves less to scroll): anchor to
         // where the reader had it before the room changed.
-        const a = across.current;
-        // Only while the content is as wide as when it was recorded: a page
-        // turned or reordered since changes what the fraction points at. The
-        // scroll width never reads less than the room, so once the room has
-        // grown past the content it reads the room instead, which says nothing
-        // about the content: that is a match too.
-        const sw = el.scrollWidth;
-        if (anchor.current && a && (a.sw === sw || (sw <= width + 1 && a.sw <= width + 1))) anchor.current.rx = a.rx;
+        // (No check that the content is as wide as it was: the scroll width
+        // moves for reasons that aren't the content — it never reads less
+        // than the room, and the margin round the pages steps up at 840px —
+        // and a check on it threw good places away. A page turned in the
+        // sidebar leaves it as it was.)
+        if (anchor.current && across.current !== null) anchor.current.rx = across.current;
       }
       setFitWidth(width);
     });
@@ -131,7 +129,7 @@ export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
     // the measured width — not the browser's clamp when the room changes.
     const onScroll = () => {
       if (el.clientWidth === lastWidth.current && el.scrollWidth > 0)
-        across.current = { rx: el.scrollLeft / el.scrollWidth, sw: el.scrollWidth };
+        across.current = el.scrollLeft / el.scrollWidth;
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {

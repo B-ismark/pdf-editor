@@ -258,9 +258,12 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     So a page from the thumbnails or Go to page lands 16px (72px narrow)
     below the top, and PageDown steps by the padded height. Find and the zoom
     anchors set the scroll directly and don't see it.
-  - The sideways anchor (`across`) is a fraction *and* the content width it was
-    taken at: used only while that width holds, and dropped when the surface
+  - The sideways anchor (`across`) is just a fraction, dropped when the surface
     goes behind another document (it returns scrolled to its start, silently).
+    Don't gate it on `scrollWidth` matching: that never reads less than the
+    room, and `.doc`'s padding steps from 16px to 24px at 840px, so it moves
+    with the room alone — a check on it threw good places away (the view went
+    to the left edge on a phone turned sideways).
   - **The floating controls leave the page's opening lines clear.** On a viewer
     ≥880px wide (a container query) the zoom pill joins the dock's row at the
     bottom-right; narrower, it keeps the top-right and `.doc` starts 72px down,

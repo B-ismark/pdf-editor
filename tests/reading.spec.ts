@@ -239,3 +239,29 @@ for (const [name, size, mobile, grow] of [
     await ctx.close();
   });
 }
+
+for (const [name, size, mobile, to] of [
+  ["a phone turned on its side", { width: 390, height: 844 }, true, { width: 844, height: 390 }],
+  ["a window widened past 840px", { width: 700, height: 800 }, false, { width: 1000, height: 800 }],
+  ["a window widened a long way", { width: 700, height: 800 }, false, { width: 1400, height: 800 }],
+] as const) {
+  test(`zoomed well in, ${name} keeps the view across`, async ({ browser }) => {
+    // The margin round the pages steps up at 840px, so the scroll width moved
+    // with the room; a check that the content hadn't changed read that as a
+    // change and threw the place away: the view went to the left edge.
+    const ctx = await browser.newContext({ viewport: size, ...(mobile ? { hasTouch: true, isMobile: true } : {}) });
+    const page = await ctx.newPage();
+    await open(page, (await fixtures()).long);
+    const scroller = page.locator(".viewer__scroll");
+    for (let i = 0; i < 3; i++) await page.locator('.icon-btn[aria-label="Zoom in"]').first().click();
+    await expect.poll(() => scroller.evaluate((el) => el.scrollWidth > el.clientWidth * 1.5)).toBe(true);
+    await scroller.evaluate((el) => (el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2));
+    await page.waitForTimeout(200);
+    const across = () => scroller.evaluate((el) => el.scrollLeft / el.scrollWidth);
+    const before = await across();
+    await page.setViewportSize(to);
+    await page.waitForTimeout(400);
+    expect(Math.abs((await across()) - before), `across ${before} → ${await across()}`).toBeLessThan(0.02);
+    await ctx.close();
+  });
+}
