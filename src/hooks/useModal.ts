@@ -137,26 +137,41 @@ let handedOn: HTMLElement | null = null;
  */
 export function scrimPress(close: (() => void) | undefined) {
   if (!close) return undefined;
-  return (e: { preventDefault(): void; pointerType?: string }) => {
+  return (e: { preventDefault(): void; pointerType?: string; clientX?: number; clientY?: number }) => {
     e.preventDefault();
     // A finger's tap still sends its click once the scrim is gone, and it
     // pressed whatever sat under the backdrop. Swallow that one click.
-    if (e.pointerType && e.pointerType !== "mouse") swallowNextClick();
+    if (e.pointerType && e.pointerType !== "mouse") swallowTapClick(e.clientX ?? 0, e.clientY ?? 0);
     close();
   };
 }
 
-function swallowNextClick() {
-  const eat = (ev: Event) => {
+/**
+ * Eat the click this tap is about to send — only that one: a real click at
+ * the spot pressed, soon. A press that turns into a swipe sends no click, and
+ * must not take the next tap with it (or a script's `.click()`), so the guard
+ * also stands down when the press is cancelled or lifts somewhere else.
+ */
+function swallowTapClick(x: number, y: number) {
+  const near = (ev: { clientX: number; clientY: number }) => Math.hypot(ev.clientX - x, ev.clientY - y) <= 16;
+  const eat = (ev: MouseEvent) => {
+    if (!ev.isTrusted || !near(ev)) return done();
     ev.preventDefault();
     ev.stopPropagation();
     done();
   };
+  const lift = (ev: PointerEvent) => {
+    if (!near(ev)) done();
+  };
   const done = () => {
     document.removeEventListener("click", eat, true);
+    document.removeEventListener("pointercancel", done, true);
+    document.removeEventListener("pointerup", lift, true);
     clearTimeout(timer);
   };
   document.addEventListener("click", eat, true);
+  document.addEventListener("pointercancel", done, true);
+  document.addEventListener("pointerup", lift, true);
   const timer = setTimeout(done, 600);
 }
 

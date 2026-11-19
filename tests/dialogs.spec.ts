@@ -372,6 +372,26 @@ test.describe("with a finger", () => {
     await page.waitForTimeout(300);
     await expect(tool).not.toHaveClass(/tooldock__btn--on/);
   });
+
+  test("a swipe on the backdrop doesn't swallow the next tap", async ({ page }) => {
+    // Guarding against the tap's click armed on the press; a swipe sends no
+    // click, so the guard took the person's next real tap instead.
+    await open(page, (await fixtures()).sample);
+    const tool = page.locator('.tooldock__btn[aria-label="Add text"]');
+    const at = (await tool.boundingBox())!;
+    await fromPalette(page, "Watermark");
+    const d = page.locator('[role="dialog"][aria-modal="true"]');
+    await expect(d).toBeVisible();
+    const cdp = await page.context().newCDPSession(page);
+    const touch = (type: string, x: number, y: number) =>
+      cdp.send("Input.dispatchTouchEvent", { type, touchPoints: type === "touchEnd" ? [] : [{ x, y }] } as never);
+    await touch("touchStart", 30, 60);
+    for (let i = 1; i <= 6; i++) await touch("touchMove", 30, 60 + i * 25);
+    await touch("touchEnd", 30, 210);
+    await expect(d).toBeHidden();
+    await page.touchscreen.tap(at.x + at.width / 2, at.y + at.height / 2);
+    await expect(tool).toHaveClass(/tooldock__btn--on/);
+  });
 });
 
 test("closing a dialog by its backdrop gives focus back too", async ({ page }) => {

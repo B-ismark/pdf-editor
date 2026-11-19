@@ -303,7 +303,9 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     reached the page behind and took focus off the opener just restored.
     Every scrim cancels its pointerdown. A finger's tap sends its click
     anyway, onto whatever was under the backdrop, so a touch or pen press also
-    swallows the next click (within 600ms).
+    swallows that click — only a real one at the spot pressed, within 600ms.
+    The guard stands down on `pointercancel` or a lift elsewhere: a swipe
+    sends no click, and an armed guard took the next real tap instead.
   - Closing a tab from its "Discard & close" warning puts focus on the tab
     now in front (the tab itself), not the page.
   - Titles are `<h2 className="headline-small dialog__title">` (24px), every
