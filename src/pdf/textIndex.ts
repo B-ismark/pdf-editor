@@ -167,7 +167,9 @@ export async function completeText(pdf: LoadedPdf): Promise<LoadedPdf> {
   const read = new Map<number, PageText>();
   await Promise.all(
     pending.map(async (p) => {
-      read.set(p.pageIndex, await textOf(pdf.bytes, ix, p.pageIndex));
+      // A page pdf.js can't read has no text to give, exactly as the
+      // background walk treats it — not a reason to refuse the whole file.
+      read.set(p.pageIndex, await textOf(pdf.bytes, ix, p.pageIndex).catch(() => ({ fragments: [], fields: [] })));
     }),
   );
   return { ...pdf, pages: fillPages(pdf.pages, read) };

@@ -124,6 +124,33 @@ test.describe("background text", () => {
     expect(text).toContain("Zanzibar");
   });
 
+  test("the page indicator doesn't jump back to page one as text arrives", async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 });
+    await slowText(page, 2);
+    await page.goto("/");
+    await page.setInputFiles("input[type=file]", await threePages());
+    await painted(page);
+    const chip = page.locator(".zoombar__page");
+    await page.locator('.page[data-page-pos="1"]').scrollIntoViewIfNeeded();
+    await page.evaluate(() => document.querySelector('.page[data-page-pos="1"]')!.scrollIntoView({ block: "start" }));
+    await expect(chip).toHaveText("2 / 3");
+    // Every reading the chip shows from here until the last page's text lands.
+    await page.evaluate(() => {
+      const seen: string[] = [];
+      (window as unknown as { seen: string[] }).seen = seen;
+      new MutationObserver(() => seen.push(document.querySelector(".zoombar__page")?.textContent ?? "")).observe(
+        document.querySelector(".zoombar")!,
+        { subtree: true, characterData: true, childList: true },
+      );
+    });
+    await page.keyboard.press("Escape");
+    await expect(page.locator(".docpanel")).toContainText("Searchable on every page", { timeout: HOLD_MS + 10_000 });
+    await page.waitForTimeout(500);
+    const seen = await page.evaluate(() => (window as unknown as { seen: string[] }).seen);
+    expect(seen.filter((t) => t.startsWith("1 /"))).toEqual([]);
+    await expect(chip).toHaveText("2 / 3");
+  });
+
   test.describe("a restored session", () => {
     test("an edit on a page not read yet still counts, and still downloads", async ({ page }) => {
       const path = await threePages();
@@ -145,6 +172,68 @@ test.describe("background text", () => {
       const [third] = await pageTexts(readFileSync((await download.path())!), [3]);
       // The replacement is drawn (over the original, as every vector edit is).
       expect(third).toContain("Kilimanjaro");
+    });
+
+    test("an edit made while the download waits isn't marked saved, and a second press makes no second file", async ({ page }) => {
+      const path = await threePages();
+      await slowText(page, 2);
+      await page.goto("/");
+      const edits = { "2:0": { text: "Third page rewritten Kilimanjaro.", style: {} } };
+      await seedStore(page, [["doc:a", docRecord("a", "three.pdf", 0, { doc: { ...EMPTY, edits } })]], [["bytes:a", path]]);
+      await restoreSeeded(page);
+      await painted(page);
+      await expect(page.locator(".docpanel")).toContainText("Reading text…");
+      let downloads = 0;
+      page.on("download", () => downloads++);
+      const first = page.waitForEvent("download", { timeout: 3 * HOLD_MS + 10_000 });
+      await page.click(".appbar__download");
+      // Pressed again while the first is still waiting on page three's text.
+      await page.click(".appbar__download");
+      // And an edit on page one, made during the wait: the file is the
+      // document as it was when Download was pressed, so this isn't in it.
+      const frag = page.locator(".fragment", { hasText: "First page needle" }).first();
+      await frag.click();
+      await page.keyboard.press("End");
+      await page.keyboard.type(" Serengeti", { delay: 20 });
+      await page.locator(".appbar__spacer").click();
+      const download = await first;
+      const [one] = await pageTexts(readFileSync((await download.path())!), [1]);
+      expect(one).not.toContain("Serengeti");
+      // So the counter still owes that edit.
+      await expect(page.locator(".appbar__changes")).toHaveText("2 changes");
+      await page.waitForTimeout(3_000);
+      expect(downloads).toBe(1);
+    });
+
+    test("Download all is busy from the press, while it waits for text", async ({ page }) => {
+      const path = await threePages();
+      await slowText(page, 2);
+      await page.goto("/");
+      await seedStore(
+        page,
+        [
+          ["doc:a", docRecord("a", "three.pdf", 0)],
+          ["doc:b", docRecord("b", "three-again.pdf", 1)],
+        ],
+        [
+          ["bytes:a", path],
+          ["bytes:b", path],
+        ],
+      );
+      await restoreSeeded(page);
+      await painted(page);
+      let downloads = 0;
+      page.on("download", () => downloads++);
+      const zip = page.waitForEvent("download", { timeout: 3 * HOLD_MS + 10_000 });
+      await page.locator('[aria-label="Export options"]').click();
+      await page.locator(".menu__item", { hasText: "Download all (2) as ZIP" }).click();
+      // Still waiting on page three's text: a second press is refused.
+      await page.locator('[aria-label="Export options"]').click();
+      await expect(page.locator(".menu__item", { hasText: "Download all (2) as ZIP" })).toBeDisabled();
+      await page.keyboard.press("Escape");
+      await zip;
+      await page.waitForTimeout(2_000);
+      expect(downloads).toBe(1);
     });
 
     test("whiteout over a page not read yet still warns before download", async ({ page }) => {

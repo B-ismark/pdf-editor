@@ -742,18 +742,32 @@ export function App() {
   const downloadAll = useCallback(async () => {
     if (tabs.length === 0 || busy) return;
     const stateOf = (t: OpenDoc) => (t.id === activeId ? frontDoc : parkedState(t));
+    // What each document is as the button is pressed: what it will be marked
+    // saved as, and what goes in the ZIP — read before any wait below.
+    const marks = new Map<string, SavedMark>(tabs.map((t) => [t.id, { doc: stateOf(t), baked: t.baked }]));
+    // Busy from the press, not after the text wait, so a second press can't
+    // start a second ZIP.
+    setStatus("exporting");
+    setMessage("Reading every document's text…");
     // The single-file Download's whiteout check, for every document: a ZIP is
     // no less a file someone else will read.
     // Every page's text, including any still being read in the background.
-    const unsafe = (
-      await Promise.all(
-        tabs.map(async (t) => {
-          const state = stateOf(t);
-          const w = findUnsafeCovers(await completeText(t.pdf), state.redactions, state.pages);
-          return w.count > 0 ? [`${t.fileName} (page ${w.pages.join(", ")})`] : [];
-        }),
-      )
-    ).flat();
+    let unsafe: string[];
+    try {
+      unsafe = (
+        await Promise.all(
+          tabs.map(async (t) => {
+            const state = marks.get(t.id)!.doc;
+            const w = findUnsafeCovers(await completeText(t.pdf), state.redactions, state.pages);
+            return w.count > 0 ? [`${t.fileName} (page ${w.pages.join(", ")})`] : [];
+          }),
+        )
+      ).flat();
+    } catch {
+      setStatus("error");
+      setMessage("Couldn't read the documents' text. Please try again.");
+      return;
+    }
     if (unsafe.length > 0) {
       setStatus("error");
       setMessage(
@@ -761,9 +775,6 @@ export function App() {
       );
       return;
     }
-    // What each document is as the ZIP starts: what it will be marked saved as.
-    const marks = new Map<string, SavedMark>(tabs.map((t) => [t.id, { doc: stateOf(t), baked: t.baked }]));
-    setStatus("exporting");
     try {
       const { exportPdf } = await import("./pdf/exporter");
       const { makeZip } = await import("./pdf/zip");
