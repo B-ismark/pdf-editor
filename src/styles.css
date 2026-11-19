@@ -2723,9 +2723,15 @@ body {
      the moment a file opens — so the toast sits above the bottom cluster
      instead (dock 16+56, draw bar 76+60), over the page's foot. */
   .app:not(:has(.viewer__scroll--sheet)) .snackbar { top: auto; bottom: calc(148px + env(safe-area-inset-bottom)); }
-  /* The phone's open draw bar is two rows (~110px from 76px up): clear it. */
+  /* The phone's open draw bar is two rows (~110px from 76px up): clear it.
+     At ≤359px its style controls take a third row (~152px): clear that too. */
   .app:not(:has(.viewer__scroll--sheet)):has(.drawbar:not(.drawbar--closed)) .snackbar {
     bottom: calc(196px + env(safe-area-inset-bottom));
+  }
+  @media (max-width: 359px) {
+    .app:not(:has(.viewer__scroll--sheet)):has(.drawbar:not(.drawbar--closed)) .snackbar {
+      bottom: calc(240px + env(safe-area-inset-bottom));
+    }
   }
 
   /* Download stays in the app bar on every breakpoint (no more FAB) — icon-only
@@ -3124,10 +3130,12 @@ body {
 @container viewer (min-width: 880px) {
   .zoombar { top: auto; bottom: calc(17px + env(safe-area-inset-bottom)); }
 }
-/* Whatever is brought into view — a Find match, a tabbed-to box, a picked
-   object — stops clear of the floating controls rather than under them: the
-   dock's band at the bottom (and the pill in it), the pill at the top on a
-   narrow viewer. */
+/* Whatever the browser brings into view — a tabbed-to box, a page from the
+   thumbnails or Go to page — stops clear of the dock's band at the bottom (and
+   the pill in it), and of the pill at the top on a narrow viewer, rather than
+   under them. (Not an open draw bar's height: it comes and goes.) Find and the
+   zoom anchors set the scroll directly and aren't affected. Paging keys step
+   by the padded height, so nothing under the dock is skipped. */
 .viewer__scroll { scroll-padding: 16px 0 calc(84px + env(safe-area-inset-bottom)); }
 @container viewer (max-width: 879.98px) {
   .viewer__scroll { scroll-padding-top: 72px; }

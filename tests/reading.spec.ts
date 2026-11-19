@@ -169,3 +169,41 @@ test("zoomed in, a panel opening and closing leaves the view where it was across
   await page.waitForTimeout(300);
   expect(Math.abs((await across()) - before), `across ${before} → ${await across()}`).toBeLessThan(0.02);
 });
+
+test("on the narrowest phones, the toast stays off a three-row draw bar", async ({ browser }) => {
+  const ctx = await browser.newContext({ viewport: { width: 320, height: 740 }, hasTouch: true, isMobile: true });
+  const page = await ctx.newPage();
+  await open(page, (await fixtures()).sample);
+  await page.locator('.tooldock__btn[aria-label="Draw"]').tap();
+  await expect(page.locator(".drawbar:not(.drawbar--closed)")).toBeVisible();
+  await expect(page.locator(".snackbar")).toBeVisible();
+  const s = await rect(page, ".snackbar");
+  const d = await rect(page, ".drawbar");
+  expect(overlaps(s, d), `toast ${JSON.stringify(s)} vs draw bar ${JSON.stringify(d)}`).toBe(false);
+  await ctx.close();
+});
+
+test("back from another tab, a resize anchors to where the view is now, not before", async ({ page }) => {
+  // A document kept warm behind another comes back scrolled to its start,
+  // with no scroll event to say so: the sideways anchor was the old one.
+  await page.setViewportSize({ width: 1024, height: 768 });
+  const f = await fixtures();
+  await open(page, f.sample);
+  const scroller = page.locator(".viewer__scroll");
+  for (let i = 0; i < 4; i++) await page.locator('.icon-btn[aria-label="Zoom in"]').click();
+  await expect.poll(() => scroller.evaluate((el) => el.scrollWidth > el.clientWidth + 200)).toBe(true);
+  await scroller.evaluate((el) => {
+    el.scrollLeft = el.scrollWidth;
+    el.scrollTop = 0;
+  });
+  await page.waitForTimeout(200);
+  await page.setInputFiles("input[data-open-input]", f.long);
+  await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+  await page.locator(".doctab").first().locator(".doctab__btn").click();
+  await page.waitForTimeout(400);
+  const across = () => scroller.evaluate((el) => el.scrollLeft / el.scrollWidth);
+  const now = await across();
+  await page.setViewportSize({ width: 760, height: 768 });
+  await page.waitForTimeout(400);
+  expect(Math.abs((await across()) - now), `across ${now} → ${await across()}`).toBeLessThan(0.02);
+});

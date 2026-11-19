@@ -249,12 +249,18 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   anchor is taken from the last scroll at the measured width (`across`).
   - The toast's bottom-left place is the *window's* corner: with Pages open
     that is the sidebar's last thumbnail, so it goes back to centre-above-the-
-    cluster then; and a phone's open draw bar is two rows, so the toast steps
-    up to 196px over it.
+    cluster then; and a phone's open draw bar is two rows (three at ≤359px),
+    so the toast steps up to 196px (240px) over it.
   - **Anything scrolled into view stops clear of them** (`scroll-padding` on
     `.viewer__scroll`: the dock's band at the bottom, the pill's at the top on
     a narrow viewer). With the pill in the dock's row, an object brought into
     view at the bottom edge was under it, and a click there hit the pill.
+    So a page from the thumbnails or Go to page lands 16px (72px narrow)
+    below the top, and PageDown steps by the padded height. Find and the zoom
+    anchors set the scroll directly and don't see it.
+  - The sideways anchor (`across`) is a fraction *and* the content width it was
+    taken at: used only while that width holds, and dropped when the surface
+    goes behind another document (it returns scrolled to its start, silently).
   - **The floating controls leave the page's opening lines clear.** On a viewer
     ≥880px wide (a container query) the zoom pill joins the dock's row at the
     bottom-right; narrower, it keeps the top-right and `.doc` starts 72px down,

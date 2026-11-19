@@ -82,7 +82,7 @@ export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
   // observer below, which outlives any one render.
   const lastWidth = useRef(fitWidth);
   lastWidth.current = fitWidth;
-  const across = useRef<number | null>(null);
+  const across = useRef<{ rx: number; sw: number } | null>(null);
   const pageWidthRef = useRef(pageWidthPts);
   pageWidthRef.current = pageWidthPts;
   // Re-fit when a new document sets its page width (panel is closed then).
@@ -115,7 +115,10 @@ export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
         // Sideways, the browser has already clamped the scroll to the new
         // width by now (a narrower page leaves less to scroll): anchor to
         // where the reader had it before the room changed.
-        if (anchor.current && across.current !== null) anchor.current.rx = across.current;
+        const a = across.current;
+        // Only while the content is as wide as when it was recorded: a page
+        // turned or reordered since changes what the fraction points at.
+        if (anchor.current && a && a.sw === el.scrollWidth) anchor.current.rx = a.rx;
       }
       setFitWidth(width);
     });
@@ -124,12 +127,15 @@ export function useViewport(seed?: Fit | null, carried?: () => Fit | null) {
     // the measured width — not the browser's clamp when the room changes.
     const onScroll = () => {
       if (el.clientWidth === lastWidth.current && el.scrollWidth > 0)
-        across.current = el.scrollLeft / el.scrollWidth;
+        across.current = { rx: el.scrollLeft / el.scrollWidth, sw: el.scrollWidth };
     };
     el.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       ro.disconnect();
       el.removeEventListener("scroll", onScroll);
+      // Held off the page behind another document, the surface comes back
+      // scrolled to its start with no scroll event to say so.
+      across.current = null;
     };
     // `carried` is read when the effect runs, not tracked.
     // eslint-disable-next-line react-hooks/exhaustive-deps
