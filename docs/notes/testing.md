@@ -96,7 +96,9 @@ type-checking can't see, and each exists because it broke once:
   as itself (pdf.js had filed the "fi" ligature under "f": "from" read
   "firom"), and an edit kept in that face exports at all, with real glyphs and
   real spaces (no .notdef boxes); skipped where DejaVu isn't installed;
-- `line.spec.ts` — on a line written as several runs (as Word writes one), an
+- `line.spec.ts` — (also guards pdf.js 5's run merging: without
+  `splitRunsAtSetFont` the runs arrive as one fragment and it fails) on a line
+  written as several runs (as Word writes one), an
   edited run keeps to the room before the next run, less the word space, and is
   condensed when it needs more — on screen and in both export paths (vector,
   and raster under a redaction) — so it never covers the next word; a run with
@@ -394,7 +396,8 @@ type-checking can't see, and each exists because it broke once:
   checks it: the `/ByteRange` spans the file except the signature, the PKCS#7
   digest matches those bytes, and the signature checks out against the
   embedded certificate. Exists because the engine swap could break signing
-  silently (two copies of pdf-lib → no file at all);
+  silently (two copies of pdf-lib → no file at all), and caught it again when
+  Vite 7 resolved @signpdf's `require` to the fork's CommonJS build;
 - `password.spec.ts` — a password-protected PDF asks in-app, says a wrong
   password is wrong without losing what was typed, opens with the right one,
   and downloads as a plain PDF with its text (no `/Encrypt`); cancel opens

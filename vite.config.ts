@@ -285,6 +285,9 @@ function pdfWorkerPlugin(): Plugin {
   };
 }
 
+/** @cantoo/pdf-lib's ES-module entry (its exports map hides the path). */
+const PDF_LIB_ESM = new URL("./node_modules/@cantoo/pdf-lib/es/index.js", import.meta.url).pathname;
+
 export default defineConfig({
   plugins: [react(), cspPlugin(), pdfWorkerPlugin(), pdfjsWasmPlugin()],
   base: "./",
@@ -294,7 +297,12 @@ export default defineConfig({
     // objects from two copies of the library can't be mixed in one document
     // (the writer's instanceof checks fail). Upstream pdf-lib stays a
     // devDependency only, as the tests' independent reader.
-    alias: [{ find: /^pdf-lib$/, replacement: "@cantoo/pdf-lib" }],
+    //
+    // The target is the fork's ES-module file itself, not its package name:
+    // @signpdf *requires* "pdf-lib", and since Vite 6 a require resolves the
+    // package's "require" entry — its CommonJS build, a second copy beside the
+    // app's ES one, and signing failed ("No ByteRangeStrings found").
+    alias: [{ find: /^pdf-lib$/, replacement: PDF_LIB_ESM }],
   },
   // Workers are created with `{ type: "module" }`, and the codec worker
   // lazy-loads MozJPEG with a dynamic import, which only an ES-module worker
