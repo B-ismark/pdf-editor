@@ -86,7 +86,7 @@ Read only the section a package points at, not the whole folder.
   - [x] React 19.2, using `<Activity>` for background tabs (9c). Guarded by the `warm` spec; notes in `docs/notes/tabs.md` (The last document stays warm).
   - [x] pdf.js 5, Vite 7 (9d). Guarded by the `decoders` spec (and every text and rendering spec); notes in `docs/notes/rendering.md` (pdf.js's decoders ship with the app).
 - [ ] **10. Visual and UX polish** (M ×6). From a screenshot walk of the app after section 9 (desktop 1440 and phone 390, light and dark). One slice per PR, each with before/after screenshots.
-  - [ ] **10a. Calm the canvas.** First impression of an open document.
+  - [x] **10a. Calm the canvas.** Guarded by the `reading` spec; notes in `docs/notes/shell.md` (A page at a reading width). First impression of an open document.
     - An A4 page fills the whole viewer at "100 %", so you see a wall of text, not a page. Cap the fitted width (a readable page with margin around it) and centre it.
     - Opening the Pages sidebar leaves the page clipped under the Inspector. Refit when the room for the page changes (the no-jump rule is about the Inspector only).
     - The zoom pill sits on the page's top-right corner, and on a phone it covers the title. Give it a place of its own.

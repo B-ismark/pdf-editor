@@ -67,7 +67,9 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     `useViewport(seed)` from it and keeps it current. Measured afresh, a
     switch drew one frame at the unmeasured scale, restored the scroll position
     against that height (half-way down came back a third of the way down), and
-    re-fitted a page the user had left at its size by hiding the panel. The tab
+    re-fitted a page against a stale width. (Since 10a the fit also follows the
+    surface's own width, so a panel shown or hidden while a document waited
+    is caught when it comes back.) The tab
     strip remounts with the editor too, so `DocTabs` carries keyboard focus
     across the remount (`carry`): without it, Delete and the arrow keys dropped
     focus to `<body>`. And anything the shell decides *at a moment* (the

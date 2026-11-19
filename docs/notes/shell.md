@@ -233,6 +233,23 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   page area is wide enough, below it when not, centred on phones where the
   pill steps aside.
 
+- **A page at a reading width (10a).** The fit is capped at the page's printed
+  size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is
+  794px, centred, with margin — not stretched to the window. Below that it
+  fits the room it has, and the room is *observed* (a ResizeObserver on the
+  scroll surface), so opening Pages or the Inspector refits rather than leaving
+  the page's right edge under the panel; the scroll is anchored so the reader
+  stays on the same page. The old "never refit on a panel toggle" rule was there
+  to stop a jump — the cap does that now on wide windows, where a panel only
+  moves the margin.
+  - **The floating controls leave the page's opening lines clear.** On a viewer
+    ≥880px wide (a container query) the zoom pill joins the dock's row at the
+    bottom-right; narrower, it keeps the top-right and `.doc` starts 72px down,
+    below it. The status toast is bottom-left at ≥1280px windows, above the
+    bottom cluster on phones (top again only while the properties sheet holds the
+    bottom, `:has(.viewer__scroll--sheet)`), and says what opened in plain words
+    ("Opened · 150 pages") — the parse count ("3750 text fragments") is gone.
+
 - **One owner for the app's history entries (`useModal`).** Dialogs push an
   entry so Back closes them, and the editor's phone layer (Back puts the
   selection / sheet / edit away) pushes one too — both through `pushHistory`

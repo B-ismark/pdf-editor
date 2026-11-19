@@ -361,14 +361,14 @@ export function App() {
           showDoc(fresh);
         }
         setStatus("ready");
-        const opened = `${plural(loaded.pages.length, "page")}`;
+        // Plain words: what opened, not how it was parsed ("3750 text
+        // fragments" was the app's vocabulary, not the reader's).
+        const opened = `Opened · ${plural(loaded.pages.length, "page")}`;
         if (!opts.quiet) setMessage(note ?? opened);
         // The text, in the background. Into every tab showing these bytes, and
         // merged page by page, so OCR's words or another batch landing in
         // between aren't overwritten.
-        let total = 0;
-        indexText(loaded, (read, done) => {
-          for (const t of read.values()) total += t.fragments.length;
+        indexText(loaded, (read) => {
           setTabs((list) =>
             list.map((t) => {
               if (t.pdf.bytes !== loaded.bytes) return t;
@@ -376,10 +376,6 @@ export function App() {
               return pages === t.pdf.pages ? t : { ...t, pdf: { ...t.pdf, pages } };
             }),
           );
-          // Once it's all read, the count joins the opening line — if that is
-          // still what the status line says.
-          if (done && !opts.quiet && !note)
-            setMessage((m) => (m === opened ? `${opened} · ${plural(total, "text fragment")}` : m));
         });
         return fresh;
       } catch (err) {
