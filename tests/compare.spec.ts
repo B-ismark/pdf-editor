@@ -194,8 +194,8 @@ test(`on ${what}, a redaction still hides just its own words`, async ({ page }) 
   const x0 = 60 + font.widthOfTextAtSize("Keep this ", 14);
   const x1 = x0 + font.widthOfTextAtSize("secret", 14);
   await page.goto("/");
-  // The crop moves the exported page's corner to (40, 600); the redaction is
-  // stored in the uncropped page's space.
+  // The crop, fitted to the page, moves the exported page's corner; the
+  // redaction is stored in the uncropped page's space.
   const edited = {
     ...EMPTY,
     pages: [{ index: 0, rotate: 0, crop }],
