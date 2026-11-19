@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 import { plural } from "../plural";
 import { Icon } from "./Icon";
 
@@ -62,7 +62,7 @@ export function SplitDialog({ count, picked, busy, error, onSplit, onClose }: Pr
   const ready = parts.length >= 2 && !busy;
 
   return (
-    <div className="dialog-scrim" onPointerDown={close}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(close)}>
       <div
         ref={ref}
         tabIndex={-1}

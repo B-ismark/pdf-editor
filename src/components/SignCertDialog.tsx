@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { staleBuildMessage } from "../staleBuild";
 import { Icon } from "./Icon";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 import type { SignIdentity, SignMeta } from "../pdf/sign";
 
 interface Props {
@@ -45,7 +45,7 @@ export function SignCertDialog({ onSign, onClose }: Props) {
   };
 
   return (
-    <div className="dialog-scrim" onPointerDown={busy ? undefined : onClose}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(busy ? undefined : onClose)}>
       <div
         ref={modalRef}
         tabIndex={-1}

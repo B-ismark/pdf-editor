@@ -1,5 +1,5 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 import { renderPageToCanvas } from "../pdf/loader";
 import { MIN_CROP, cropOffset, fitCrop, sheetSize, sheetToView, shownSize } from "../pdf/pagePlan";
 import type { CropRect, PageData } from "../pdf/types";
@@ -271,7 +271,7 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
   };
 
   return (
-    <div className="dialog-scrim" onPointerDown={onClose}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onClose)}>
       <div
         ref={ref}
         tabIndex={-1}

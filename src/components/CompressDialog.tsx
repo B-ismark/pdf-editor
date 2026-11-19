@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { staleBuildMessage } from "../staleBuild";
 import { Icon } from "./Icon";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 import type { CompressOptions } from "../pdf/finishOps";
 
 /** A chosen compression strategy. */
@@ -83,7 +83,7 @@ export function CompressDialog({ onEstimate, onDownload, onClose }: Props) {
   const isLossless = sel === "lossless";
 
   return (
-    <div className="dialog-scrim" onPointerDown={onClose}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onClose)}>
       <div
         ref={modalRef}
         tabIndex={-1}

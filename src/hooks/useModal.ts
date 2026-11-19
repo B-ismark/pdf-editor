@@ -122,6 +122,28 @@ function handlePop() {
 if (typeof window !== "undefined") window.addEventListener("popstate", handlePop);
 
 /**
+ * The opener of a dialog that closed while another took focus — one dialog
+ * handing on to the next (Download with password → the covered-text warning).
+ * The next one adopts it: its own opener, read as it rendered, was a button in
+ * the dialog now gone.
+ */
+let handedOn: HTMLElement | null = null;
+
+/**
+ * The scrim's press: closes the dialog without the press itself landing
+ * anywhere. Closing on pointerdown removes the scrim, so the mousedown that
+ * follows it went to the page behind and took focus off the button the dialog
+ * had just handed it back to. Cancelling the pointerdown cancels that mousedown.
+ */
+export function scrimPress(close: (() => void) | undefined) {
+  if (!close) return undefined;
+  return (e: { preventDefault(): void }) => {
+    e.preventDefault();
+    close();
+  };
+}
+
+/**
  * Shared modal behaviour for dialogs and full-screen surfaces:
  *
  * - **Focus trap** — Tab / Shift+Tab cycle within the container (WCAG 2.4.3).
@@ -134,14 +156,6 @@ if (typeof window !== "undefined") window.addEventListener("popstate", handlePop
  * Attach the returned ref to the modal's container (give it `tabIndex={-1}` so
  * it can receive focus when it has no focusable children).
  */
-/**
- * The opener of a dialog that closed while another took focus — one dialog
- * handing on to the next (Download with password → the covered-text warning).
- * The next one adopts it: its own opener, read as it rendered, was a button in
- * the dialog now gone.
- */
-let handedOn: HTMLElement | null = null;
-
 export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => void) {
   const containerRef = useRef<T | null>(null);
   // Who had focus before the dialog: read while rendering, because by the time

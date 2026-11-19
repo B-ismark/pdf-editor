@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 import { Icon } from "./Icon";
 
 interface Props {
@@ -47,7 +47,7 @@ export function ProtectDialog({ onDownload, onClose, busy }: Props) {
   };
   const noSave = { autoComplete: "off", "data-1p-ignore": "", "data-lpignore": "true", "data-form-type": "other" } as const;
   return (
-    <div className="dialog-scrim" onPointerDown={onClose}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onClose)}>
       <div
         ref={ref}
         tabIndex={-1}

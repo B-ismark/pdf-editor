@@ -1,3 +1,4 @@
+import { scrimPress } from "../hooks/useModal";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./Icon";
 
@@ -139,6 +140,7 @@ export function CommandPalette({ commands, onClose }: Props) {
   useEffect(() => setActive(0), [q]);
   // Whether the highlight last moved by the arrow keys rather than the pointer.
   const byKeys = useRef(false);
+  const lastPointer = useRef<{ x: number; y: number } | null>(null);
   useEffect(() => {
     const row = listRef.current?.querySelector<HTMLElement>('[data-active="true"]');
     if (!row) return;
@@ -162,7 +164,7 @@ export function CommandPalette({ commands, onClose }: Props) {
   };
 
   return (
-    <div className="cmdk-scrim" onPointerDown={close}>
+    <div className="cmdk-scrim" onPointerDown={scrimPress(close)}>
       <div
         className="cmdk"
         role="dialog"
@@ -227,7 +229,14 @@ export function CommandPalette({ commands, onClose }: Props) {
                     aria-selected={i === active}
                     aria-checked={c.checked}
                     aria-keyshortcuts={ariaKeys(c.shortcut)}
-                    onPointerEnter={() => {
+                    onPointerMove={(e) => {
+                      // Only a pointer that moved. Scrolling slides rows under
+                      // one at rest, and the browser reports that as entering:
+                      // the arrow keys' highlight was snatched back to it.
+                      const p = lastPointer.current;
+                      if (p && p.x === e.clientX && p.y === e.clientY) return;
+                      lastPointer.current = { x: e.clientX, y: e.clientY };
+                      if (i === active) return;
                       byKeys.current = false;
                       setActive(i);
                     }}

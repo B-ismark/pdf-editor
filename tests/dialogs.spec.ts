@@ -358,3 +358,55 @@ test.describe("with a finger", () => {
     }
   });
 });
+
+test("closing a dialog by its backdrop gives focus back too", async ({ page }) => {
+  // Closing on the press removed the backdrop, and the mousedown after it
+  // landed on the page behind — taking focus off the button just restored.
+  await open(page, (await fixtures()).sample);
+  const caret = page.getByRole("button", { name: "Export options" });
+  await caret.click();
+  await page.getByRole("menuitem", { name: /Download with password/ }).click();
+  const d = page.getByRole("dialog", { name: "Download with password" });
+  await expect(d).toBeVisible();
+  await page.mouse.click(8, 420);
+  await expect(d).toBeHidden();
+  await expect(caret).toBeFocused();
+});
+
+test("the arrow keys keep the palette's highlight with a pointer resting on the list", async ({ page }) => {
+  // Each scroll slid a new row under the still pointer, which the browser
+  // reports as the pointer entering it: the highlight jumped back there.
+  await open(page, (await fixtures()).sample);
+  await page.keyboard.press("Control+k");
+  const list = page.locator(".cmdk__list");
+  await expect(list).toBeVisible();
+  const box = (await list.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  const index = () =>
+    list.evaluate((l) => [...l.querySelectorAll('[role="option"]')].findIndex((o) => o.getAttribute("data-active") === "true"));
+  await expect.poll(index).toBeGreaterThan(0);
+  const start = await index();
+  for (let i = 0; i < 20; i++) await page.keyboard.press("ArrowDown");
+  await page.waitForTimeout(200);
+  expect(await index()).toBe(start + 20);
+});
+
+test("closing a tab with Discard leaves focus on the strip", async ({ page }) => {
+  const f = await fixtures();
+  await open(page, f.sample);
+  const ov = (await page.locator(".page__overlay").first().boundingBox())!;
+  await page.locator('.tooldock__btn[aria-label="Add text"]').click();
+  await page.mouse.click(ov.x + 150, ov.y + 150);
+  await page.keyboard.type("Work", { delay: 15 });
+  await page.locator('.tooldock__btn[aria-label="Select"]').click();
+  await page.setInputFiles("input[data-open-input]", f.typeset);
+  await expect(page.locator(".doctab")).toHaveCount(2, { timeout: 30_000 });
+  const tab = page.locator(".doctab", { hasText: "sample.pdf" }).locator(".doctab__btn");
+  await tab.click();
+  await expect(page.locator(".doctab--active")).toContainText("sample.pdf");
+  await tab.focus();
+  await page.keyboard.press("Delete");
+  await page.getByRole("button", { name: /Discard & close/ }).click();
+  await expect(page.locator(".doctab")).toHaveCount(1);
+  await expect(page.locator(".doctab--active .doctab__btn")).toBeFocused();
+});

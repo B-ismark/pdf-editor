@@ -1,4 +1,4 @@
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 
 interface Props {
   title: string;
@@ -22,7 +22,7 @@ export function ConfirmDialog({
 }: Props) {
   const ref = useModal<HTMLDivElement>(onCancel);
   return (
-    <div className="dialog-scrim" onPointerDown={onCancel}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onCancel)}>
       <div
         ref={ref}
         tabIndex={-1}

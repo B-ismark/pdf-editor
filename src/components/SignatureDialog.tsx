@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Icon } from "./Icon";
 import { useSignatures } from "../hooks/useSignatures";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 
 interface Props {
   onCreate: (sig: { dataUrl: string; w: number; h: number }) => void;
@@ -142,7 +142,7 @@ export function SignatureDialog({ onCreate, onClose }: Props) {
   const modalRef = useModal<HTMLDivElement>(onClose);
 
   return (
-    <div className="dialog-scrim" onPointerDown={onClose}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onClose)}>
       <div
         ref={modalRef}
         tabIndex={-1}

@@ -295,7 +295,15 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     closing while another has already taken focus (Download with password
     handing on to the covered-text warning) leaves focus there and hands its
     opener on (`handedOn`); the new one adopts it when its own opener — a
-    button in the dialog now gone — is disconnected.
+    button in the dialog now gone — is disconnected. With neither (an opener
+    gone and nothing handed on), it falls back to whatever held focus when its
+    effect ran, if that's outside the dialog.
+  - **A scrim closes on press, and the press lands nowhere** (`scrimPress`):
+    closing on pointerdown removes the scrim, so the mousedown that followed
+    reached the page behind and took focus off the opener just restored.
+    Every scrim cancels its pointerdown.
+  - Closing a tab from its "Discard & close" warning puts focus on the tab
+    now in front (its close button), not the page.
   - Titles are `<h2 className="headline-small dialog__title">` (24px), every
     dialog alike. Compare and Organise are full-screen surfaces with a bar
     title, and keep `title-large`.
@@ -309,7 +317,9 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     a shortcut and nothing else. Arrow keys walk the flattened rows in the
     order shown; moving by the arrows onto a group's first row scrolls its
     heading into view too (not on hover — the list would slide under the
-    pointer).
+    pointer). Hover follows `pointermove` with a real change of position, not
+    `pointerenter`: a row scrolled under a resting pointer fires an enter, and
+    that took the active row back from the arrows.
     The input is a `combobox` whose `aria-activedescendant` names the active
     row; headings are `aria-hidden` (each group is labelled by its heading).
 

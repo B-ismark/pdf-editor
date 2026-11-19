@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Icon } from "./Icon";
 import { ColorField } from "./ColorField";
-import { useModal } from "../hooks/useModal";
+import { useModal, scrimPress } from "../hooks/useModal";
 import { DEFAULT_BATES, MAX_BATES_DIGITS, MAX_START, POSITIONS, TOKENS, batesNumber, dateLabel, firstNumber, labelsFor, normalBates, slotsOf, textColor, textSize, uses } from "../pdf/headerFooter";
 import type { BatesOptions, NumberPosition, PageNumberOptions, WatermarkOptions } from "../pdf/types";
 
@@ -145,7 +145,7 @@ export function FinishDialog({
   const stale = (usesDate && storedDate != null && storedDate !== today) || (usesFile && storedFile != null && storedFile !== fileName);
 
   return (
-    <div className="dialog-scrim" onPointerDown={onClose}>
+    <div className="dialog-scrim" onPointerDown={scrimPress(onClose)}>
       <div
         ref={modalRef}
         tabIndex={-1}
