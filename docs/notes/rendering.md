@@ -62,8 +62,12 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   `@signpdf/placeholder-pdf-lib` imports `"pdf-lib"` itself, and objects from
   two copies of the library can't share a document — the writer's `instanceof`
   checks fail and signing never produced a file. `vite.config.ts` aliases
-  `pdf-lib` to the fork; `sign.spec.ts` verifies a real signature and fails if
-  the alias goes. Upstream `pdf-lib` stays only as a devDependency for the
+  `pdf-lib` to the fork's **ES-module file** (`es/index.js`), not its package
+  name: @signpdf *requires* it, and since Vite 6 a `require` resolves the
+  package's CommonJS entry — a second copy again, beside the app's ES one
+  ("No ByteRangeStrings found"). `dist/assets` should hold one chunk with
+  `PDFStreamWriter` in it. `sign.spec.ts` verifies a real signature and fails if
+  the alias goes or points at the package name. Upstream `pdf-lib` stays only as a devDependency for the
   tests, which deliberately read the output with a different library.
 - **A page's text arrives after the page.** `loadLayout` (`loader.ts`) reads
   page sizes, turns and references only, and every page starts `textPending`
@@ -96,3 +100,44 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   has run, and posts a `MessageChannel` message, which isn't clamped. Not
   `scheduler.yield`: it resumes ahead of React's queued render, so progress
   never painted. Call it as often as you like; most calls return immediately.
+
+## pdf.js's decoders ship with the app
+
+- **The legacy build, on purpose.** pdf.js 5's modern build calls the newest
+  built-ins unguarded, on the page and in its worker (`Uint8Array.prototype.toHex`
+  for every document's fingerprint, `Promise.try` in every message,
+  `Map.prototype.getOrInsertComputed` in `render`, `Math.sumPrecise` in font
+  building): any browser older than the last few releases failed to open every
+  file. `loader.ts`, `fontEmbed.ts` and the worker patch (`PDF_WORKER`) all use
+  `pdfjs-dist/legacy/build/`, which polyfills them; the `decoders` spec deletes
+  them on both sides and opens a file. Don't import `pdfjs-dist` bare.
+  The price: about 21 kB more gzipped in the `pdfjs` chunk at start-up and 18 kB
+  in the worker. Its core-js polyfills are installed globally once the chunk
+  loads, so the spec can't catch the app's *own* code leaning on a new
+  built-in — don't.
+- **Scans and JPEG 2000 paint only through `wasmUrl`.** Since pdf.js 5 JPEG
+  2000 (OpenJPEG), JBIG2 *and fax-coded scans* (`CCITTFaxDecode`, one module
+  with JBIG2) are decoded by WebAssembly modules fetched at runtime from the
+  `wasmUrl` document option (by the page, which hands the bytes to the worker,
+  since the app doesn't set `useWorkerFetch`), falling back to script builds
+  fetched from the same place. Left unset, both fetches fail, pdf.js only
+  warns, and the image isn't painted: a scanned contract opens blank.
+  `pdfjsWasmPlugin` (vite.config.ts) copies the modules, their script
+  fallbacks and their licences into `dist/pdfjs-<version>/` (the names are
+  fixed by pdf.js, so the version is in the folder) and serves them in dev;
+  **every `getDocument()` spreads `pdfjsDocOptions`** (`pdf/pdfjsOptions.ts`),
+  which makes the folder absolute. A new `getDocument()` that forgets it draws
+  such pages blank — the `decoders` spec catches it only on the paths it
+  opens. Not shipped: `quickjs-eval` (a document's own JavaScript) and `qcms`
+  (ICC profiles), which pdf.js uses only with `useWorkerFetch`; ICC images
+  draw in their alternate colour space, as they did with pdf.js 4.
+- **`page.render` needs `canvas` as well as `canvasContext`** since pdf.js 5
+  (type-checked, so a missing one fails the build).
+- **A run of text is a fragment of its own, as pdf.js 4 had it.** pdf.js 5 ends
+  a text item only when the font really changes, so a line Word writes as
+  several same-font runs (`Tf` re-set between them, often after `q…Q`) arrived
+  as one fragment: an edit to one word re-flowed the whole line and the
+  line/patterns specs failed. `splitRunsAtSetFont` in `patchPdfWorker`
+  (vite.config.ts) flushes the item at every `Tf` that sets a font, as before;
+  `replaceOnce` throws at build time if a pdf.js update changes the code it
+  matches, so look at the new `getTextContent` `setFont` case then.

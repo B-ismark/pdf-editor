@@ -451,7 +451,7 @@ function drawPage(bytes: ArrayBuffer, index: number, cssWidth: number, canvas: H
     off.height = Math.ceil(viewport.height);
     const ctx = off.getContext("2d");
     if (!ctx) return;
-    task = page.render({ canvasContext: ctx, viewport });
+    task = page.render({ canvas: off, canvasContext: ctx, viewport });
     try {
       await task.promise;
     } catch (err) {
@@ -489,7 +489,7 @@ async function pagePixels(bytes: ArrayBuffer, index: number, scale: number, sign
   if (!ctx || signal.stopped) return null;
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, c.width, c.height);
-  const task = page.render({ canvasContext: ctx, viewport });
+  const task = page.render({ canvas: c, canvasContext: ctx, viewport });
   signal.tasks.push(task);
   try {
     await task.promise;

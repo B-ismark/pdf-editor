@@ -1,8 +1,13 @@
-import * as pdfjsLib from "pdfjs-dist";
+// pdf.js's legacy build: the same engine, with the polyfills its modern build
+// leaves out (`Uint8Array.prototype.toHex`, `Promise.try`,
+// `Map.prototype.getOrInsertComputed`, `Math.sumPrecise` …). Without them only
+// the newest browsers open a file at all; everything else fails on load.
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 // Vite resolves this to a hashed URL for the worker bundle.
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import type { TextItem, TextStyle } from "pdfjs-dist/types/src/display/api";
 import { cropOffset, shownSize } from "./pagePlan";
+import { pdfjsDocOptions } from "./pdfjsOptions";
 import { completeText, stopIndexing } from "./textIndex";
 import type { CropRect, FormField, LoadedPdf, PageData, TextFragment } from "./types";
 
@@ -254,7 +259,7 @@ export function renderPage(
     canvas.width = Math.max(1, Math.floor(viewport.width * dpr));
     canvas.height = Math.max(1, Math.floor(viewport.height * dpr));
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const renderTask = page.render({ canvasContext: ctx, viewport });
+    const renderTask = page.render({ canvas, canvasContext: ctx, viewport });
     task = renderTask;
     await renderTask.promise;
   })();
@@ -281,7 +286,7 @@ const docCache = new WeakMap<ArrayBuffer, Promise<pdfjsLib.PDFDocumentProxy>>();
 export function getCachedDoc(bytes: ArrayBuffer): Promise<pdfjsLib.PDFDocumentProxy> {
   let doc = docCache.get(bytes);
   if (!doc) {
-    doc = pdfjsLib.getDocument({ data: bytes.slice(0) }).promise;
+    doc = pdfjsLib.getDocument({ ...pdfjsDocOptions, data: bytes.slice(0) }).promise;
     docCache.set(bytes, doc);
   }
   return doc;
@@ -340,6 +345,7 @@ export async function renderPageToCanvas(
   const ctx = canvas.getContext("2d");
   if (!ctx) throw new Error("Could not get 2D canvas context");
   const task = page.render({
+    canvas,
     canvasContext: ctx,
     viewport,
     // ENABLE_FORMS: fields are left to an HTML layer — here, to nothing.

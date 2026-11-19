@@ -1,4 +1,5 @@
 import type { PDFDocument, PDFFont } from "@cantoo/pdf-lib";
+import { pdfjsDocOptions } from "./pdfjsOptions";
 
 /** An embedded source font plus a coverage test for the text about to use it. */
 export interface EmbeddedSourceFont {
@@ -87,10 +88,10 @@ export async function createSourceFontEmbedder(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let doc: any;
   try {
-    const pdfjs = await import("pdfjs-dist");
+    const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
     fontkit = (await import("@pdf-lib/fontkit")).default;
     out.registerFontkit(streamingSubsets(fontkit));
-    doc = await pdfjs.getDocument({ data: bytes.slice(0), fontExtraProperties: true, disableFontFace: true }).promise;
+    doc = await pdfjs.getDocument({ ...pdfjsDocOptions, data: bytes.slice(0), fontExtraProperties: true, disableFontFace: true }).promise;
   } catch {
     return NOOP;
   }
@@ -116,7 +117,7 @@ export async function createSourceFontEmbedder(
       canvas.width = Math.max(1, Math.ceil(viewport.width));
       canvas.height = Math.max(1, Math.ceil(viewport.height));
       const ctx = canvas.getContext("2d");
-      if (ctx) await page.render({ canvasContext: ctx, viewport }).promise;
+      if (ctx) await page.render({ canvas, canvasContext: ctx, viewport }).promise;
       const content = await page.getTextContent();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       content.items.forEach((item: any, i: number) => {
