@@ -154,27 +154,46 @@ test("after a move or a delete, the keyboard stays with the page", async ({ page
   expect(await focused()).toEqual({ label: "Page 4", at: 3 });
 });
 
-test("wherever a finger may be used, every page's controls are in view", async ({ browser }) => {
-  // A phone, and a touch laptop: it hovers like a desktop, but a tap on an
-  // invisible Delete still deleted the page.
-  for (const opts of [
-    { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true },
-    { viewport: { width: 1280, height: 860 }, hasTouch: true },
-  ]) {
-    const ctx = await browser.newContext(opts);
-    const page = await ctx.newPage();
-    await open(page, (await fixtures()).sample);
-    expect(await page.evaluate(() => matchMedia("(any-pointer: coarse)").matches), "a touch screen").toBe(true);
-    await openOrganise(page);
-    const cards = page.locator(".organize .pcard");
-    await expect(cards.first()).toBeVisible();
-    const actions = cards.nth(1).locator(".pcard__actions");
-    expect(await actions.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
-    await expect(actions.getByRole("button", { name: "Rotate" })).toBeVisible();
-    // And they stay after a move: a page moved three places is three taps.
-    await actions.getByRole("button", { name: "Move later" }).tap();
-    await expect(cards.nth(2).locator(".pcard__actions").getByRole("button", { name: "Move later" })).toBeVisible();
-    expect(await cards.nth(2).locator(".pcard__actions").evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
-    await ctx.close();
+test("wherever a finger may be used, every page's controls are in view", async ({ browser, playwright, baseURL }) => {
+  // A phone; and a touch laptop — it hovers with a fine pointer like a
+  // desktop, but has a touch screen too: a tap on an invisible Delete still
+  // deleted the page. Headless Chromium with touch reports a phone, so the
+  // laptop is a browser told it has both.
+  const laptop = await playwright.chromium.launch({
+    executablePath: process.env.PW_EXECUTABLE_PATH || undefined,
+    args: ["--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=6"],
+  });
+  try {
+    for (const [b, opts] of [
+      [browser, { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true }],
+      // Not hasTouch: Playwright's touch emulation also turns hover off.
+      [laptop, { baseURL, viewport: { width: 1280, height: 860 } }],
+    ] as const) {
+      const ctx = await b.newContext(opts);
+      const page = await ctx.newPage();
+      await open(page, (await fixtures()).sample);
+      const media = await page.evaluate(() => ({
+        coarse: matchMedia("(any-pointer: coarse)").matches,
+        mouse: matchMedia("(hover: hover) and (pointer: fine)").matches,
+      }));
+      expect(media.coarse, "a touch screen").toBe(true);
+      if (b === laptop) expect(media.mouse, "that also hovers like a desktop").toBe(true);
+      await openOrganise(page);
+      await page.mouse.move(2, 2);
+      const cards = page.locator(".organize .pcard");
+      await expect(cards.first()).toBeVisible();
+      const actions = cards.nth(1).locator(".pcard__actions");
+      await expect.poll(() => actions.evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+      await expect(actions.getByRole("button", { name: "Rotate" })).toBeVisible();
+      // And they stay after a move: a page moved three places is three taps.
+      const later = actions.getByRole("button", { name: "Move later" });
+      await (b === laptop ? later.click() : later.tap());
+      await page.mouse.move(2, 2);
+      await expect(cards.nth(2).locator(".pcard__actions").getByRole("button", { name: "Move later" })).toBeVisible();
+      await expect.poll(() => cards.nth(4).locator(".pcard__actions").evaluate((el) => getComputedStyle(el).opacity)).toBe("1");
+      await ctx.close();
+    }
+  } finally {
+    await laptop.close();
   }
 });
