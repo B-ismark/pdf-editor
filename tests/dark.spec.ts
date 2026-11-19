@@ -132,8 +132,9 @@ test.describe("dark mode", () => {
     await expect(page.locator('[role="menu"]')).toBeVisible();
     expect(await lightSurfaces(), "the ⋯ menu").toEqual([]);
     await page.keyboard.press("Escape");
-    // Every dialog the app opens over a document, reached the one way they all
-    // share — the command palette — so none can be skipped.
+    // The document dialogs the palette reaches (one route for all of them,
+    // so a new one is a one-word addition). The signature, password and
+    // close-confirm dialogs share the same .dialog surface and tokens.
     for (const label of [
       "Watermark",
       "Header & footer",

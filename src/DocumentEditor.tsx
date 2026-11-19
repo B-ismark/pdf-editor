@@ -1736,7 +1736,7 @@ export const DocumentEditor = memo(function DocumentEditor({
       const scroller = document.querySelector<HTMLElement>(".viewer__scroll");
       const el = document.querySelector<HTMLElement>(`[data-el-id="${CSS.escape(sheetSelId)}"]`);
       if (!scroller || !el) return;
-      const sheet = document.querySelector<HTMLElement>(".panel");
+      const sheet = document.querySelector<HTMLElement>(".panel:not(.is-leaving)");
       const scRect = scroller.getBoundingClientRect();
       // Sheet is bottom-anchored: derive its top from its height so the number
       // is right even mid slide-up (its transformed rect would read too low).

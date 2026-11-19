@@ -144,4 +144,34 @@ test.describe("open and close", () => {
     await expect(page.getByRole("dialog")).toHaveCount(0);
     expect(await copies(page)).toEqual([]);
   });
+  test("closing a dialog that holds a chosen file doesn't take the app down", async ({ page }) => {
+    // A file input's value can't be set by script; copying it into the exit
+    // picture threw inside React's commit and brought up the crash screen.
+    await page.setViewportSize({ width: 1280, height: 860 });
+    await open(page, (await fixtures()).sample);
+    await page.locator('.tooldock__btn[aria-label="Sign"]').click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("button", { name: "Upload" }).click();
+    // Not an image: it never decodes, so the input keeps the file and stays.
+    await dialog.locator("input[type=file]").setInputFiles({ name: "bad.png", mimeType: "image/png", buffer: Buffer.from("not a picture") });
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByText("Something went wrong")).toHaveCount(0);
+    await expect(page.locator(".page canvas").first()).toBeVisible();
+  });
+
+  test("a surface hidden with its tab, not closed, makes no copy", async ({ page }) => {
+    // A tab going to the background hides its editor rather than removing it,
+    // so the drawer was never closed and there is nothing to play.
+    await page.setViewportSize({ width: 390, height: 844 });
+    const f = await fixtures();
+    await open(page, f.sample);
+    await page.getByRole("button", { name: "Show pages" }).click();
+    await expect(page.locator(".pagenav")).toBeVisible();
+    await countCopies(page);
+    await page.setInputFiles("input[data-open-input]", f.typeset);
+    await expect(page.locator(".doctab")).toHaveCount(2);
+    await page.waitForTimeout(100);
+    expect(await copies(page)).toEqual([]);
+  });
 });
