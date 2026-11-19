@@ -137,13 +137,16 @@ export function CommandPalette({ commands, onClose }: Props) {
     if (back && back.isConnected && back !== document.body) back.focus({ preventScroll: true });
   };
   useEffect(() => setActive(0), [q]);
+  // Whether the highlight last moved by the arrow keys rather than the pointer.
+  const byKeys = useRef(false);
   useEffect(() => {
     const row = listRef.current?.querySelector<HTMLElement>('[data-active="true"]');
     if (!row) return;
     // The first row of a group brings its heading with it, so walking up into
-    // a group shows what the group is.
+    // a group shows what the group is. Not under the pointer: the list would
+    // slide beneath it.
     const group = row.closest('[role="group"]');
-    if (group && group.querySelector('[role="option"]') === row) {
+    if (byKeys.current && group && group.querySelector('[role="option"]') === row) {
       group.firstElementChild?.scrollIntoView({ block: "nearest" });
     }
     row.scrollIntoView({ block: "nearest" });
@@ -183,9 +186,11 @@ export function CommandPalette({ commands, onClose }: Props) {
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") {
                 e.preventDefault();
+                byKeys.current = true;
                 setActive((i) => Math.min(results.length - 1, i + 1));
               } else if (e.key === "ArrowUp") {
                 e.preventDefault();
+                byKeys.current = true;
                 setActive((i) => Math.max(0, i - 1));
               } else if (e.key === "Enter") {
                 e.preventDefault();
@@ -222,7 +227,10 @@ export function CommandPalette({ commands, onClose }: Props) {
                     aria-selected={i === active}
                     aria-checked={c.checked}
                     aria-keyshortcuts={ariaKeys(c.shortcut)}
-                    onPointerEnter={() => setActive(i)}
+                    onPointerEnter={() => {
+                      byKeys.current = false;
+                      setActive(i);
+                    }}
                     onClick={() => runAt(i)}
                   >
                     {c.icon && <Icon name={c.icon} size={18} />}

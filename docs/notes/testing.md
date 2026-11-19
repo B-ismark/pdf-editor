@@ -91,9 +91,12 @@ type-checking can't see, and each exists because it broke once:
   its checkbox; closing gives focus back to the opener even when a field took
   it first; a working Download keeps its colour and its spinner shows, caret
   alike (the exporter chunk is held back to catch it at work); walking up the
-  palette shows each group's heading, and the active row is named by
-  `aria-activedescendant`; with a finger, no dialog opens on a text field
-  (slice 10d).
+  palette, every group's first row shows its heading, but hovering one doesn't
+  scroll; the active row is named by `aria-activedescendant`; a dialog handing
+  on to another (password form → covered-text warning) leaves the warning on
+  its button and closing it returns to Export options; with a finger, no
+  dialog opens on a place to type — Watermark, Download with password, Sign
+  with certificate (slice 10d).
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

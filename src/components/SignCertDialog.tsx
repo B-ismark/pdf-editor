@@ -87,7 +87,7 @@ export function SignCertDialog({ onSign, onClose }: Props) {
           <>
             <div className="field">
               <span className="field__label label-medium">Your name</span>
-              <input className="sigtype__input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ada Lovelace" autoFocus disabled={busy} />
+              <input className="sigtype__input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Ada Lovelace" data-autofocus disabled={busy} />
             </div>
             <div className="field">
               <span className="field__label label-medium">Organisation (optional)</span>

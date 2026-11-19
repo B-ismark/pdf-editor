@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
-import { fixtures } from "./fixtures";
-import { open, watch } from "./helpers";
+import { fixtures, HIDDEN } from "./fixtures";
+import { dragOnPage, open, pickTool, watch } from "./helpers";
 
 /**
  * Dialogs open where the work starts, and say what they are.
@@ -262,12 +262,21 @@ test("walking up into a group of commands shows its heading", async ({ page }) =
   await expect(list).toBeVisible();
   const n = await list.getByRole("option").count();
   for (let i = 0; i < n; i++) await page.keyboard.press("ArrowDown");
-  for (let i = 0; i < n; i++) await page.keyboard.press("ArrowUp");
-  const gap = await list.evaluate((l) => {
-    const h = l.querySelector(".cmdk__heading")!;
-    return h.getBoundingClientRect().top - l.getBoundingClientRect().top;
-  });
-  expect(gap, "the first heading is in view").toBeGreaterThanOrEqual(0);
+  // Up through the whole list: at each group's first row, its heading shows.
+  const hidden: string[] = [];
+  for (let i = 0; i < n; i++) {
+    await page.keyboard.press("ArrowUp");
+    const miss = await list.evaluate((l) => {
+      const row = l.querySelector('[data-active="true"]')!;
+      const group = row.closest('[role="group"]')!;
+      if (group.querySelector('[role="option"]') !== row) return null;
+      const h = group.firstElementChild!;
+      const top = h.getBoundingClientRect().top - l.getBoundingClientRect().top;
+      return top >= -1 ? null : `${h.textContent} ${top}`;
+    });
+    if (miss) hidden.push(miss);
+  }
+  expect(hidden, "headings scrolled out of view").toEqual([]);
   // The active row is announced from the search box.
   const input = page.getByRole("combobox", { name: "Search commands" });
   const id = await input.getAttribute("aria-activedescendant");
@@ -275,18 +284,77 @@ test("walking up into a group of commands shows its heading", async ({ page }) =
   await expect(page.locator(`[id="${id}"]`)).toHaveAttribute("aria-selected", "true");
 });
 
+test("the palette list holds still under the pointer", async ({ page }) => {
+  await open(page, (await fixtures()).sample);
+  await page.keyboard.press("Control+k");
+  const list = page.locator(".cmdk__list");
+  await expect(list).toBeVisible();
+  // Scroll so a group's heading is just above the top and its first row shows.
+  const { at, x, y } = await list.evaluate((l) => {
+    const groups = [...l.querySelectorAll('[role="group"]')] as HTMLElement[];
+    const g = groups[Math.min(2, groups.length - 1)];
+    const h = g.firstElementChild as HTMLElement;
+    const lt = l.getBoundingClientRect().top;
+    l.scrollTop += h.getBoundingClientRect().bottom - lt + 1;
+    const r = g.querySelector('[role="option"]')!.getBoundingClientRect();
+    return { at: l.scrollTop, x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  });
+  await page.mouse.move(x, y);
+  await expect(list.locator('[data-active="true"]')).toBeVisible();
+  await page.waitForTimeout(200);
+  expect(await list.evaluate((l) => l.scrollTop)).toBe(at);
+});
+
+test("a dialog that hands on to another gives focus back to where both began", async ({ page }) => {
+  // Download with password closing as the covered-text warning opens: the
+  // password form took focus back for its opener, out of the warning, which
+  // fell back to its box — and closing the warning left focus on the page.
+  await open(page, (await fixtures()).hidden);
+  const frag = page.locator('.page [role="textbox"]').first();
+  await expect(frag).toHaveText(HIDDEN.body);
+  const pg = (await page.locator(".page").first().boundingBox())!;
+  const fb = (await frag.boundingBox())!;
+  await pickTool(page, "Whiteout");
+  await dragOnPage(page, { x: fb.x - pg.x - 4, y: fb.y - pg.y - 2 }, { x: fb.x - pg.x + fb.width / 2, y: fb.y - pg.y + fb.height + 2 });
+  const caret = page.getByRole("button", { name: "Export options" });
+  await caret.click();
+  await page.getByRole("menuitem", { name: /Download with password/ }).click();
+  const d = page.getByRole("dialog", { name: "Download with password" });
+  await d.getByLabel("Password", { exact: true }).fill("hunter22");
+  await d.getByLabel("Type it again").fill("hunter22");
+  await d.getByRole("button", { name: "Download" }).click();
+  const warn = page.getByRole("alertdialog", { name: "Whiteout doesn't remove the text" });
+  await expect(warn).toBeVisible();
+  await expect(warn.getByRole("button", { name: "Download anyway" })).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(warn).toBeHidden();
+  await expect(caret).toBeFocused();
+});
+
 test.describe("with a finger", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   test("a dialog doesn't raise the keyboard before it's begun", async ({ page }) => {
     await open(page, (await fixtures()).sample);
     expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
-    await fromPalette(page, "Watermark");
-    const d = page.getByRole("dialog", { name: "Finishing touches" });
-    await expect(d).toBeVisible();
-    const tag = await page.evaluate(() => {
-      const a = document.activeElement as HTMLInputElement;
-      return `${a.tagName}${a.type ? `:${a.type}` : ""}`;
-    });
-    expect(["INPUT:text", "TEXTAREA"]).not.toContain(tag);
+    const typing = () =>
+      page.evaluate(() => {
+        const a = document.activeElement as HTMLElement;
+        const t = a instanceof HTMLInputElement ? a.type : "";
+        const types =
+          a.tagName === "TEXTAREA" ||
+          a.isContentEditable ||
+          (a.tagName === "INPUT" && !["checkbox", "radio", "range", "button", "submit", "file", "color"].includes(t));
+        return types ? `${a.tagName}:${t}` : "";
+      });
+    // Download with password and Sign with certificate focused their fields
+    // themselves (autoFocus), ahead of the rule.
+    for (const name of ["Watermark", "Download with password", "Sign with certificate"]) {
+      await fromPalette(page, name);
+      const d = page.locator('[role="dialog"][aria-modal="true"]');
+      await expect(d).toBeVisible();
+      expect(await typing(), name).toBe("");
+      await page.keyboard.press("Escape");
+      await expect(d).toBeHidden();
+    }
   });
 });

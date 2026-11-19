@@ -134,6 +134,14 @@ if (typeof window !== "undefined") window.addEventListener("popstate", handlePop
  * Attach the returned ref to the modal's container (give it `tabIndex={-1}` so
  * it can receive focus when it has no focusable children).
  */
+/**
+ * The opener of a dialog that closed while another took focus — one dialog
+ * handing on to the next (Download with password → the covered-text warning).
+ * The next one adopts it: its own opener, read as it rendered, was a button in
+ * the dialog now gone.
+ */
+let handedOn: HTMLElement | null = null;
+
 export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => void) {
   const containerRef = useRef<T | null>(null);
   // Who had focus before the dialog: read while rendering, because by the time
@@ -146,7 +154,16 @@ export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => voi
 
   useEffect(() => {
     const container = containerRef.current;
-    const prevActive = opener.current ?? null;
+    const placedAtOpen = document.activeElement as HTMLElement | null;
+    let prevActive = opener.current ?? null;
+    if (!prevActive?.isConnected) {
+      prevActive = handedOn?.isConnected
+        ? handedOn
+        : placedAtOpen && placedAtOpen !== document.body && !container?.contains(placedAtOpen)
+          ? placedAtOpen
+          : null;
+    }
+    handedOn = null;
     const token = Symbol("modal");
     const entry: ModalEntry = { token, onClose: () => onCloseRef.current(), history: pushHistory({ __modal: true }) };
     stack.push(entry);
@@ -170,6 +187,9 @@ export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => voi
     //   goes on from the top.
     // Where a finger is the pointer, never a place to type: focusing one raises
     // the on-screen keyboard over a dialog the person hasn't started on yet.
+    // So a dialog marks its field `data-autofocus` rather than `autoFocus`,
+    // which would run first and can't be told. (The password to open a file
+    // keeps `autoFocus`: typing it is all that dialog asks.)
     // Focus must not change anything either — a field that acts on focus (the
     // header slot chips type into) is marked rather than found.
     const placed = document.activeElement;
@@ -220,7 +240,13 @@ export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => voi
       // Closed via the UI (not the Back gesture): remove the entry it added,
       // without that pop closing anything else.
       unwindHistory(entry.history);
-      prevActive?.focus?.();
+      // Give focus back — unless something else already holds it: a dialog
+      // opening as this one closes. Taking it from that dialog left it on its
+      // box, and its own close then had nowhere to go. It inherits the opener.
+      const now = document.activeElement;
+      const free = !now || now === document.body || !now.isConnected || !!container?.contains(now);
+      if (free) prevActive?.focus?.();
+      else handedOn = prevActive;
     };
     // Run once for the modal's lifetime.
     // eslint-disable-next-line react-hooks/exhaustive-deps

@@ -280,15 +280,22 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     radio — not a checkbox or slider (Sign opened on "Remember this signature",
     below the pad), not an unchosen radio. With a coarse pointer, places to type
     are skipped: focusing one raises the on-screen keyboard over a dialog not
-    yet begun.
+    yet begun. So a dialog marks its field `data-autofocus`, not `autoFocus`
+    (which runs first and can't be told) — Download with password and Sign with
+    certificate did. The password to open a locked file keeps `autoFocus`:
+    typing it is all that dialog asks.
   - **Opening a dialog must not change it.** A field that acts on focus is
     marked `data-autofocus` on the spot that leaves things as they were:
     Header & footer's chips type into the slot last focused, so it opens on
     that slot (Footer, centre); Split's page-count box switches to "Every" on
-    focus, so with pages picked it opens on the "At picked pages" radio.
+    focus, so with pages picked it opens on the "Before each picked page" radio.
   - Focus goes back to the opener on close. `useModal` reads the opener while
     rendering: by its effect a child's `autoFocus` has moved focus inside, and
-    restoring to that removed field dropped focus onto the page.
+    restoring to that removed field dropped focus onto the page. A dialog
+    closing while another has already taken focus (Download with password
+    handing on to the covered-text warning) leaves focus there and hands its
+    opener on (`handedOn`); the new one adopts it when its own opener — a
+    button in the dialog now gone — is disconnected.
   - Titles are `<h2 className="headline-small dialog__title">` (24px), every
     dialog alike. Compare and Organise are full-screen surfaces with a bar
     title, and keep `title-large`.
@@ -300,7 +307,9 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   - The palette files rows under their group's heading (`role="group"` in the
     listbox, groups in registry order); the right-hand column is a `<kbd>` for
     a shortcut and nothing else. Arrow keys walk the flattened rows in the
-    order shown; the first row of a group scrolls its heading into view too.
+    order shown; moving by the arrows onto a group's first row scrolls its
+    heading into view too (not on hover — the list would slide under the
+    pointer).
     The input is a `combobox` whose `aria-activedescendant` names the active
     row; headings are `aria-hidden` (each group is labelled by its heading).
 

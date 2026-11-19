@@ -74,7 +74,7 @@ export function ProtectDialog({ onDownload, onClose, busy }: Props) {
               onKeyDown={onEnter}
               aria-invalid={empty || undefined}
               aria-describedby={empty ? "protect-error" : undefined}
-              autoFocus
+              data-autofocus
             />
           </label>
           <label className="field">
