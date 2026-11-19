@@ -67,7 +67,10 @@ type-checking can't see, and each exists because it broke once:
   700px window (the Inspector's narrowest, 288px) the size slider keeps
   150px+, no control overruns its row and a link's "Web address" stays on one
   line; a drawing's Width slider starts on the control line; the menu's shade
-  shows in dark; with no tab strip the app bar keeps its rule (slice 10b).
+  shows in dark; with no tab strip the app bar keeps its rule; stacked, Reset
+  style's icon is on the control line; and with real scrollbars (launched
+  without `--hide-scrollbars`) a short 1440px window keeps the desktop
+  Inspector's labels beside their controls (slice 10b).
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

@@ -934,11 +934,15 @@ body {
 /* At its narrowest (288px, a window between phone and desktop) the Inspector's
    control column was 167px: the size slider squeezed to 75px between its
    steppers and "Web address" broke onto two lines. There, each label sits
-   above its control and the control has the whole width. */
+   above its control and the control has the whole width. The fold point sits
+   between the narrow panel (255px of content, 240 with a scrollbar) and the
+   desktop one (287, 272 with a 15px scrollbar), so a scrollbar never moves a
+   panel across it. */
 .props { container: props / inline-size; }
-@container props (max-width: 279px) {
+@container props (max-width: 264px) {
   .props .field { grid-template-columns: minmax(0, 1fr); row-gap: 8px; }
-  .props__row-actions > .btn--text { margin-left: 0; }
+  /* The button pads its content 12px in; the content is what lines up. */
+  .props__row-actions > .btn--text { margin-left: -12px; }
 }
 
 /* Segmented button */

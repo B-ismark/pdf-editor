@@ -235,3 +235,40 @@ test("with no tab strip, the app bar keeps its rule", async ({ browser }) => {
   expect(bar["border-bottom-color"]).not.toMatch(/rgba\(.*,\s*0\)|transparent/);
   await ctx.close();
 });
+
+test("with scrollbars that take up room, a short window doesn't fold the desktop Inspector", async ({ playwright, baseURL }) => {
+  // Headless Chromium hides scrollbars; a Windows or Linux desktop browser
+  // gives them 15px, which took the 320px Inspector under the fold point.
+  const browser = await playwright.chromium.launch({
+    executablePath: process.env.PW_EXECUTABLE_PATH || undefined,
+    ignoreDefaultArgs: ["--hide-scrollbars"],
+  });
+  const page = await browser.newPage({ baseURL, viewport: { width: 1440, height: 420 } });
+  try {
+    await open(page, (await fixtures()).sample);
+    await page.locator(".fragment").first().click();
+    await expect(page.locator(".props__title")).toHaveText("Text");
+    const scrolls = await page.locator(".inspector").evaluate((el) => el.clientWidth < el.offsetWidth - 2);
+    expect(scrolls, "the Inspector shows a scrollbar here").toBe(true);
+    const beside = await page.locator(".props .field").evaluateAll((fields) =>
+      fields.map((f) => {
+        const l = f.querySelector(".field__label")!.getBoundingClientRect();
+        const c = [...f.children].find((c) => !c.classList.contains("field__label"))!.getBoundingClientRect();
+        return c.x > l.x + 40;
+      }),
+    );
+    expect(beside.every(Boolean), "labels beside their controls").toBe(true);
+  } finally {
+    await browser.close();
+  }
+});
+
+test("stacked, Reset style lines up with the controls above it", async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 900 });
+  await open(page, (await fixtures()).sample);
+  await page.locator(".fragment").first().click();
+  const control = (await controls(page))[0].x;
+  // Its icon, not its box: a text button pads its content 12px in.
+  const icon = (await page.getByRole("button", { name: "Reset style" }).locator("svg").boundingBox())!;
+  expect(Math.abs(icon.x - control), `icon at ${icon.x}, controls at ${control}`).toBeLessThan(2);
+});
