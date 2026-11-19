@@ -153,7 +153,7 @@ export function SignatureDialog({ onCreate, onClose }: Props) {
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="dialog__head">
-          <span className="title-large">Add signature</span>
+          <h2 className="headline-small dialog__title">Add signature</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">
             <Icon name="close" size={20} />
           </button>

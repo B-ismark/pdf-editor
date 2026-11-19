@@ -72,7 +72,7 @@ export function SplitDialog({ count, picked, busy, error, onSplit, onClose }: Pr
         aria-modal="true"
         aria-labelledby={`${id}-title`}
       >
-        <span className="title-large" id={`${id}-title`}>Split into files</span>
+        <h2 className="headline-small dialog__title" id={`${id}-title`}>Split into files</h2>
         <div className="split" role="radiogroup" aria-label="Where to split">
           <label className="split__row">
             <input type="radio" name={`${id}-mode`} checked={mode === "every"} onChange={() => setMode("every")} />

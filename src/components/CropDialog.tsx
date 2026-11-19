@@ -282,7 +282,7 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
         aria-labelledby={`${id}-title`}
         aria-describedby={`${id}-note`}
       >
-        <span className="title-large" id={`${id}-title`}>Crop page {position + 1}</span>
+        <h2 className="headline-small dialog__title" id={`${id}-title`}>Crop page {position + 1}</h2>
         <div className="crop__stage" ref={stage}>
           <div className="crop__page" style={{ width: sheet.width * k, height: sheet.height * k }}>
             <div ref={host} className="crop__host" />
@@ -294,6 +294,7 @@ export function CropDialog({ bytes, page, position, count, onCrop, onClose }: Pr
               aria-label="Crop frame"
               aria-describedby={`${id}-keys`}
               tabIndex={0}
+              data-autofocus
               data-tip="Drag to move the frame"
               onPointerDown={begin("frame")}
               onPointerMove={move}

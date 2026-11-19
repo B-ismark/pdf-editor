@@ -32,7 +32,7 @@ export function ConfirmDialog({
         aria-modal="true"
         aria-label={title}
       >
-        <span className="title-large">{title}</span>
+        <h2 className="headline-small dialog__title">{title}</h2>
         <p className="body-medium confirm__msg">{message}</p>
         <div className="dialog__actions">
           <button className="btn" onClick={onCancel}>{cancelLabel}</button>

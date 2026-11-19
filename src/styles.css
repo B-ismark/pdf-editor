@@ -42,6 +42,10 @@ body {
 :focus:not(:focus-visible) {
   outline: none;
 }
+/* A dialog takes focus itself when it opens with no field to start in (so a
+   screen reader reads its title); the box is not a control, so no ring. */
+[role="dialog"][tabindex="-1"]:focus-visible,
+[role="alertdialog"][tabindex="-1"]:focus-visible { outline: none; }
 
 .app {
   display: flex;
@@ -107,7 +111,6 @@ body {
 }
 .btn:hover::after { opacity: var(--state-hover); }
 .btn:active::after { opacity: var(--state-press); }
-.btn:disabled { opacity: 0.55; cursor: default; }
 .btn--filled { background: var(--primary); color: var(--on-primary); }
 .btn--text {
   background: transparent;
@@ -117,6 +120,16 @@ body {
 .btn--tonal { background: var(--secondary-container); color: var(--on-secondary-container); }
 .btn--danger { background: var(--error-container); color: var(--on-error-container); }
 .btn--lg { height: 50px; padding: 0 26px; font-size: 0.9375rem; }
+/* Disabled is a neutral, waiting state — not the button faded. At 55% opacity
+   a filled button read as a washed-out version of itself, the page showing
+   through it. Material's disabled roles instead: a quiet on-surface fill and
+   label, the same for every kind, no hover. */
+.btn:disabled { cursor: default; color: color-mix(in srgb, var(--on-surface) 38%, transparent); }
+.btn--filled:disabled,
+.btn--tonal:disabled,
+.btn--danger:disabled { background: color-mix(in srgb, var(--on-surface) 12%, transparent); }
+.btn--text:disabled { background: transparent; }
+.btn:disabled::after { opacity: 0; }
 
 /* ============ Top app bar ============ */
 .appbar {
@@ -1786,7 +1799,18 @@ body {
 }
 .cmdk__item--on { background: var(--secondary-container); color: var(--on-secondary-container); }
 .cmdk__label { flex: 1; }
-.cmdk__hint { color: var(--on-surface-variant); font-variant-numeric: tabular-nums; }
+/* Keys alone in the right-hand column, set as keys; what a command is about is
+   the quiet heading over its group, as in the ⋯ menu. */
+.cmdk__hint {
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
+  background: color-mix(in srgb, var(--on-surface) 8%, transparent);
+  color: var(--on-surface-variant);
+  font-family: var(--font-plain);
+  font-variant-numeric: tabular-nums;
+}
+.cmdk__heading { padding: 12px 12px 4px; color: var(--on-surface-variant); }
+.cmdk__group:first-child .cmdk__heading { padding-top: 4px; }
 /* A setting's current value (Theme … Dark) and an on switch's check, the same
    way the ⋯ menu shows them: the palette row and the menu row are one command. */
 .cmdk__value { color: var(--on-surface-variant); }
@@ -2489,6 +2513,10 @@ body {
   align-items: center;
   justify-content: space-between;
 }
+/* One title for every dialog: Material's dialog headline (24px). They were
+   set at 16 or 22px — small for the weight of the box under them — and as
+   plain text, not a heading. */
+.dialog__title { margin: 0; color: var(--on-surface); }
 .dialog__body {
   flex: 1;
   min-height: 220px;

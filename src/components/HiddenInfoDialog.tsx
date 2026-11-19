@@ -77,7 +77,7 @@ export function HiddenInfoDialog({ onInspect, onDownload, onClose, busy }: Props
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="dialog__head">
-          <span className="title-medium" id="hidden-title">Hidden information</span>
+          <h2 className="headline-small dialog__title" id="hidden-title">Hidden information</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">
             <Icon name="close" size={20} />
           </button>

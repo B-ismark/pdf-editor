@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Icon } from "./Icon";
 
-/** Where a command belongs. The palette says it beside each row (when the
- * row has no shortcut to show), and the ⋯ and Export menus file their rows by
- * it — one taxonomy, so a command can't be "Text" in one place and "Finish" in
- * another. */
+/** Where a command belongs. The palette files its rows under it, as the ⋯
+ * and Export menus do — one taxonomy, so a command can't be "Text" in one
+ * place and "Finish" in another. */
 export type CommandGroup =
   | "tools"
   | "draw"
@@ -107,10 +106,22 @@ export function CommandPalette({ commands, onClose }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
 
-  const results = useMemo(
-    () => commands.filter((c) => !c.disabled && !c.hidden && match(c, q)),
-    [commands, q],
-  );
+  // Filed under their groups, each group where its first command stands in
+  // the registry. The right-hand column is for keys alone: it used to show a
+  // command's group when it had no shortcut, so "V" and "Draw" stood in one
+  // column as if they were the same kind of thing.
+  const sections = useMemo(() => {
+    const by = new Map<CommandGroup, Command[]>();
+    for (const c of commands) {
+      if (c.disabled || c.hidden || !match(c, q)) continue;
+      const list = by.get(c.group);
+      if (list) list.push(c);
+      else by.set(c.group, [c]);
+    }
+    return [...by].map(([group, cmds]) => ({ group, cmds }));
+  }, [commands, q]);
+  // Arrow keys walk the rows in the order they are shown.
+  const results = useMemo(() => sections.flatMap((s) => s.cmds), [sections]);
 
   // Focus goes back where it was when the palette closes, before the command
   // runs, so a command that moves focus itself (Find) still wins and one that
@@ -181,29 +192,43 @@ export function CommandPalette({ commands, onClose }: Props) {
         </div>
         <div className="cmdk__list" role="listbox" aria-label="Commands" ref={listRef}>
           {results.length === 0 && <div className="cmdk__empty">No matching commands</div>}
-          {results.map((c, i) => (
-            <button
-              key={c.id}
-              className={`cmdk__item${i === active ? " cmdk__item--on" : ""}`}
-              data-active={i === active}
-              data-cmd={c.id}
-              data-group={c.group}
-              role="option"
-              aria-selected={i === active}
-              aria-checked={c.checked}
-              aria-keyshortcuts={ariaKeys(c.shortcut)}
-              onPointerEnter={() => setActive(i)}
-              onClick={() => runAt(i)}
-            >
-              {c.icon && <Icon name={c.icon} size={18} />}
-              <span className="cmdk__label">{c.label}</span>
-              {c.value && <span className="cmdk__value label-medium">{c.value}</span>}
-              {c.checked && <Icon name="check" size={16} className="cmdk__check" />}
-              <span className="cmdk__hint label-medium" aria-hidden="true">{c.shortcut ?? GROUP_LABEL[c.group]}</span>
-              {/* The dialog mark is for dialogs only: Draw opens a toolbar,
-                  which the dock marks its own way. */}
-              {c.opens === "dialog" && <Icon name="opens_dialog" size={16} className="opens-mark" />}
-            </button>
+          {sections.map(({ group, cmds }) => (
+            <div key={group} role="group" aria-labelledby={`cmdk-g-${group}`} className="cmdk__group">
+              <div id={`cmdk-g-${group}`} className="cmdk__heading label-small" role="presentation">
+                {GROUP_LABEL[group]}
+              </div>
+              {cmds.map((c) => {
+                const i = results.indexOf(c);
+                return (
+                  <button
+                    key={c.id}
+                    className={`cmdk__item${i === active ? " cmdk__item--on" : ""}`}
+                    data-active={i === active}
+                    data-cmd={c.id}
+                    data-group={c.group}
+                    role="option"
+                    aria-selected={i === active}
+                    aria-checked={c.checked}
+                    aria-keyshortcuts={ariaKeys(c.shortcut)}
+                    onPointerEnter={() => setActive(i)}
+                    onClick={() => runAt(i)}
+                  >
+                    {c.icon && <Icon name={c.icon} size={18} />}
+                    <span className="cmdk__label">{c.label}</span>
+                    {c.value && <span className="cmdk__value label-medium">{c.value}</span>}
+                    {c.checked && <Icon name="check" size={16} className="cmdk__check" />}
+                    {c.shortcut && (
+                      <kbd className="cmdk__hint label-medium" aria-hidden="true">
+                        {c.shortcut}
+                      </kbd>
+                    )}
+                    {/* The dialog mark is for dialogs only: Draw opens a
+                        toolbar, which the dock marks its own way. */}
+                    {c.opens === "dialog" && <Icon name="opens_dialog" size={16} className="opens-mark" />}
+                  </button>
+                );
+              })}
+            </div>
           ))}
         </div>
       </div>

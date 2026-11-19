@@ -10,6 +10,9 @@ const FOCUSABLE = [
   '[contenteditable="true"]',
 ].join(",");
 
+/** What counts as "a field" for where a dialog puts focus on opening. */
+const FIELD = 'input:not([type="hidden"]), select, textarea, [contenteditable="true"]';
+
 /**
  * The app's own history entries, in one place. Dialogs push one so Back
  * closes them, and so does the editor's phone "Back puts the selection
@@ -140,9 +143,23 @@ export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => voi
       ).filter((el) => el.getClientRects().length > 0);
     };
 
-    // Move focus into the dialog (first focusable, else the container itself).
-    const items = focusables();
-    (items[0] ?? container)?.focus?.();
+    // Move focus into the dialog — to where the work starts, not to Close.
+    // Close leads the markup, so "the first focusable" put a ring on "close"
+    // as the first thing the eye met. In order:
+    // - where a child already put it (`autoFocus` runs before this effect);
+    // - a control marked `data-autofocus` (the crop frame);
+    // - the first field;
+    // - else the dialog itself, so a screen reader reads its title and Tab
+    //   goes on from the top.
+    const placed = document.activeElement;
+    if (!(container && placed && placed !== container && container.contains(placed))) {
+      const items = focusables();
+      const target =
+        items.find((el) => el.hasAttribute("data-autofocus")) ??
+        items.find((el) => el.matches(FIELD)) ??
+        container;
+      target?.focus?.();
+    }
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (!isTop()) return;

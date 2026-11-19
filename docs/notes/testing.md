@@ -80,6 +80,12 @@ type-checking can't see, and each exists because it broke once:
   names each page button and marks a pick with a tick; after a move or a
   delete the keyboard stays with the page; on a phone and on a touch laptop
   every page's controls are in view, before and after a move (slice 10c).
+- `dialogs.spec.ts` — a dialog opens on its first field, by mouse or from the
+  palette, never on Close (a stray Enter doesn't close it); one with no field
+  focuses itself with no ring; Crop opens on its frame; titles are level-2
+  headings at 24px; a disabled primary button is a neutral fill at full
+  opacity; the palette's key column holds only keys and its rows sit under one
+  heading per group, walked by the arrows in the order shown (slice 10d).
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

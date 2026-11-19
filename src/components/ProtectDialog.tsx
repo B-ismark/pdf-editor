@@ -57,7 +57,7 @@ export function ProtectDialog({ onDownload, onClose, busy }: Props) {
         aria-modal="true"
         aria-labelledby="protect-title"
       >
-        <span className="title-large" id="protect-title">Download with password</span>
+        <h2 className="headline-small dialog__title" id="protect-title">Download with password</h2>
         <div className="pwform">
           <p className="body-medium confirm__msg">
             The copy you download asks for this password before it opens. It isn't kept anywhere, so if it's lost, so

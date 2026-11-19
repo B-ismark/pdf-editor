@@ -270,6 +270,23 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
   pick. After a move or delete, focus goes back to the moved page's same
   control (or the next page's button): the card remounts, so focus fell to the
   body. Page buttons are named "Page N"; the pick mark is `check`, not `add`.
+- **Dialogs (10d).**
+  - Where focus lands on opening (`useModal`): where a child's `autoFocus`
+    already put it; else a control marked `data-autofocus` (the crop frame);
+    else the first field; else the dialog box itself (`tabIndex={-1}`, no ring
+    drawn on it). Never "the first focusable" — Close leads the markup, so that
+    put a ring on "close" for anyone arriving by keyboard, and Enter closed it.
+    A dialog's own focus effect (Header & footer's last place) is declared
+    after `useModal` and so runs after it, and wins.
+  - Titles are `<h2 className="headline-small dialog__title">` (24px), every
+    dialog alike. Compare and Organise are full-screen surfaces with a bar
+    title, and keep `title-large`.
+  - Disabled `.btn` uses Material's disabled roles (on-surface 12% fill, 38%
+    label, no hover), not opacity — at 55% a filled button was itself, faded.
+  - The palette files rows under their group's heading (`role="group"` in the
+    listbox, groups in registry order); the right-hand column is a `<kbd>` for
+    a shortcut and nothing else. Arrow keys walk the flattened rows in the
+    order shown.
 
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is

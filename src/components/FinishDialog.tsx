@@ -156,7 +156,7 @@ export function FinishDialog({
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="dialog__head">
-          <span className="title-large">Finishing touches</span>
+          <h2 className="headline-small dialog__title">Finishing touches</h2>
           <button className="icon-btn" onClick={onClose} aria-label="Close" data-tip="Close">
             <Icon name="close" size={20} />
           </button>

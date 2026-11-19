@@ -56,7 +56,7 @@ export function SignCertDialog({ onSign, onClose }: Props) {
         onPointerDown={(e) => e.stopPropagation()}
       >
         <div className="dialog__head">
-          <span className="title-medium">Sign document</span>
+          <h2 className="headline-small dialog__title">Sign document</h2>
           <button className="icon-btn" onClick={onClose} disabled={busy} aria-label="Close" data-tip="Close">
             <Icon name="close" size={20} />
           </button>

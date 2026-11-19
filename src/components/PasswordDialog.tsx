@@ -36,7 +36,7 @@ export function PasswordDialog({ fileName, wrong, checking, onSubmit, onCancel }
         aria-modal="true"
         aria-labelledby="pw-title"
       >
-        <span className="title-large" id="pw-title">This PDF is password-protected</span>
+        <h2 className="headline-small dialog__title" id="pw-title">This PDF is password-protected</h2>
         <form
           className="pwform"
           onSubmit={(e) => {
