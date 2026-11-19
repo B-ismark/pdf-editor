@@ -116,6 +116,20 @@ test.describe("the last document stays warm", () => {
     expect(Math.abs((await width()) - fitted)).toBeLessThan(1);
   });
 
+  test("a document that waited through a move to a sharper screen comes back sharp", async ({ page }) => {
+    const f = await fixtures();
+    await open(page, f.long);
+    const backing = () => page.locator(".page canvas").first().evaluate((c) => (c as HTMLCanvasElement).width);
+    await expect.poll(backing).toBeGreaterThan(0);
+    const before = await backing();
+    await openMore(page, f.sample);
+    // The same window, now on a 2× screen: no resize, so the fit stays.
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 820, deviceScaleFactor: 2, mobile: false });
+    await switchTo(page, "long.pdf");
+    await expect.poll(backing, { timeout: 5000 }).toBeGreaterThan(before * 1.5);
+  });
+
   test("typing before and after a switch is two undo steps", async ({ page }) => {
     const f = await fixtures();
     await open(page, f.long);

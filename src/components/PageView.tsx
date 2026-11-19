@@ -162,7 +162,10 @@ function PageViewInner(props: Props) {
     let cancelled = false;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const at = `${page.pageIndex}:${page.rotation}:${scale}`;
+    // The screen's density too: `renderPage` sizes the backing store by it, and a
+    // window moved to a sharper screen while its document waited behind
+    // another fires no resize.
+    const at = `${page.pageIndex}:${page.rotation}:${scale}:${window.devicePixelRatio || 1}`;
     if (near && paintedAs.current?.bytes === bytes && paintedAs.current.at === at) return;
     paintedAs.current = null;
     if (!near) {
