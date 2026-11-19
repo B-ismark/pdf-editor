@@ -1102,15 +1102,17 @@ export function App() {
               <span className="restore-banner__icon"><Icon name="restore" size={22} /></span>
               <div className="restore-banner__text">
                 <b className="title-small">Restore last session?</b>
-                {/* A list or a long name is cut short; the tooltip has it whole.
-                    A short single name needs none. */}
+                {/* Cut short, the tooltip has the names whole; not cut, it has
+                    nothing to add. Decided as the pointer arrives (before
+                    TooltipHost reads it), from the line as it is laid out. */}
                 <span
                   className="body-small restore-banner__files"
-                  data-tip={
-                    restorable.docs.length > 1 || restorable.docs[0].fileName.length > 24
-                      ? restorable.docs.map((d) => d.fileName).join(", ")
-                      : undefined
-                  }
+                  data-tip=""
+                  onPointerOver={(e) => {
+                    const el = e.currentTarget;
+                    const cut = el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight;
+                    el.dataset.tip = cut ? restorable.docs.map((d) => d.fileName).join(", ") : "";
+                  }}
                 >
                   {restorable.docs.length === 1
                     ? restorable.docs[0].fileName

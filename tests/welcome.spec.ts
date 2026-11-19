@@ -180,6 +180,24 @@ test("over an open document, a file is offered a new tab, but not behind a dialo
   await expect(page.locator(".dropveil")).toHaveCount(0);
 });
 
+test("a cut-short file name shows whole on hover; one that fits gets no tooltip", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  const sample = (await fixtures()).sample;
+  const hover = async (name: string) => {
+    await seedStore(page, [["doc:a", docRecord("a", name, 0)]], [["bytes:a", sample]]);
+    await page.reload();
+    await page.mouse.move(0, 0);
+    await page.locator(".restore-banner__files").hover();
+    await page.waitForTimeout(900);
+  };
+  // Short in characters, wide in letters: cut on a desktop banner.
+  await hover("WWWWWWWWWWWWWWWWWWWW.pdf");
+  await expect(page.getByRole("tooltip")).toHaveText("WWWWWWWWWWWWWWWWWWWW.pdf");
+  await hover("notes.pdf");
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+});
+
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
   test("nothing asks a finger to drag, and no line ends on one word", async ({ page }) => {
