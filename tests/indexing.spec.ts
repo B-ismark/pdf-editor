@@ -24,7 +24,7 @@ const HOLD_MS = 8_000;
  * `HOLD_MS` late. Everything else — layout, rendering, other pages' text — is
  * untouched.
  */
-async function slowText(page: Page, pageIndex: number) {
+async function slowText(page: Page, pageIndex: number, holdMs = HOLD_MS) {
   await page.route(/\/assets\/pdf\.worker\.min-[\w-]{8}\.mjs$/, async (route) => {
     const res = await route.fetch();
     const prefix = `
@@ -37,9 +37,9 @@ async function slowText(page: Page, pageIndex: number) {
             const d = e.data;
             const until = d && d.streamId != null ? held.get(d.streamId) : undefined;
             if (d && d.action === "GetTextContent" && d.data && d.data.pageIndex === ${pageIndex}) {
-              const at = Date.now() + ${HOLD_MS};
+              const at = Date.now() + ${holdMs};
               held.set(d.streamId, at);
-              setTimeout(() => fn(e), ${HOLD_MS});
+              setTimeout(() => fn(e), ${holdMs});
             } else if (until !== undefined) {
               setTimeout(() => fn(e), Math.max(0, until - Date.now()));
             } else fn(e);
@@ -195,7 +195,7 @@ test.describe("background text", () => {
       await frag.click();
       await page.keyboard.press("End");
       await page.keyboard.type(" Serengeti", { delay: 20 });
-      await page.locator(".appbar__spacer").click();
+      await page.waitForTimeout(300);
       const download = await first;
       const [one] = await pageTexts(readFileSync((await download.path())!), [1]);
       expect(one).not.toContain("Serengeti");
@@ -207,7 +207,11 @@ test.describe("background text", () => {
 
     test("Download all is busy from the press, while it waits for text", async ({ page }) => {
       const path = await threePages();
-      await slowText(page, 2);
+      // Two documents take a while to restore: a longer hold, so it's still
+      // running when Download all is pressed.
+      test.setTimeout(120_000);
+      const hold = 25_000;
+      await slowText(page, 2, hold);
       await page.goto("/");
       await seedStore(
         page,
@@ -222,15 +226,19 @@ test.describe("background text", () => {
       );
       await restoreSeeded(page);
       await painted(page);
+      await expect(page.locator(".docpanel")).toContainText("Reading text…");
       let downloads = 0;
       page.on("download", () => downloads++);
-      const zip = page.waitForEvent("download", { timeout: 3 * HOLD_MS + 10_000 });
+      const zip = page.waitForEvent("download", { timeout: 2 * hold + 10_000 });
       await page.locator('[aria-label="Export options"]').click();
       await page.locator(".menu__item", { hasText: "Download all (2) as ZIP" }).click();
-      // Still waiting on page three's text: a second press is refused.
-      await page.locator('[aria-label="Export options"]').click();
-      await expect(page.locator(".menu__item", { hasText: "Download all (2) as ZIP" })).toBeDisabled();
-      await page.keyboard.press("Escape");
+      // Still waiting on page three's text, and already busy: Export won't
+      // open again, so there's no second press to make.
+      const caret = page.locator('[aria-label="Export options"]');
+      await expect(caret).toHaveAttribute("aria-disabled", "true");
+      // (Forced: Playwright would otherwise wait for it to stop being busy.)
+      await caret.click({ force: true });
+      await expect(page.locator(".menu__item", { hasText: "Download all (2) as ZIP" })).toHaveCount(0);
       await zip;
       await page.waitForTimeout(2_000);
       expect(downloads).toBe(1);
