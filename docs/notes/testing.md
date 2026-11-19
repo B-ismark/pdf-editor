@@ -333,6 +333,16 @@ type-checking can't see, and each exists because it broke once:
   cropped page too (the exporter rasterises that page); marks and Overlay keep
   their colours in dark theme; closing Compare leaves a background tab's fonts
   loaded; the command is disabled with one document open;
+- `indexing.spec.ts` — Package 9a. A file opens with its layout and reads its
+  text in the background. The spec holds one page's text back inside pdf.js's
+  worker (it serves the worker with a prefix that delays that page's
+  `GetTextContent` message), so "not read yet" lasts long enough to act in:
+  the first page paints well inside the hold; the Inspector says "Reading
+  text…", never "No text layer"; Find counts what has arrived and Redact all
+  waits for every page; Export text includes the held page; a restored edit on
+  it counts as a change and is drawn in the download; a restored whiteout over
+  it still warns before download. Each was shown to fail with its
+  `completeText` (or count) removed;
 - `winansi.spec.ts` — text drawn in a standard font (a text box, a watermark)
   never reaches the file as a stand-in "?": `@cantoo/pdf-lib` writes "?" for a
   character WinAnsi can't encode instead of throwing, so `sanitize`

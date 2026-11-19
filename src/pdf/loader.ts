@@ -3,6 +3,7 @@ import * as pdfjsLib from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { TextItem, TextStyle } from "pdfjs-dist/types/src/display/api";
 import { cropOffset, shownSize } from "./pagePlan";
+import { completeText, stopIndexing } from "./textIndex";
 import type { CropRect, FormField, LoadedPdf, PageData, TextFragment } from "./types";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -25,129 +26,172 @@ export function looksLikePdf(bytes: ArrayBuffer): boolean {
   return false;
 }
 
+/** What reading a page's text yields: its editable fragments and form fields. */
+export interface PageText {
+  fragments: TextFragment[];
+  fields: FormField[];
+  /** pdf.js couldn't read this page's text: it has none we know of — which is
+   * not the same as knowing it has none. */
+  unreadable?: true;
+}
+
 /**
- * Parse a PDF into per-page editable text fragments.
+ * Open a PDF for showing: page sizes, turns and references only.
+ *
+ * Every page comes back `textPending`, with no fragments or fields yet — those
+ * are read in the background (`textIndex.ts`), because reading a long file's
+ * text took most of a second on 600 pages while its layout took 38 ms, and the
+ * first page waited on all of it. Uses the same parse the pages render from
+ * (`getCachedDoc`), so opening no longer parses the file twice.
  *
  * We keep the raw bytes around: unedited content is preserved by exporting
  * from the original file and only redrawing fragments the user changed.
  */
-export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
-  // pdf.js transfers/detaches the buffer it parses, so hand it a copy and
-  // keep the pristine original for export.
-  const parseCopy = bytes.slice(0);
-  const doc = await pdfjsLib.getDocument({ data: parseCopy }).promise;
-  const pages: PageData[] = [];
-
-  for (let p = 0; p < doc.numPages; p++) {
-    const page = await doc.getPage(p + 1);
-    // Unturned: the page's own user space, which is what text transforms and
-    // every overlay object are measured in. The turn is applied at render.
-    const viewport = page.getViewport({ scale: 1, rotation: 0 });
-    // The view need not start at the user-space origin (a CropBox of
-    // [100 200 …]). Everything read off the page is moved into view space
-    // here, once, so nothing downstream has to know; the exporter moves it back.
-    const ox = page.view[0] ?? 0;
-    const oy = page.view[1] ?? 0;
-    const content = await page.getTextContent();
-    const fragments: TextFragment[] = [];
-
-    content.items.forEach((raw, itemIndex) => {
-      const item = raw as TextItem;
-      // Skip whitespace-only fragments; they carry no editable glyphs and
-      // clutter the overlay.
-      if (!item.str || item.str.trim() === "") return;
-
-      const style: TextStyle | undefined = content.styles[item.fontName];
-      fragments.push({
-        id: `${p}:${itemIndex}`,
+export async function loadLayout(bytes: ArrayBuffer): Promise<LoadedPdf> {
+  try {
+    const doc = await getCachedDoc(bytes);
+    const pages: PageData[] = [];
+    for (let p = 0; p < doc.numPages; p++) {
+      const page = await doc.getPage(p + 1);
+      // Unturned: the page's own user space, which is what text transforms and
+      // every overlay object are measured in. The turn is applied at render.
+      const viewport = page.getViewport({ scale: 1, rotation: 0 });
+      const ox = page.view[0] ?? 0;
+      const oy = page.view[1] ?? 0;
+      pages.push({
         pageIndex: p,
-        itemIndex,
-        original: item.str,
-        transform: ox || oy ? [...item.transform.slice(0, 4), item.transform[4] - ox, item.transform[5] - oy] : item.transform,
-        width: item.width,
-        height: item.height,
-        fontFamily: style?.fontFamily ?? "sans-serif",
-        ...(item.dir === "rtl" ? { rtl: true } : {}),
+        viewBox: { width: viewport.width, height: viewport.height },
+        ...(ox || oy ? { origin: { x: ox, y: oy } } : {}),
+        rotation: ((page.rotate % 360) + 360) % 360,
+        fragments: [],
+        fields: [],
+        textPending: true,
+        ref: page.ref ? { num: page.ref.num, gen: page.ref.gen } : null,
       });
-    });
-
-    // AcroForm widgets → editable form fields. Push buttons and signature
-    // fields aren't filled in, so they aren't offered.
-    const fields: FormField[] = [];
-    try {
-      const annots = await page.getAnnotations();
-      annots.forEach((a: Record<string, unknown>, k: number) => {
-        if (a.subtype !== "Widget" || a.hidden) return;
-        const ft = a.fieldType as string | undefined;
-        const rect = a.rect as number[] | undefined;
-        if (!rect || rect.length < 4) return;
-        const x = Math.min(rect[0], rect[2]) - ox;
-        const y = Math.min(rect[1], rect[3]) - oy;
-        const width = Math.abs(rect[2] - rect[0]);
-        const height = Math.abs(rect[3] - rect[1]);
-        const name = (a.fieldName as string) || `field-${p}-${k}`;
-        const label = typeof a.alternativeText === "string" ? a.alternativeText.trim() : "";
-        const base = {
-          id: `${p}:field:${k}`,
-          name,
-          pageIndex: p,
-          rect: { x, y, width, height },
-          // Locked along with its contents (`/F` Locked + LockedContents):
-          // no viewer lets it change, and pdf.js paints it into the canvas.
-          readOnly: !!a.readOnly || !!a.noHTML,
-          ...(a.noHTML || a.hasOwnCanvas ? { painted: true } : {}),
-          ...(label ? { label } : {}),
-        };
-        if (ft === "Tx") {
-          const maxLen = typeof a.maxLen === "number" && a.maxLen > 0 ? a.maxLen : undefined;
-          fields.push({
-            ...base,
-            type: "text",
-            defaultValue: String(a.fieldValue ?? ""),
-            ...(a.multiLine ? { multiline: true } : {}),
-            ...(maxLen ? { maxLength: maxLen } : {}),
-          });
-        } else if (ft === "Btn" && a.checkBox) {
-          const on = a.fieldValue != null && a.fieldValue !== "Off" && a.fieldValue !== false;
-          fields.push({ ...base, type: "checkbox", defaultValue: on });
-        } else if (ft === "Btn" && a.radioButton && typeof a.buttonValue === "string") {
-          const v = typeof a.fieldValue === "string" && a.fieldValue !== "Off" ? a.fieldValue : "";
-          fields.push({ ...base, type: "radio", defaultValue: v, onValue: a.buttonValue });
-        } else if (ft === "Ch" && Array.isArray(a.options)) {
-          const options = (a.options as { exportValue?: unknown; displayValue?: unknown }[]).map((o) => {
-            const value = String(o.exportValue ?? o.displayValue ?? "");
-            return { value, label: String(o.displayValue ?? value) };
-          });
-          const raw = a.fieldValue;
-          const chosen = (Array.isArray(raw) ? raw : raw == null || raw === "" ? [] : [raw]).map(String);
-          const multi = !a.combo && !!a.multiSelect;
-          fields.push({
-            ...base,
-            type: "choice",
-            options,
-            defaultValue: multi ? chosen : (chosen[0] ?? ""),
-            ...(a.combo ? { combo: true } : {}),
-            ...(multi ? { multiSelect: true } : {}),
-          });
-        }
-      });
-    } catch {
-      /* Annotation parsing is best-effort; ignore malformed forms. */
     }
-
-    pages.push({
-      pageIndex: p,
-      viewBox: { width: viewport.width, height: viewport.height },
-      ...(ox || oy ? { origin: { x: ox, y: oy } } : {}),
-      rotation: ((page.rotate % 360) + 360) % 360,
-      fragments,
-      fields,
-      ref: page.ref ? { num: page.ref.num, gen: page.ref.gen } : null,
-    });
+    return { bytes, pages };
+  } catch (err) {
+    // A file that won't open must not stay parsed in the worker.
+    releaseDoc(bytes);
+    throw err;
   }
+}
 
-  await doc.destroy();
-  return { bytes, pages };
+/**
+ * Parse a PDF with every page's text read — for callers that need it all at
+ * once (Compare reads the copies it exports this way).
+ */
+export async function loadPdf(bytes: ArrayBuffer): Promise<LoadedPdf> {
+  const layout = await loadLayout(bytes);
+  try {
+    return await completeText(layout);
+  } catch (err) {
+    releaseDoc(bytes);
+    throw err;
+  }
+}
+
+/**
+ * Read one page's editable text fragments and form fields, from the parse the
+ * page renders from. Fragment ids are `page:item` — the item's index in
+ * `getTextContent()`'s array, which `fontInfo.ts` lines up with — so they are
+ * the same whenever and in whatever order pages are read.
+ */
+export async function readPageText(bytes: ArrayBuffer, p: number): Promise<PageText> {
+  const doc = await getCachedDoc(bytes);
+  const page = await doc.getPage(p + 1);
+  // The view need not start at the user-space origin (a CropBox of
+  // [100 200 …]). Everything read off the page is moved into view space
+  // here, once, so nothing downstream has to know; the exporter moves it back.
+  const ox = page.view[0] ?? 0;
+  const oy = page.view[1] ?? 0;
+  const content = await page.getTextContent();
+  const fragments: TextFragment[] = [];
+
+  content.items.forEach((raw, itemIndex) => {
+    const item = raw as TextItem;
+    // Skip whitespace-only fragments; they carry no editable glyphs and
+    // clutter the overlay.
+    if (!item.str || item.str.trim() === "") return;
+
+    const style: TextStyle | undefined = content.styles[item.fontName];
+    fragments.push({
+      id: `${p}:${itemIndex}`,
+      pageIndex: p,
+      itemIndex,
+      original: item.str,
+      transform: ox || oy ? [...item.transform.slice(0, 4), item.transform[4] - ox, item.transform[5] - oy] : item.transform,
+      width: item.width,
+      height: item.height,
+      fontFamily: style?.fontFamily ?? "sans-serif",
+      ...(item.dir === "rtl" ? { rtl: true } : {}),
+    });
+  });
+
+  // AcroForm widgets → editable form fields. Push buttons and signature
+  // fields aren't filled in, so they aren't offered.
+  const fields: FormField[] = [];
+  try {
+    const annots = await page.getAnnotations();
+    annots.forEach((a: Record<string, unknown>, k: number) => {
+      if (a.subtype !== "Widget" || a.hidden) return;
+      const ft = a.fieldType as string | undefined;
+      const rect = a.rect as number[] | undefined;
+      if (!rect || rect.length < 4) return;
+      const x = Math.min(rect[0], rect[2]) - ox;
+      const y = Math.min(rect[1], rect[3]) - oy;
+      const width = Math.abs(rect[2] - rect[0]);
+      const height = Math.abs(rect[3] - rect[1]);
+      const name = (a.fieldName as string) || `field-${p}-${k}`;
+      const label = typeof a.alternativeText === "string" ? a.alternativeText.trim() : "";
+      const base = {
+        id: `${p}:field:${k}`,
+        name,
+        pageIndex: p,
+        rect: { x, y, width, height },
+        // Locked along with its contents (`/F` Locked + LockedContents):
+        // no viewer lets it change, and pdf.js paints it into the canvas.
+        readOnly: !!a.readOnly || !!a.noHTML,
+        ...(a.noHTML || a.hasOwnCanvas ? { painted: true } : {}),
+        ...(label ? { label } : {}),
+      };
+      if (ft === "Tx") {
+        const maxLen = typeof a.maxLen === "number" && a.maxLen > 0 ? a.maxLen : undefined;
+        fields.push({
+          ...base,
+          type: "text",
+          defaultValue: String(a.fieldValue ?? ""),
+          ...(a.multiLine ? { multiline: true } : {}),
+          ...(maxLen ? { maxLength: maxLen } : {}),
+        });
+      } else if (ft === "Btn" && a.checkBox) {
+        const on = a.fieldValue != null && a.fieldValue !== "Off" && a.fieldValue !== false;
+        fields.push({ ...base, type: "checkbox", defaultValue: on });
+      } else if (ft === "Btn" && a.radioButton && typeof a.buttonValue === "string") {
+        const v = typeof a.fieldValue === "string" && a.fieldValue !== "Off" ? a.fieldValue : "";
+        fields.push({ ...base, type: "radio", defaultValue: v, onValue: a.buttonValue });
+      } else if (ft === "Ch" && Array.isArray(a.options)) {
+        const options = (a.options as { exportValue?: unknown; displayValue?: unknown }[]).map((o) => {
+          const value = String(o.exportValue ?? o.displayValue ?? "");
+          return { value, label: String(o.displayValue ?? value) };
+        });
+        const raw = a.fieldValue;
+        const chosen = (Array.isArray(raw) ? raw : raw == null || raw === "" ? [] : [raw]).map(String);
+        const multi = !a.combo && !!a.multiSelect;
+        fields.push({
+          ...base,
+          type: "choice",
+          options,
+          defaultValue: multi ? chosen : (chosen[0] ?? ""),
+          ...(a.combo ? { combo: true } : {}),
+          ...(multi ? { multiSelect: true } : {}),
+        });
+      }
+    });
+  } catch {
+    /* Annotation parsing is best-effort; ignore malformed forms. */
+  }
+  return { fragments, fields };
 }
 
 /** A page render in progress, with a way to abort it. */
@@ -249,6 +293,8 @@ export function getCachedDoc(bytes: ArrayBuffer): Promise<pdfjsLib.PDFDocumentPr
  * to let go, so without this each closed tab stayed resident for the life of
  * the page. A later `getCachedDoc` for the same bytes simply parses again. */
 export function releaseDoc(bytes: ArrayBuffer): void {
+  // Its text is read from this parse; stop reading before the parse goes.
+  stopIndexing(bytes);
   const doc = docCache.get(bytes);
   if (!doc) return;
   docCache.delete(bytes);

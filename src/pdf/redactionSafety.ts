@@ -31,8 +31,15 @@ export interface CoverWarning {
 export function findUnsafeCovers(loaded: LoadedPdf, redactions: Redaction[], plan?: PageRef[]): CoverWarning {
   const pages = new Set<number>();
   let count = 0;
+  // A page not read yet has no fragments *yet*: a cover over its text would
+  // pass. Callers read the whole text first (`completeText`).
+  if (loaded.pages.some((p) => p.textPending)) throw new Error("findUnsafeCovers needs every page's text read");
   const byPage = new Map<number, TextFragment[]>();
-  for (const p of loaded.pages) byPage.set(p.pageIndex, p.fragments);
+  const unreadable = new Set<number>();
+  for (const p of loaded.pages) {
+    byPage.set(p.pageIndex, p.fragments);
+    if (p.textUnreadable) unreadable.add(p.pageIndex);
+  }
   // Pages are named by where they now sit, and a deleted page's cover doesn't
   // ship, so it can't leak.
   const position = new Map(resolvePlan(plan, loaded.pages.length).map((p, pos) => [p.index, pos] as const));
@@ -42,9 +49,11 @@ export function findUnsafeCovers(loaded: LoadedPdf, redactions: Redaction[], pla
     const pos = position.get(r.pageIndex);
     if (pos === undefined) continue;
     const frags = byPage.get(r.pageIndex);
-    if (!frags || frags.length === 0) continue;
+    // A page whose text couldn't be read may hold anything under the cover.
+    const unknown = unreadable.has(r.pageIndex);
+    if (!unknown && (!frags || frags.length === 0)) continue;
     const rb = redactionBox(r);
-    if (frags.some((f) => intersects(rb, fragmentBox(f)))) {
+    if (unknown || frags!.some((f) => intersects(rb, fragmentBox(f)))) {
       count++;
       pages.add(pos + 1);
     }

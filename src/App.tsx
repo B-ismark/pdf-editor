@@ -12,7 +12,8 @@ import { downloadBytes } from "./download";
 import { plural } from "./plural";
 import { leftOutNote } from "./pdf/standardText";
 import { keptFillableNote } from "./keptNote";
-import { loadPdf, looksLikePdf, mayBeEncrypted, releaseDoc } from "./pdf/loader";
+import { loadLayout, looksLikePdf, mayBeEncrypted, releaseDoc } from "./pdf/loader";
+import { completeText, fillPages, indexText } from "./pdf/textIndex";
 import { IMAGE_ACCEPT, sniffImage } from "./pdf/images";
 import { clearEngineCache } from "./pdf/engineCache";
 import { findUnsafeCovers } from "./pdf/redactionSafety";
@@ -287,7 +288,7 @@ export function App() {
       setStatus("loading");
       setMessage(`Loading ${name}…`);
       try {
-        const loaded = await loadPdf(bytes);
+        const loaded = await loadLayout(bytes);
         // Re-read after the await: renders have happened since.
         const { tabs, activeId } = liveTabs.current;
         const fresh: OpenDoc = {
@@ -325,10 +326,26 @@ export function App() {
           showDoc(fresh);
         }
         setStatus("ready");
-        if (!opts.quiet) {
-          const total = loaded.pages.reduce((n, p) => n + p.fragments.length, 0);
-          setMessage(note ?? `${plural(loaded.pages.length, "page")} · ${plural(total, "text fragment")}`);
-        }
+        const opened = `${plural(loaded.pages.length, "page")}`;
+        if (!opts.quiet) setMessage(note ?? opened);
+        // The text, in the background. Into every tab showing these bytes, and
+        // merged page by page, so OCR's words or another batch landing in
+        // between aren't overwritten.
+        let total = 0;
+        indexText(loaded, (read, done) => {
+          for (const t of read.values()) total += t.fragments.length;
+          setTabs((list) =>
+            list.map((t) => {
+              if (t.pdf.bytes !== loaded.bytes) return t;
+              const pages = fillPages(t.pdf.pages, read);
+              return pages === t.pdf.pages ? t : { ...t, pdf: { ...t.pdf, pages } };
+            }),
+          );
+          // Once it's all read, the count joins the opening line — if that is
+          // still what the status line says.
+          if (done && !opts.quiet && !note)
+            setMessage((m) => (m === opened ? `${opened} · ${plural(total, "text fragment")}` : m));
+        });
         return fresh;
       } catch (err) {
         pendingTabs.current.delete(id);
@@ -725,13 +742,33 @@ export function App() {
   const downloadAll = useCallback(async () => {
     if (tabs.length === 0 || busy) return;
     const stateOf = (t: OpenDoc) => (t.id === activeId ? frontDoc : parkedState(t));
+    // What each document is as the button is pressed: what it will be marked
+    // saved as, and what goes in the ZIP — read before any wait below.
+    const marks = new Map<string, SavedMark>(tabs.map((t) => [t.id, { doc: stateOf(t), baked: t.baked }]));
+    // Busy from the press, not after the text wait, so a second press can't
+    // start a second ZIP.
+    setStatus("exporting");
+    setMessage("Reading every document's text…");
     // The single-file Download's whiteout check, for every document: a ZIP is
     // no less a file someone else will read.
-    const unsafe = tabs.flatMap((t) => {
-      const state = stateOf(t);
-      const w = findUnsafeCovers(t.pdf, state.redactions, state.pages);
-      return w.count > 0 ? [`${t.fileName} (page ${w.pages.join(", ")})`] : [];
-    });
+    // Every page's text, including any still being read in the background.
+    let unsafe: string[];
+    try {
+      unsafe = (
+        await Promise.all(
+          tabs.map(async (t) => {
+            const state = marks.get(t.id)!.doc;
+            const w = findUnsafeCovers(await completeText(t.pdf), state.redactions, state.pages);
+            return w.count > 0 ? [`${t.fileName} (page ${w.pages.join(", ")})`] : [];
+          }),
+        )
+      ).flat();
+    } catch {
+      // Not the text (a page that won't read comes back unreadable): the check.
+      setStatus("error");
+      setMessage("Couldn't check the documents for whiteout. Please try again.");
+      return;
+    }
     if (unsafe.length > 0) {
       setStatus("error");
       setMessage(
@@ -739,9 +776,6 @@ export function App() {
       );
       return;
     }
-    // What each document is as the ZIP starts: what it will be marked saved as.
-    const marks = new Map<string, SavedMark>(tabs.map((t) => [t.id, { doc: stateOf(t), baked: t.baked }]));
-    setStatus("exporting");
     try {
       const { exportPdf } = await import("./pdf/exporter");
       const { makeZip } = await import("./pdf/zip");

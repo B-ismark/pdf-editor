@@ -7,6 +7,7 @@ import { roomAfter } from "../pdf/lineFit";
 import { usePageFonts } from "../hooks/usePageFonts";
 import { usePageColors } from "../hooks/usePageColors";
 import { offerPageCanvas, readPageColors } from "../pdf/fragmentColors";
+import { wantText } from "../pdf/textIndex";
 import { cropOffset, sheetSize, shownSize, uprightFor } from "../pdf/pagePlan";
 import { isBoxAnnotation } from "../pdf/types";
 import { DEFAULT_MARK_SIZE, MARK_PATHS } from "../pdf/marks";
@@ -191,6 +192,11 @@ function PageViewInner(props: Props) {
       handle?.cancel();
     };
   }, [bytes, page.pageIndex, page.rotation, scale, near]);
+
+  // In view before its text has been read: read it next.
+  useEffect(() => {
+    if (near && page.textPending) wantText(bytes, page.pageIndex);
+  }, [near, page.textPending, bytes, page.pageIndex]);
 
   // The document's own fonts, readable only after the page has painted. Until
   // then fragments fall back to pdf.js's generic family — the overlay for an
