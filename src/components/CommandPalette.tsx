@@ -138,9 +138,15 @@ export function CommandPalette({ commands, onClose }: Props) {
   };
   useEffect(() => setActive(0), [q]);
   useEffect(() => {
-    listRef.current
-      ?.querySelector<HTMLElement>('[data-active="true"]')
-      ?.scrollIntoView({ block: "nearest" });
+    const row = listRef.current?.querySelector<HTMLElement>('[data-active="true"]');
+    if (!row) return;
+    // The first row of a group brings its heading with it, so walking up into
+    // a group shows what the group is.
+    const group = row.closest('[role="group"]');
+    if (group && group.querySelector('[role="option"]') === row) {
+      group.firstElementChild?.scrollIntoView({ block: "nearest" });
+    }
+    row.scrollIntoView({ block: "nearest" });
   }, [active]);
 
   const runAt = (i: number) => {
@@ -166,6 +172,11 @@ export function CommandPalette({ commands, onClose }: Props) {
           <input
             ref={inputRef}
             className="cmdk__input"
+            role="combobox"
+            aria-label="Search commands"
+            aria-expanded="true"
+            aria-controls="cmdk-list"
+            aria-activedescendant={results[active] ? `cmdk-o-${results[active].id}` : undefined}
             placeholder="Type a command…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -190,11 +201,11 @@ export function CommandPalette({ commands, onClose }: Props) {
             }}
           />
         </div>
-        <div className="cmdk__list" role="listbox" aria-label="Commands" ref={listRef}>
+        <div className="cmdk__list" id="cmdk-list" role="listbox" aria-label="Commands" ref={listRef}>
           {results.length === 0 && <div className="cmdk__empty">No matching commands</div>}
           {sections.map(({ group, cmds }) => (
             <div key={group} role="group" aria-labelledby={`cmdk-g-${group}`} className="cmdk__group">
-              <div id={`cmdk-g-${group}`} className="cmdk__heading label-small" role="presentation">
+              <div id={`cmdk-g-${group}`} className="cmdk__heading label-small" aria-hidden="true">
                 {GROUP_LABEL[group]}
               </div>
               {cmds.map((c) => {
@@ -202,6 +213,7 @@ export function CommandPalette({ commands, onClose }: Props) {
                 return (
                   <button
                     key={c.id}
+                    id={`cmdk-o-${c.id}`}
                     className={`cmdk__item${i === active ? " cmdk__item--on" : ""}`}
                     data-active={i === active}
                     data-cmd={c.id}

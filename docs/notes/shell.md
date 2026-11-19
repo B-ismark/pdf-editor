@@ -276,17 +276,33 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     else the first field; else the dialog box itself (`tabIndex={-1}`, no ring
     drawn on it). Never "the first focusable" — Close leads the markup, so that
     put a ring on "close" for anyone arriving by keyboard, and Enter closed it.
-    A dialog's own focus effect (Header & footer's last place) is declared
-    after `useModal` and so runs after it, and wins.
+    A "field" is a place to type, a `<select>`, or a radio group's *checked*
+    radio — not a checkbox or slider (Sign opened on "Remember this signature",
+    below the pad), not an unchosen radio. With a coarse pointer, places to type
+    are skipped: focusing one raises the on-screen keyboard over a dialog not
+    yet begun.
+  - **Opening a dialog must not change it.** A field that acts on focus is
+    marked `data-autofocus` on the spot that leaves things as they were:
+    Header & footer's chips type into the slot last focused, so it opens on
+    that slot (Footer, centre); Split's page-count box switches to "Every" on
+    focus, so with pages picked it opens on the "At picked pages" radio.
+  - Focus goes back to the opener on close. `useModal` reads the opener while
+    rendering: by its effect a child's `autoFocus` has moved focus inside, and
+    restoring to that removed field dropped focus onto the page.
   - Titles are `<h2 className="headline-small dialog__title">` (24px), every
     dialog alike. Compare and Organise are full-screen surfaces with a bar
     title, and keep `title-large`.
   - Disabled `.btn` uses Material's disabled roles (on-surface 12% fill, 38%
     label, no hover), not opacity — at 55% a filled button was itself, faded.
+    Except a button at work (a `.spinner` child): it keeps its own colours, so
+    the spinner shows and "Exporting…" reads as under way. The split button's
+    caret (`aria-disabled`, so focus isn't dropped) matches its Download half.
   - The palette files rows under their group's heading (`role="group"` in the
     listbox, groups in registry order); the right-hand column is a `<kbd>` for
     a shortcut and nothing else. Arrow keys walk the flattened rows in the
-    order shown.
+    order shown; the first row of a group scrolls its heading into view too.
+    The input is a `combobox` whose `aria-activedescendant` names the active
+    row; headings are `aria-hidden` (each group is labelled by its heading).
 
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is

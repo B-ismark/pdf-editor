@@ -11,7 +11,19 @@ const FOCUSABLE = [
 ].join(",");
 
 /** What counts as "a field" for where a dialog puts focus on opening. */
-const FIELD = 'input:not([type="hidden"]), select, textarea, [contenteditable="true"]';
+/** A place to type. */
+const TYPING =
+  'input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]):not([type="range"])' +
+  ':not([type="button"]):not([type="submit"]):not([type="reset"]):not([type="file"]):not([type="color"]),' +
+  ' textarea, [contenteditable="true"]';
+/**
+ * Where a dialog's work starts: a place to type, a list to pick from, or the
+ * option a radio group has chosen. Not a checkbox or a slider: those are
+ * settings that sit under the work (Sign's "Remember this signature" is below
+ * the pad), and not an unchosen radio, which a screen reader would announce as
+ * the choice.
+ */
+const FIELD = `${TYPING}, select, input[type="radio"]:checked`;
 
 /**
  * The app's own history entries, in one place. Dialogs push one so Back
@@ -124,12 +136,17 @@ if (typeof window !== "undefined") window.addEventListener("popstate", handlePop
  */
 export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => void) {
   const containerRef = useRef<T | null>(null);
+  // Who had focus before the dialog: read while rendering, because by the time
+  // an effect runs a child's `autoFocus` has already moved it inside, and
+  // closing would hand focus back to a field that's gone — onto the page.
+  const opener = useRef<HTMLElement | null | undefined>(undefined);
+  if (opener.current === undefined) opener.current = document.activeElement as HTMLElement | null;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
   useEffect(() => {
     const container = containerRef.current;
-    const prevActive = document.activeElement as HTMLElement | null;
+    const prevActive = opener.current ?? null;
     const token = Symbol("modal");
     const entry: ModalEntry = { token, onClose: () => onCloseRef.current(), history: pushHistory({ __modal: true }) };
     stack.push(entry);
@@ -151,9 +168,14 @@ export function useModal<T extends HTMLElement = HTMLElement>(onClose: () => voi
     // - the first field;
     // - else the dialog itself, so a screen reader reads its title and Tab
     //   goes on from the top.
+    // Where a finger is the pointer, never a place to type: focusing one raises
+    // the on-screen keyboard over a dialog the person hasn't started on yet.
+    // Focus must not change anything either — a field that acts on focus (the
+    // header slot chips type into) is marked rather than found.
     const placed = document.activeElement;
     if (!(container && placed && placed !== container && container.contains(placed))) {
-      const items = focusables();
+      const finger = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+      const items = focusables().filter((el) => !(finger && el.matches(TYPING)));
       const target =
         items.find((el) => el.hasAttribute("data-autofocus")) ??
         items.find((el) => el.matches(FIELD)) ??

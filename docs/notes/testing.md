@@ -85,7 +85,15 @@ type-checking can't see, and each exists because it broke once:
   focuses itself with no ring; Crop opens on its frame; titles are level-2
   headings at 24px; a disabled primary button is a neutral fill at full
   opacity; the palette's key column holds only keys and its rows sit under one
-  heading per group, walked by the arrows in the order shown (slice 10d).
+  heading per group, walked by the arrows in the order shown; opening a dialog
+  changes nothing in it (Header & footer's chips still type into Footer,
+  centre; Split with picked pages opens on that choice); Sign doesn't open on
+  its checkbox; closing gives focus back to the opener even when a field took
+  it first; a working Download keeps its colour and its spinner shows, caret
+  alike (the exporter chunk is held back to catch it at work); walking up the
+  palette shows each group's heading, and the active row is named by
+  `aria-activedescendant`; with a finger, no dialog opens on a text field
+  (slice 10d).
 - `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
   draw options fit a phone with every control on screen at a full touch

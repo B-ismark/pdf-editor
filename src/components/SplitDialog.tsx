@@ -96,6 +96,9 @@ export function SplitDialog({ count, picked, busy, error, onSplit, onClose }: Pr
               type="radio"
               name={`${id}-mode`}
               checked={mode === "picked"}
+              // Opens on the choice made. The page-count box sits between the
+              // two radios, and focusing it would switch to "Every".
+              data-autofocus={mode === "picked" || undefined}
               disabled={!canPick}
               onChange={() => setMode("picked")}
             />

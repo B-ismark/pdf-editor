@@ -186,6 +186,8 @@ export function FinishDialog({
                         }}
                         className="hf__slot"
                         aria-label={PLACE[p]}
+                        // Opens where the chips type, so opening moves nothing.
+                        data-autofocus={p === lastPlace.current || undefined}
                         placeholder={p.endsWith("left") ? "Left" : p.endsWith("right") ? "Right" : "Centre"}
                         value={slots[p] ?? ""}
                         onFocus={() => {

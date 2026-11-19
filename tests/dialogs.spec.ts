@@ -161,3 +161,132 @@ test("the palette files commands under headings and keeps its right column for k
   await page.locator(".cmdk__input").fill("zoom");
   await expect(list.locator(".cmdk__heading").first()).toBeVisible();
 });
+
+test("opening a dialog changes nothing in it", async ({ page }) => {
+  // Header & footer's chips type into the slot last focused, which starts as
+  // Footer, centre. Opening on the first slot moved that to Header, left, so a
+  // chip clicked straight away landed in the header.
+  await open(page, (await fixtures()).sample);
+  await fromPalette(page, "Header & footer");
+  const d = page.getByRole("dialog", { name: "Finishing touches" });
+  await expect(d.getByLabel("Footer, centre")).toBeFocused();
+  const before = await d.getByLabel("Footer, centre").inputValue();
+  await d.getByRole("button", { name: "File name" }).click();
+  await expect(d.getByLabel("Header, left")).toHaveValue("");
+  await expect(d.getByLabel("Footer, centre")).toHaveValue(`${before}{file}`);
+  await page.keyboard.press("Escape");
+
+  // Split with pages picked: its page-count box switches to "Every" on focus.
+  // It opens on the choice made, and a screen reader hears that choice.
+  await open(page, (await fixtures()).long);
+  await fromMenu(page, /Organise pages/);
+  const org = page.getByRole("dialog", { name: /Organi[sz]e/ });
+  await expect(org).toBeVisible();
+  await org.getByRole("button", { name: "Page 3", exact: true }).click();
+  await org.getByRole("button", { name: "Split into files" }).click();
+  const s = page.getByRole("dialog", { name: "Split into files" });
+  await expect(s).toBeVisible();
+  const radios = s.getByRole("radio");
+  await expect(radios.nth(1)).toBeChecked();
+  await expect(radios.nth(1)).toBeFocused();
+  await expect(radios.nth(0)).not.toBeChecked();
+});
+
+test("a dialog opens on its work, not a setting under it", async ({ page }) => {
+  // Sign's Draw tab has nowhere to type; "first field" found "Remember this
+  // signature", below the pad, and Tab went from there to Cancel.
+  await open(page, (await fixtures()).sample);
+  await page.locator('.tooldock__btn[aria-label="Sign"]').click();
+  const d = page.locator('[role="dialog"][aria-modal="true"]');
+  await expect(d).toBeVisible();
+  const f = await page.evaluate(() => {
+    const a = document.activeElement as HTMLInputElement;
+    return { tag: a.tagName, type: a.type ?? "", dialog: a.getAttribute("role") };
+  });
+  expect(f.type, JSON.stringify(f)).not.toBe("checkbox");
+  expect(f.dialog, JSON.stringify(f)).toBe("dialog");
+});
+
+test("closing a dialog gives focus back to what opened it", async ({ page }) => {
+  // A dialog whose field takes focus itself (Download with password's) was
+  // recorded as its own opener: by the time the dialog looked, focus was
+  // already inside. Closing handed focus to that field, now gone — the page.
+  await open(page, (await fixtures()).sample);
+  const caret = page.getByRole("button", { name: "Export options" });
+  await caret.click();
+  await page.getByRole("menuitem", { name: /Download with password/ }).click();
+  const d = page.getByRole("dialog");
+  await expect(d).toBeVisible();
+  await expect(d.locator('input[type="password"]').first()).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(d).toBeHidden();
+  await expect(caret).toBeFocused();
+});
+
+test("a button at work keeps its colour, and its spinner shows", async ({ page }) => {
+  await open(page, (await fixtures()).sample);
+  // Hold the exporter back so the Download stays at work long enough to look at.
+  let release!: () => void;
+  const held = new Promise<void>((r) => (release = r));
+  await page.route(/exporter-[^/]*\.js$/, async (route) => {
+    await held;
+    await route.continue();
+  });
+  const dl = page.locator(".appbar__download");
+  const idle = await dl.evaluate((el) => getComputedStyle(el).backgroundColor);
+  await dl.click();
+  await expect(dl).toHaveAccessibleName("Exporting…");
+  const busy = await page.evaluate(() => {
+    const b = document.querySelector(".appbar__download")!;
+    const sp = b.querySelector(".spinner")!;
+    const caret = document.querySelector(".splitbtn__caret")!;
+    const cs = getComputedStyle(sp);
+    return {
+      bg: getComputedStyle(b).backgroundColor,
+      spinner: cs.borderTopColor || cs.color,
+      caretBg: getComputedStyle(caret).backgroundColor,
+      caretOpacity: getComputedStyle(caret).opacity,
+    };
+  });
+  release();
+  expect(busy.bg, "at work, not unavailable").toBe(idle);
+  expect(busy.spinner, "the spinner stands out from its button").not.toBe(busy.bg);
+  expect(busy.caretBg, "the caret reads as part of the same button").toBe(idle);
+  expect(busy.caretOpacity).toBe("1");
+});
+
+test("walking up into a group of commands shows its heading", async ({ page }) => {
+  await open(page, (await fixtures()).sample);
+  await page.keyboard.press("Control+k");
+  const list = page.locator(".cmdk__list");
+  await expect(list).toBeVisible();
+  const n = await list.getByRole("option").count();
+  for (let i = 0; i < n; i++) await page.keyboard.press("ArrowDown");
+  for (let i = 0; i < n; i++) await page.keyboard.press("ArrowUp");
+  const gap = await list.evaluate((l) => {
+    const h = l.querySelector(".cmdk__heading")!;
+    return h.getBoundingClientRect().top - l.getBoundingClientRect().top;
+  });
+  expect(gap, "the first heading is in view").toBeGreaterThanOrEqual(0);
+  // The active row is announced from the search box.
+  const input = page.getByRole("combobox", { name: "Search commands" });
+  const id = await input.getAttribute("aria-activedescendant");
+  expect(id).toBeTruthy();
+  await expect(page.locator(`[id="${id}"]`)).toHaveAttribute("aria-selected", "true");
+});
+
+test.describe("with a finger", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+  test("a dialog doesn't raise the keyboard before it's begun", async ({ page }) => {
+    await open(page, (await fixtures()).sample);
+    expect(await page.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    await fromPalette(page, "Watermark");
+    const d = page.getByRole("dialog", { name: "Finishing touches" });
+    await expect(d).toBeVisible();
+    const tag = await page.evaluate(() => {
+      const a = document.activeElement as HTMLInputElement;
+      return `${a.tagName}${a.type ? `:${a.type}` : ""}`;
+    });
+    expect(["INPUT:text", "TEXTAREA"]).not.toContain(tag);
+  });
+});
