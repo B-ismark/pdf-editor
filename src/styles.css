@@ -158,7 +158,10 @@ body {
    status toast (50): the menu can't out-rank anything from inside the bar's
    own layer (20). The menu's scrim comes along, so a tap outside closes the
    menu instead of reaching the page. Stays under dialogs and sheets (60+). */
-.appbar--menu { z-index: 56; }
+.appbar--menu,
+/* …and while the menu's exit copy plays, so a toast doesn't cut across the
+   phone's sheet sliding away. */
+.appbar:has(.menu__list.is-leaving) { z-index: 56; }
 .appbar__brand { display: flex; align-items: center; gap: 10px; margin-right: 6px; }
 /* The same brand, as the "back to the start screen" control. */
 .appbar__brand--link {
@@ -3317,6 +3320,19 @@ body {
    zoom anchors set the scroll directly and aren't affected. Paging keys step
    by the padded height, so nothing under the dock is skipped. */
 .viewer__scroll { scroll-padding: 16px 0 calc(84px + env(safe-area-inset-bottom)); }
+
+/* A phone's "where am I" while scrolling (PageHint): top-right, where the
+   pill's page chip was, on the floating controls' layer, never a target. */
+.pagehint {
+  position: absolute; top: 12px; right: 12px; z-index: 16;
+  padding: 6px 12px; border-radius: var(--radius-full);
+  background: color-mix(in srgb, var(--surface-container-high) 92%, transparent);
+  color: var(--on-surface); box-shadow: var(--shadow-2);
+  pointer-events: none; font-variant-numeric: tabular-nums;
+  opacity: 0; transform: translateY(-4px);
+  transition: opacity var(--dur-short4) var(--ease-standard), transform var(--dur-short4) var(--ease-standard);
+}
+.pagehint--shown { opacity: 1; transform: none; transition-duration: var(--dur-short2); }
 @container viewer (max-width: 879.98px) {
   .viewer__scroll { scroll-padding-top: 72px; }
 }
@@ -3385,7 +3401,8 @@ body {
 
 .is-leaving { pointer-events: none !important; }
 .dialog-scrim.is-leaving,
-.cmdk-scrim.is-leaving {
+.cmdk-scrim.is-leaving,
+.menu__scrim.is-leaving {
   animation: scrim-out var(--dur-short3) var(--ease-standard-accelerate) forwards;
 }
 .dialog-scrim.is-leaving > .dialog,

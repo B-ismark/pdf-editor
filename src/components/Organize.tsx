@@ -312,7 +312,7 @@ export function Organize({
       const bytes = await buildFromPlan(main.entries, new Map(sources).set("main", main.bytes));
       const ab = new ArrayBuffer(bytes.byteLength);
       new Uint8Array(ab).set(bytes);
-      onApply(ab, `${plural(plan.length, "page")} after organising`);
+      onApply(ab, `${plural(plan.length, "page")} after organising.`);
     } catch (e) {
       setErr(staleBuildMessage(e) ?? failure(e, "Couldn't rebuild the document. Please try again."));
     } finally {

@@ -873,9 +873,9 @@ test.describe("command registry", () => {
     await expect(page.locator(".cmdk")).toBeVisible();
     // Download PDF is the bar's own button on a phone, so the menu leaves it
     // out; so is Show pages. View there is where the zoom pill went (11a):
-    // zoom, plus Go to page borrowed from Navigate — checked on its own.
+    // zoom and Go to page, the palette's View group as it is.
     expect(more.some((r) => r[0] === "goto"), "Go to page is in ⋯ on a phone").toBe(true);
-    sameGroups(more.filter((r) => r[0] !== "goto"), await paletteAll(page), ["download", "pages"]);
+    sameGroups(more, await paletteAll(page), ["download", "pages"]);
     await ctx.close();
   });
 

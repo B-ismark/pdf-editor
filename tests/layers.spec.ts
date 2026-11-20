@@ -1,4 +1,5 @@
 import { test, expect, type Page } from "@playwright/test";
+import { PDFDocument } from "pdf-lib";
 import { fixtures } from "./fixtures";
 import { open, watch, expectClean, pickSubTool, dragOnPage } from "./helpers";
 
@@ -159,4 +160,56 @@ test("desktop: with the draw options open, the page's foot scrolls clear of them
     barTop: document.querySelector(".drawbar")!.getBoundingClientRect().top,
   }));
   expect(pageBottom, "the page's last line is above the draw options").toBeLessThanOrEqual(barTop);
+});
+
+test("phone: Go to page closed with Enter hands focus to ⋯, not the page body", async ({ page }) => {
+  await open(page, (await fixtures()).long);
+  await openMore(page);
+  await menuItem(page, "Go to page").tap();
+  const field = page.locator(".zoombar .zoombar__input");
+  await expect(field).toBeFocused();
+  await field.fill("40");
+  await field.press("Enter");
+  await expect(page.locator(".zoombar")).toHaveCount(0);
+  // The chip that takes focus back on a wide screen went with the pill.
+  await expect(page.locator(".appbar__more")).toBeFocused();
+});
+
+test("phone: scrolling shows which page you're on, then it fades", async ({ page }) => {
+  await open(page, (await fixtures()).long);
+  const hint = page.locator(".pagehint");
+  await page.locator(".viewer__scroll").evaluate((el) => el.scrollTo(0, el.scrollHeight * 0.46));
+  await expect(hint).toHaveClass(/pagehint--shown/);
+  await expect(hint).toHaveText(/^\d+ \/ 150$/);
+  const n = Number((await hint.textContent())!.split("/")[0]);
+  expect(n).toBeGreaterThan(50);
+  expect(n).toBeLessThan(90);
+  // A readout, never a target; and it goes once you stop.
+  expect(await hint.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe("none");
+  await expect(hint).not.toHaveClass(/pagehint--shown/, { timeout: 3000 });
+});
+
+test("phone: the ⋯ sheet's dim fades out with it", async ({ page }) => {
+  await open(page, (await fixtures()).sample);
+  await openMore(page);
+  await page.mouse.click(195, 30);
+  // The frame after closing: the sheet is sliding away over a fading dim.
+  const ghosts = await page.evaluate(() => new Promise<{ list: number; scrim: number; bar: number }>((res) =>
+    requestAnimationFrame(() => res({
+      list: document.querySelectorAll(".menu__list.is-leaving").length,
+      scrim: document.querySelectorAll(".menu__scrim.is-leaving").length,
+      bar: Number(getComputedStyle(document.querySelector(".appbar")!).zIndex),
+    }))));
+  expect(ghosts.list).toBe(1);
+  expect(ghosts.scrim).toBe(1);
+  // …still above the toast (50) while it does.
+  expect(ghosts.bar).toBeGreaterThan(50);
+});
+
+test("an 8-page document is “an 8-page document”", async ({ page }) => {
+  const doc = await PDFDocument.create();
+  for (let i = 0; i < 8; i++) doc.addPage([300, 400]);
+  await page.goto("/");
+  await page.setInputFiles("input[type=file]", { name: "eight.pdf", mimeType: "application/pdf", buffer: Buffer.from(await doc.save()) });
+  await expect(page.locator(".snackbar")).toHaveText("Opened an 8-page document.", { timeout: 30_000 });
 });

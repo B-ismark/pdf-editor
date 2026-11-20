@@ -19,7 +19,8 @@ export function PageJump({
   pageCount: number;
   docKey: unknown;
   editing: boolean;
-  onEditingChange: (editing: boolean) => void;
+  /** `byKey`: closed with Enter or Esc, so focus should land somewhere. */
+  onEditingChange: (editing: boolean, byKey?: boolean) => void;
 }) {
   const active = useActivePage(pageCount, docKey);
   const [draft, setDraft] = useState("");
@@ -37,7 +38,7 @@ export function PageJump({
   }, [editing]);
   const close = () => {
     refocus.current = true;
-    onEditingChange(false);
+    onEditingChange(false, true);
   };
 
   // The field opens empty, with the page you're on as its placeholder: typing
@@ -97,5 +98,37 @@ export function PageJump({
       />
       <span className="zoombar__of label-medium" aria-hidden="true">/ {pageCount}</span>
     </form>
+  );
+}
+
+/**
+ * Where you are, on a phone: the pill (and its "3 / 12") gives the page's top
+ * corner back there, so while you scroll a quiet "70 / 150" shows near the top
+ * edge and fades once you stop. It's a readout, not a control — it never takes
+ * a tap (Go to page… is in ⋯) — and it's hidden from assistive tech, which
+ * would otherwise announce every page passed.
+ */
+export function PageHint({ pageCount, docKey }: { pageCount: number; docKey: unknown }) {
+  const active = useActivePage(pageCount, docKey);
+  const [shown, setShown] = useState(false);
+  useEffect(() => {
+    const el = document.querySelector<HTMLElement>(".viewer__scroll");
+    if (!el) return;
+    let timer = 0;
+    const onScroll = () => {
+      setShown(true);
+      window.clearTimeout(timer);
+      timer = window.setTimeout(() => setShown(false), 1200);
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      window.clearTimeout(timer);
+    };
+  }, [docKey]);
+  return (
+    <div className={`pagehint label-medium${shown ? " pagehint--shown" : ""}`} aria-hidden="true">
+      {active + 1} / {pageCount}
+    </div>
   );
 }

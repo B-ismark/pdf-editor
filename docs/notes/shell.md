@@ -440,6 +440,17 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     corner is the page's first lines. ⋯ grows a View group there (Zoom in,
     Zoom out, Fit to width, Go to page…), and the pill shows only to hold the
     page field while Go to page is open (`pillShown` in DocumentEditor).
+    That View group is the palette's own (Go to page moved from Navigate to
+    View for good), less Show pages, which is a bar button — the ⋯-row =
+    palette-command invariant in `shell.spec` holds on a phone without
+    exceptions for it. What the pill also said, *where you are*, is
+    `PageHint`: "70 / 150" at the top right while you scroll, fading a beat
+    after you stop; a readout, `pointer-events: none` and `aria-hidden`.
+    Closing the page field with Enter or Esc hands focus to ⋯, since the
+    page chip PageJump would return it to went with the pill. The sheet's
+    dim is copied on the way out too (phone only — on a wide screen it's
+    clear), and the bar keeps its menu layer while the copy plays so the
+    toast doesn't cut across it.
   - *The toast is sized to its words and leaves when you start working.*
     Centred by `left: 50%`, a shrink-to-fit box only gets the half of the
     window right of centre, so a one-line sentence wrapped: `width:
@@ -450,7 +461,8 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     (the editor reports counts up in an effect), so "the count moved after
     the message arrived" wiped the edit's own report; crop and sidebar specs
     caught it. Every toast is a
-    sentence: "Opened a 3-page document.", not "Opened · 3 pages".
+    sentence: "Opened a 3-page document.", not "Opened · 3 pages" — and
+    "an 8-page", "an 11-page" (`aOrAn` reads the number as it's said).
   - *No tooltips for a finger.* A tap focuses the button, and focus showed
     the tip, so tapping Draw said "Draw · D" over the bar it had opened.
     `TooltipHost` remembers that the last pointer down was a touch and shows

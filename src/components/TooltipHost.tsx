@@ -62,7 +62,7 @@ export function TooltipHost() {
     // phone doesn't have, over the bar it had just opened. Focus after a
     // touch (until a key is pressed) shows nothing.
     const onDown = (e: PointerEvent) => {
-      touched = e.pointerType === "touch";
+      touched = e.pointerType !== "mouse";
       clear();
     };
     const onKey = () => {

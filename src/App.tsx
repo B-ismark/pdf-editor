@@ -64,6 +64,17 @@ function pdfOpenError(err: unknown): string {
 /** How long a toast must have been up before an edit sends it away (ms). */
 const EDIT_ENDS_TOAST_AFTER = 600;
 
+/** "a 12-page", "an 8-page", "an 11-page", "an 18,000-page": the article a
+ * number takes is decided by how it's said — eight, eleven, eighteen, and
+ * every group of thousands that starts with one of those. */
+function aOrAn(n: number): "a" | "an" {
+  let s = String(Math.floor(Math.abs(n)));
+  // The leading group of thousands is the part read first (11 in 11,500).
+  const lead = s.length % 3 || 3;
+  s = s.slice(0, lead);
+  return s.startsWith("8") || s === "11" || s === "18" ? "an" : "a";
+}
+
 /** A callback whose identity never changes but which always runs the latest
  * version of `fn`. The editor is memo'd and the workspace re-renders on every
  * edit it reports, so everything handed down has to keep its identity. */
@@ -378,7 +389,7 @@ export function App() {
         // fragments" was the app's vocabulary, not the reader's).
         // A sentence, like every other toast: "Opened · 3 pages" was the one
         // that read as a label.
-        const opened = `Opened a ${loaded.pages.length}-page document.`;
+        const opened = `Opened ${aOrAn(loaded.pages.length)} ${loaded.pages.length}-page document.`;
         if (!opts.quiet) setMessage(note ?? opened);
         // The text, in the background. Into every tab showing these bytes, and
         // merged page by page, so OCR's words or another batch landing in

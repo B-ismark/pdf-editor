@@ -141,7 +141,9 @@ type-checking can't see, and each exists because it broke once:
   sheet from the bottom edge over a dim; a tap shows no tooltip while the
   keyboard still gets one; the draw options are one row with the fold handle
   pinned; the toast is one line and the first edit sends it away; on desktop
-  the page's foot scrolls clear of the open draw options.
+  the page's foot scrolls clear of the open draw options; Enter in the page
+  field hands focus to ⋯; scrolling shows "N / 150" and it fades; the sheet's
+  dim fades out with it; "Opened an 8-page document.".
 - `phone.spec.ts` — no zoom pill, and the status message clears the tool dock
   and the draw options;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the

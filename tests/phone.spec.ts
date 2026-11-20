@@ -59,6 +59,8 @@ test("phone: floating surfaces do not overlap each other", async ({ page }) => {
 test("phone: every ⋯ menu item takes its own tap (the zoom pill doesn't cover the first)", async ({ page }) => {
   await open(page, (await fixtures()).sample);
   await page.getByRole("button", { name: "More actions" }).click();
+  // A sheet that's still rising puts its last rows below the screen.
+  await page.locator(".menu__list:not(.is-leaving)").evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
   const items = page.getByRole("menuitem");
   const n = await items.count();
   expect(n).toBeGreaterThan(3);
