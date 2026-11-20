@@ -61,6 +61,9 @@ function pdfOpenError(err: unknown): string {
   return "Something went wrong opening this PDF. Try another file.";
 }
 
+/** How long a toast must have been up before an edit sends it away (ms). */
+const EDIT_ENDS_TOAST_AFTER = 600;
+
 /** A callback whose identity never changes but which always runs the latest
  * version of `fn`. The editor is memo'd and the workspace re-renders on every
  * edit it reports, so everything handed down has to keep its identity. */
@@ -960,19 +963,23 @@ export function App() {
     return () => clearTimeout(t);
   }, [message, status, busy]);
   // …and an edit ends one sooner: "Opened a 1-page document." has nothing to
-  // add once you're working, and it sat over the bar you'd just opened. Only
-  // a message that was showing before the edit: one the edit itself raised
-  // arrives in the same render and is recorded first, so it stays.
-  const msgAt = useRef({ id: activeId, changes: frontChanges });
+  // add once you're working, and it sat over the bar you'd just opened. Only a
+  // message that had been up a while, though: an edit that reports itself
+  // ("Cropped page 1.", "Moved page 1 to position 2") raises its message
+  // first and its change count a render later, so "the count moved after the
+  // message arrived" alone would wipe the edit's own report.
+  const msgShownAt = useRef(0);
   useEffect(() => {
-    msgAt.current = { id: activeId, changes: frontChanges };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    msgShownAt.current = performance.now();
   }, [message]);
+  const seenChanges = useRef({ id: activeId, changes: frontChanges });
   useEffect(() => {
-    const at = msgAt.current;
-    msgAt.current = { id: activeId, changes: frontChanges };
-    if (at.id !== activeId || at.changes === frontChanges) return;
-    if (message && status !== "error" && !busy) setMessage("");
+    const was = seenChanges.current;
+    seenChanges.current = { id: activeId, changes: frontChanges };
+    if (was.id !== activeId || was.changes === frontChanges) return;
+    if (!message || status === "error" || busy) return;
+    if (performance.now() - msgShownAt.current < EDIT_ENDS_TOAST_AFTER) return;
+    setMessage("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frontChanges, activeId]);
 

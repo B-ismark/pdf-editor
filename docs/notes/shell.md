@@ -444,9 +444,12 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     Centred by `left: 50%`, a shrink-to-fit box only gets the half of the
     window right of centre, so a one-line sentence wrapped: `width:
     max-content` with a 240px floor. It still fades after 4 s, and an edit
-    ends it sooner — but only a message that was up *before* the edit (App
-    records the change count when a message arrives, in the same commit, so
-    an edit that raises its own message keeps it). Every toast is a
+    ends it sooner — but only a message that has been up a while
+    (`EDIT_ENDS_TOAST_AFTER`, 600ms). An edit that reports itself ("Cropped
+    page 1.") raises its message first and its change count a render later
+    (the editor reports counts up in an effect), so "the count moved after
+    the message arrived" wiped the edit's own report; crop and sidebar specs
+    caught it. Every toast is a
     sentence: "Opened a 3-page document.", not "Opened · 3 pages".
   - *No tooltips for a finger.* A tap focuses the button, and focus showed
     the tip, so tapping Draw said "Draw · D" over the bar it had opened.
