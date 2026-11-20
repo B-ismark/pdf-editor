@@ -85,7 +85,7 @@ Read only the section a package points at, not the whole folder.
   - [x] Raster and image encoding in a Worker (9b). Guarded by the `codec` spec; notes in `docs/notes/privacy-and-export.md` (The image codec runs off the page).
   - [x] React 19.2, using `<Activity>` for background tabs (9c). Guarded by the `warm` spec; notes in `docs/notes/tabs.md` (The last document stays warm).
   - [x] pdf.js 5, Vite 7 (9d). Guarded by the `decoders` spec (and every text and rendering spec); notes in `docs/notes/rendering.md` (pdf.js's decoders ship with the app).
-- [ ] **10. Visual and UX polish** (M ×6). From a screenshot walk of the app after section 9 (desktop 1440 and phone 390, light and dark). One slice per PR, each with before/after screenshots.
+- [x] **10. Visual and UX polish** (M ×6). From a screenshot walk of the app after section 9 (desktop 1440 and phone 390, light and dark). One slice per PR, each with before/after screenshots.
   - [x] **10a. Calm the canvas.** Guarded by the `reading` spec; notes in `docs/notes/shell.md` (A page at a reading width). First impression of an open document.
     - An A4 page fills the whole viewer at "100 %", so you see a wall of text, not a page. Cap the fitted width (a readable page with margin around it) and centre it.
     - Opening the Pages sidebar leaves the page clipped under the Inspector. Refit when the room for the page changes. (Built: the Inspector refits too below the cap; clipping was judged worse than the rescale.)
@@ -108,3 +108,33 @@ Read only the section a package points at, not the whole folder.
     - On a phone it says "drag & drop files here", which a phone can't do; the helper line orphans its last words.
   - [x] **10f. Show, don't tell.** The app explains itself in sentences in many places (hints, empty states, dialog intros, toasts). Walk every surface and cut instruction text to what an affordance can't say: a visible state, an icon with a tooltip, a placeholder, a preview. Keep words where they carry a consequence (what will be removed, what can't be undone).
   - [x] **10g. Dark mode and motion pass.** Guarded by the `dark` and `motion` specs; notes in `docs/notes/shell.md` (Dark mode and motion). (Built: every surface already used the dark tokens — now checked by a spec; the glare was the default, so Dim pages follows the theme until chosen. Nothing had an exit, so closed surfaces leave as an inert copy.) The white page against the near-black surround, the "Dim pages" default, and a check that every surface, menu and dialog uses the dark tokens; then a motion pass over open/close of panels, menus and dialogs.
+- [ ] **11. Second polish pass** (M ×6). From a second screenshot walk after section 10 (desktop 1440 and phone 390, light and dark, every flow), reviewed by a designer pass that was not shown the earlier findings. One slice per PR, each with before/after screenshots. For the walk itself: wait out the dialog entrance before a shot, use a multi-page file for Split, move the pointer off the toolbar, and reset the document between steps.
+  - [ ] **11a. Phone: what floats over what.** The layers at the bottom and edges of a phone screen don't know about each other.
+    - The zoom pill stays bright above the sheet's and the Pages drawer's scrim, and overlaps the drawer's edge. Every floating control goes under every scrim; on a phone, where pinch already zooms, the pill gives its corner back (into ⋯, or gone).
+    - The "Opened · 1 page" toast outstays several actions, lands on the draw bar, and "Downloaded edited PDF." wraps to two lines. Short life (about 4 s, or the first edit), a minimum width, stacked above whichever bar is open, one punctuation style.
+    - A tap on a tool shows its keyboard shortcut ("Draw · D") as a tooltip. No shortcut tips for touch.
+    - The draw bar wraps to two rows with an empty cell on a phone, and on desktop it covers the last 40px of the page. One row (scrolling) on a phone; the page gets bottom room while the bar is open.
+    - The ⋯ menu on a phone is a long dropdown over the toolbar; a bottom sheet fits the hand.
+  - [ ] **11b. One dialog pattern.** Dialogs disagree on how you leave them.
+    - Some have ✕ and Cancel, Hidden information has ✕ and a Close button, Download with password and Crop have no ✕. Cancel is black in some and primary in others. One pattern: ✕ in the header always; Cancel a text button in one colour; one filled primary; "Close" only when there is no other action.
+    - Download with password uses a different download icon from every other Download.
+    - Finishing touches: Header & footer is a full-width grid and Watermark a narrow centred column, so the dialog jumps height and the title moves between tabs; labels sit ~470px from their controls; the Insert buttons are square outlined buttons unlike any chip in the app; "Page 1 reads: 1" is a whisper and Watermark has no preview. One form layout, a steady height, assist chips, a small live page preview on both tabs.
+    - Crop's handles are nearly invisible and "mm" sits outside its fields.
+  - [ ] **11c. Menu marks, states and reasons.**
+    - The chevron that means "opens a dialog" reads as "has a submenu", beside "Save as…" using the ellipsis. Use the ellipsis for "opens a dialog" and keep the chevron for real submenus (the mark is declared once on the command data, so this is one change — see `docs/notes/shell.md`, "This opens something").
+    - A disabled item gives no reason ("Split into files" on a one-page file), and the palette drops it entirely ("No matching commands"). Keep it in place, disabled, saying why ("Needs 2+ pages"), in menus and the palette alike.
+    - Settings in ⋯ show state three ways (Theme as a value, others as ticks). One way.
+    - "Lossless redacted pages" sits in the Inspector on every document with a four-line explanation, and again in ⋯ › Settings, with an icon that reads "expand". One home (Settings), a better icon; at most a one-line status in the Inspector.
+  - [ ] **11d. Side panels and find.**
+    - Text and Text box controls: Sans/Serif/Mono each set in its own face, so the segment labels don't share a size or baseline; the size slider squeezed to ~110px between two steppers; Reset style floating in the value column; an off toggle (Italic) louder than an on one (Bold). Labels in the UI font; slider or steppers, not both; Reset at the foot with Delete; quiet off-state toggles.
+    - Redact patterns replaces the Inspector but has its own header, mid-panel actions, a Redact button past the padding, a full-bleed divider and a focus ring on open. The Inspector's shell, with a sticky action footer.
+    - The find bar covers the page's first line; "0/0" in grey is the only sign of no result; Redact all's icon reads as an unchecked box. Dock the bar above the scroll area; say "No matches" (page text only); a labelled Redact all that is visibly disabled when it can't act.
+  - [ ] **11e. Dark mode, second pass.**
+    - Delete is a soft tonal button in light and a saturated filled red bar in dark: dark is louder than light. Same tonal role in both.
+    - Colour swatches (black on the dark panel, dark grey in the header & footer dialog) all but vanish. An outline that contrasts with the surface, plus an inner ring.
+    - Dim pages reaches the canvas and thumbnails but not the Crop preview, Compare's pages or the signature pad, which stay full white. Every page-like surface goes through the same dim.
+    - A text box's resize handle draws as a solid black square on a phone in dark. Handles from the outline and surface roles.
+  - [ ] **11f. Full-screen views and placement.**
+    - Organise on a phone: the title wraps, Add file / Blank page / Split become unlabelled icons, Apply is tight to the edge. On desktop each card carries ~60px of empty space. One-line title with secondary actions in an overflow; cards sized to content.
+    - Compare: the previous/next arrows sit apart from the "1 change on 1 page" count, the Side by side / Overlay switch is smaller than every other segmented control, struck-through change text is cut off, file names repeat over each column.
+    - A new text box lands on top of existing text, is too narrow for what's typed on a phone, and has a ~10px (desktop) / ~18px (phone) resize handle. Place it in clear space near the tap, grow it to its text, touch-sized handles.
