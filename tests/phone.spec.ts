@@ -41,19 +41,17 @@ test("phone: floating surfaces do not overlap each other", async ({ page }) => {
   const w = watch(page);
   await open(page, (await fixtures()).sample);
 
-  // The status snackbar is top-anchored on phones (the bottom edge belongs to the
-  // tool dock) and spans most of the width; the zoom pill is pinned top-right in
-  // the same band, so the two collided and the zoom percentage became unreadable
-  // whenever a status message showed.
-  const vsZoom = await collision(page, ".snackbar", ".zoombar");
-  expect(vsZoom.present, "both the snackbar and the zoom pill are showing").toBe(true);
-  expect(
-    vsZoom.overlap,
-    `snackbar ${JSON.stringify(vsZoom.ra)} vs zoom ${JSON.stringify(vsZoom.rb)}`,
-  ).toBe(false);
-
+  // The zoom pill used to share the toast's band and covered its percentage;
+  // on a phone the pill is gone now (11a), so the toast's neighbours are the
+  // tool dock and, with Draw on, the draw options above it.
+  await expect(page.locator(".zoombar")).toHaveCount(0);
+  await expect(page.locator(".snackbar")).toBeVisible();
   const vsDock = await collision(page, ".snackbar", ".tooldock");
   expect(vsDock.overlap).toBe(false);
+  await page.locator('.tooldock__btn[aria-label="Draw"]').tap();
+  const vsDraw = await collision(page, ".snackbar", ".drawbar");
+  expect(vsDraw.present, "the toast is still up with the draw options").toBe(true);
+  expect(vsDraw.overlap, `snackbar ${JSON.stringify(vsDraw.ra)} vs draw bar ${JSON.stringify(vsDraw.rb)}`).toBe(false);
 
   expect(w.errors, `errors: ${w.errors.slice(0, 3).join(" | ")}`).toEqual([]);
 });
@@ -61,6 +59,8 @@ test("phone: floating surfaces do not overlap each other", async ({ page }) => {
 test("phone: every ⋯ menu item takes its own tap (the zoom pill doesn't cover the first)", async ({ page }) => {
   await open(page, (await fixtures()).sample);
   await page.getByRole("button", { name: "More actions" }).click();
+  // A sheet that's still rising puts its last rows below the screen.
+  await page.locator(".menu__list:not(.is-leaving)").evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
   const items = page.getByRole("menuitem");
   const n = await items.count();
   expect(n).toBeGreaterThan(3);
@@ -75,7 +75,7 @@ test("phone: every ⋯ menu item takes its own tap (the zoom pill doesn't cover 
   }
 });
 
-test("phone: the draw options fit the screen with every control reachable", async ({ page }) => {
+test("phone: the draw options stay on screen, one row, every control reachable", async ({ page }) => {
   await open(page, (await fixtures()).sample);
   await page.locator('.tooldock__btn[aria-label="Draw"]').click();
   const bar = page.locator(".drawbar");
@@ -83,8 +83,10 @@ test("phone: the draw options fit the screen with every control reachable", asyn
   const subtools = page.locator(".drawbar__tools button");
   const n = await subtools.count();
   expect(n).toBeGreaterThan(5);
-  // The narrowest phones are where it overflowed, and stroke tools (with the
-  // width slider) are wider than highlight/note — check every pair.
+  // One row that scrolls sideways (11a), so "fits" means: the bar is on
+  // screen, the fold handle is always in view at its end, and every other
+  // control comes into the bar's view when scrolled to. The narrowest phones
+  // and the stroke tools (with the width slider) are the tight cases.
   for (const width of [320, 360, 393]) {
     await page.setViewportSize({ width, height: 851 });
     for (let i = 0; i < n; i++) {
@@ -92,19 +94,30 @@ test("phone: the draw options fit the screen with every control reachable", asyn
       await page.locator(".drawbar__handle").click(); // …so open it again
       const geo = await bar.evaluate((el) => {
         const r = el.getBoundingClientRect();
-        const out = Array.from(el.querySelectorAll<HTMLElement>("button, input"))
+        const inBar = (c: Element) => {
+          const b = c.getBoundingClientRect();
+          return b.left >= r.left - 1 && b.right <= r.right + 1 && b.left >= 0 && b.right <= window.innerWidth;
+        };
+        const fold = el.querySelector(".drawbar__collapse")!;
+        const foldShowing = inBar(fold) && fold.contains(document.elementFromPoint(fold.getBoundingClientRect().x + 20, fold.getBoundingClientRect().y + 20));
+        const unreachable = Array.from(el.querySelectorAll<HTMLElement>("button, input"))
+          .filter((c) => c.getBoundingClientRect().width > 0)
           .filter((c) => {
+            c.scrollIntoView({ inline: "nearest", block: "nearest" });
             const b = c.getBoundingClientRect();
-            if (b.width === 0) return false;
-            return b.left < 0 || b.right > window.innerWidth || b.left < r.left - 1 || b.right > r.right + 1;
+            const top = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2);
+            return !inBar(c) || !c.contains(top);
           })
           .map((c) => c.getAttribute("aria-label") ?? c.className);
-        return { sw: el.scrollWidth, cw: el.clientWidth, right: r.right, vw: window.innerWidth, out };
+        el.scrollLeft = 0;
+        return { h: r.height, left: r.left, right: r.right, vw: window.innerWidth, foldShowing, unreachable };
       });
       const where = `${width}px, sub-tool ${i}`;
-      expect(geo.sw, where).toBeLessThanOrEqual(geo.cw + 1);
+      expect(geo.left, where).toBeGreaterThanOrEqual(0);
       expect(geo.right, where).toBeLessThanOrEqual(geo.vw);
-      expect(geo.out, where).toEqual([]);
+      expect(geo.h, where).toBeLessThan(64);
+      expect(geo.foldShowing, where).toBe(true);
+      expect(geo.unreachable, where).toEqual([]);
     }
   }
   // Sub-tool buttons keep a full touch target.

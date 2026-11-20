@@ -135,10 +135,20 @@ type-checking can't see, and each exists because it broke once:
   phone sheet and its scrim leave as copies; the docked Pages rail leaves
   none; reduced motion runs no animation and makes no copy. Exit copies
   carry `.is-leaving` — exclude it in any spec that scans the whole page.
-- `phone.spec.ts` — the status message clears the zoom pill and the tool dock;
+- `layers.spec.ts` — what floats over what on a phone (slice 11a): no zoom
+  pill, zoom and Go to page in ⋯ (the pill comes back only for the page
+  field); the pill and dock sit under every dim (probed by class); ⋯ is a
+  sheet from the bottom edge over a dim; a tap shows no tooltip while the
+  keyboard still gets one; the draw options are one row with the fold handle
+  pinned; the toast is one line and the first edit sends it away; on desktop
+  the page's foot scrolls clear of the open draw options; Enter in the page
+  field hands focus to ⋯; scrolling shows "N / 150" and it fades; the sheet's
+  dim fades out with it; "Opened an 8-page document.".
+- `phone.spec.ts` — no zoom pill, and the status message clears the tool dock
+  and the draw options;
   every ⋯ menu item takes its own tap (the pill used to cover the first); the
-  draw options fit a phone with every control on screen at a full touch
-  target; the icon-only Download button has a name;
+  draw options stay on screen in one row, the fold handle always showing and
+  every other control reachable by scrolling, at a full touch target; the icon-only Download button has a name;
 - `placement.spec.ts` — a signature clicked onto text is placed (not swallowed
   by the fragment), centred on the click exactly where the ghost showed, kept
   on the page at the edge, and Esc backs out;

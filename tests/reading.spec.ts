@@ -29,6 +29,15 @@ const rect = (page: Page, sel: string) =>
 type R = { x: number; y: number; w: number; h: number };
 const overlaps = (a: R, b: R) => !(a.x + a.w <= b.x || b.x + b.w <= a.x || a.y + a.h <= b.y || b.y + b.h <= a.y);
 
+/** Zoom in one step: the pill's button, or on a phone (no pill, 11a) ⋯ → View. */
+async function zoomIn(page: Page) {
+  const btn = page.locator('.zoombar .icon-btn[aria-label="Zoom in"]');
+  if (await btn.count()) return btn.click();
+  await page.locator(".appbar__more").click();
+  await page.locator('.menu__list:not(.is-leaving) [role^="menuitem"]', { hasText: "Zoom in" }).click();
+  await expect(page.locator(".menu__list:not(.is-leaving)")).toHaveCount(0);
+}
+
 /** The first page's top — its title and opening lines — as it opens. */
 async function openingLines(page: Page): Promise<R> {
   const p = await rect(page, ".page");
@@ -96,19 +105,24 @@ for (const [name, size, mobile] of [
     const page = await ctx.newPage();
     const w = watch(page);
     await open(page, (await fixtures()).long);
-    await expect(page.locator(".snackbar__msg")).toHaveText("Opened · 150 pages");
+    await expect(page.locator(".snackbar__msg")).toHaveText("Opened a 150-page document.");
     const top = await openingLines(page);
-    for (const sel of [".zoombar", ".snackbar", ".tooldock"]) {
+    // A phone has no zoom pill (11a): pinch zooms, and the corner is the page's.
+    await expect(page.locator(".zoombar")).toHaveCount(mobile ? 0 : 1);
+    const floating = mobile ? [".snackbar", ".tooldock"] : [".zoombar", ".snackbar", ".tooldock"];
+    for (const sel of floating) {
       const r = await rect(page, sel);
       expect(overlaps(top, r), `${sel} ${JSON.stringify(r)} over the page's top ${JSON.stringify(top)}`).toBe(false);
     }
     // And they are clear of each other.
-    const z = await rect(page, ".zoombar");
     const d = await rect(page, ".tooldock");
     const s = await rect(page, ".snackbar");
-    expect(overlaps(z, d), "zoom pill vs dock").toBe(false);
     expect(overlaps(s, d), "toast vs dock").toBe(false);
-    expect(overlaps(s, z), "toast vs zoom pill").toBe(false);
+    if (!mobile) {
+      const z = await rect(page, ".zoombar");
+      expect(overlaps(z, d), "zoom pill vs dock").toBe(false);
+      expect(overlaps(s, z), "toast vs zoom pill").toBe(false);
+    }
     expect(w.errors).toEqual([]);
     await ctx.close();
   });
@@ -138,7 +152,7 @@ test("on a wide window, the toast stays off the Pages sidebar", async ({ page })
   await page.locator('[aria-label="Show pages"]').first().click();
   await expect(page.locator(".pagenav")).toBeVisible();
   await page.setInputFiles("input[data-open-input]", f.sample);
-  await expect(page.locator(".snackbar__msg")).toHaveText("Opened · 12 pages");
+  await expect(page.locator(".snackbar__msg")).toHaveText("Opened a 12-page document.");
   const s = await rect(page, ".snackbar");
   for (const sel of [".pagenav", ".tooldock", ".zoombar"]) {
     const r = await rect(page, sel);
@@ -224,7 +238,7 @@ for (const [name, size, mobile, grow] of [
       await page.locator('[aria-label="Show pages"]').first().click();
       await expect(page.locator(".pagenav")).toBeVisible();
     }
-    await page.locator('.icon-btn[aria-label="Zoom in"]').first().click();
+    await zoomIn(page);
     await expect.poll(() => scroller.evaluate((el) => el.scrollWidth > el.clientWidth + 20)).toBe(true);
     await scroller.evaluate((el) => (el.scrollLeft = el.scrollWidth));
     await page.waitForTimeout(200);
@@ -253,7 +267,7 @@ for (const [name, size, mobile, to] of [
     const page = await ctx.newPage();
     await open(page, (await fixtures()).long);
     const scroller = page.locator(".viewer__scroll");
-    for (let i = 0; i < 3; i++) await page.locator('.icon-btn[aria-label="Zoom in"]').first().click();
+    for (let i = 0; i < 3; i++) await zoomIn(page);
     await expect.poll(() => scroller.evaluate((el) => el.scrollWidth > el.clientWidth * 1.5)).toBe(true);
     await scroller.evaluate((el) => (el.scrollLeft = (el.scrollWidth - el.clientWidth) / 2));
     await page.waitForTimeout(200);

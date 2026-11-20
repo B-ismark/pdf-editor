@@ -430,6 +430,53 @@ Moved verbatim from `CLAUDE.md`; the index there links here.
     have no scrim and just go. A callback ref must keep a stable identity:
     React runs its cleanup whenever the function changes, so an inline arrow
     would play the exit on every render.
+- **Phone: what floats over what (11a).**
+  - *Every floating control goes under every dim.* The zoom pill was on a
+    layer of its own (55, to out-rank the toast), so it stayed bright above
+    the sheet's dim (25) and the Pages drawer's (17). It is at the dock's 16
+    now; `layers.spec` compares each control's layer with every dim's,
+    probing the dims by class so a new one can't slip in above.
+  - *On a phone the pill gives its corner back.* Pinch zooms, and the
+    corner is the page's first lines. ⋯ grows a View group there (Zoom in,
+    Zoom out, Fit to width, Go to page…), and the pill shows only to hold the
+    page field while Go to page is open (`pillShown` in DocumentEditor).
+    That View group is the palette's own (Go to page moved from Navigate to
+    View for good), less Show pages, which is a bar button — the ⋯-row =
+    palette-command invariant in `shell.spec` holds on a phone without
+    exceptions for it. What the pill also said, *where you are*, is
+    `PageHint`: "70 / 150" at the top right while you scroll, fading a beat
+    after you stop; a readout, `pointer-events: none` and `aria-hidden`.
+    Closing the page field with Enter or Esc hands focus to ⋯, since the
+    page chip PageJump would return it to went with the pill. The sheet's
+    dim is copied on the way out too (phone only — on a wide screen it's
+    clear), and the bar keeps its menu layer while the copy plays so the
+    toast doesn't cut across it.
+  - *The toast is sized to its words and leaves when you start working.*
+    Centred by `left: 50%`, a shrink-to-fit box only gets the half of the
+    window right of centre, so a one-line sentence wrapped: `width:
+    max-content` with a 240px floor. It still fades after 4 s, and an edit
+    ends it sooner — but only a message that has been up a while
+    (`EDIT_ENDS_TOAST_AFTER`, 600ms). An edit that reports itself ("Cropped
+    page 1.") raises its message first and its change count a render later
+    (the editor reports counts up in an effect), so "the count moved after
+    the message arrived" wiped the edit's own report; crop and sidebar specs
+    caught it. Every toast is a
+    sentence: "Opened a 3-page document.", not "Opened · 3 pages" — and
+    "an 8-page", "an 11-page" (`aOrAn` reads the number as it's said).
+  - *No tooltips for a finger.* A tap focuses the button, and focus showed
+    the tip, so tapping Draw said "Draw · D" over the bar it had opened.
+    `TooltipHost` remembers that the last pointer down was a touch and shows
+    nothing on focus until a key is pressed; keyboard focus still explains.
+  - *The phone's draw options are one row that scrolls.* The two-row grid
+    left an empty cell for tools with no stroke width and stood 110px over
+    the page. The fold handle is `position: sticky` at the end with a fade
+    before it (always a way out, and a sign there's more), and
+    `scroll-padding-inline-end` keeps a control scrolled to from stopping
+    under it. On every screen, while the options are open the scroll
+    surface gets 148px at the bottom so the page's foot scrolls clear.
+  - *A phone's ⋯ is a bottom sheet* over a dim, with the properties sheet's
+    grab bar and motion (`sheet-up` / `sheet-down`), rather than a 760px
+    dropdown hung from the top corner over the toolbar.
 - **A page at a reading width (10a).** The fit is capped at the page's printed
   size (`ACTUAL_SIZE` in `useViewport`, 96/72): on a wide window an A4 page is
   794px, centred, with margin — not stretched to the window. Below that it

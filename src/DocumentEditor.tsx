@@ -26,7 +26,7 @@ import { ConfirmDialog } from "./components/ConfirmDialog";
 import { FindBar } from "./components/FindBar";
 import { PatternPanel } from "./components/PatternPanel";
 import { PageNav } from "./components/PageNav";
-import { PageJump } from "./components/PageJump";
+import { PageHint, PageJump } from "./components/PageJump";
 import { CommandPalette, GROUP_LABEL, ariaKeys, type Command, type CommandGroup } from "./components/CommandPalette";
 import { Icon } from "./components/Icon";
 import { leftOutNote } from "./pdf/standardText";
@@ -1671,6 +1671,28 @@ export const DocumentEditor = memo(function DocumentEditor({
   useEffect(() => {
     if (zoomHidden) setPageJumpOpen(false);
   }, [zoomHidden]);
+  // A phone already zooms with two fingers, and the pill's corner is the
+  // page's first lines; it lived on a layer of its own, bright above the
+  // sheet's and the drawer's dim. So on a phone it gives the corner back:
+  // zoom is in ⋯ (View), and the pill shows only to hold the page field while
+  // "Go to page…" is open.
+  const pillShown = !zoomHidden && (!compact || pageJumpOpen);
+  // On a phone the page field closes with the pill around it, so PageJump's
+  // chip — where Enter and Esc hand focus back — is gone with it. ⋯, where
+  // "Go to page…" was chosen, takes focus instead of <body>.
+  const refocusMore = useRef(false);
+  const onPageJumpChange = useCallback(
+    (open: boolean, byKey?: boolean) => {
+      if (!open && byKey && compact) refocusMore.current = true;
+      setPageJumpOpen(open);
+    },
+    [compact],
+  );
+  useEffect(() => {
+    if (pageJumpOpen || !refocusMore.current) return;
+    refocusMore.current = false;
+    menuBtnRef.current?.focus();
+  }, [pageJumpOpen]);
   /** "Go to page…": on a phone, first put away whatever is hiding the pill. */
   const openPageJump = useCallback(() => {
     if (compact) {
@@ -2787,7 +2809,7 @@ export const DocumentEditor = memo(function DocumentEditor({
     { id: "find", group: "navigate", label: "Find in document", icon: "search", shortcut: "Ctrl+F", keywords: "search", run: openFind },
     { id: "find-next", group: "navigate", label: "Next match", icon: "chevron_down", keywords: "find search", hidden: matches.length === 0, run: nextMatch },
     { id: "find-prev", group: "navigate", label: "Previous match", icon: "chevron_up", keywords: "find search", hidden: matches.length === 0, run: prevMatch },
-    { id: "goto", group: "navigate", label: "Go to page…", icon: "go_to_page", keywords: "jump page number", hidden: !pdf || shown.length < 2, run: openPageJump },
+    { id: "goto", group: "view", label: "Go to page…", icon: "go_to_page", keywords: "jump page number", hidden: !pdf || shown.length < 2, run: openPageJump },
 
     { id: "pages", group: "view", label: navOpen ? "Hide pages" : "Show pages", icon: navOpen ? "panel_close" : "panel_open", keywords: "thumbnails sidebar", run: () => setNavOpen((v) => !v) },
     { id: "panel", group: "view", label: inspectorOpen ? "Hide panel" : "Show panel", icon: "sliders", keywords: "inspector properties", hidden: !isWide, run: () => setInspectorOpen(!inspectorOpen) },
@@ -3001,15 +3023,18 @@ export const DocumentEditor = memo(function DocumentEditor({
             </button>
             {menuOpen && (
               <>
-                <div className="menu__scrim" onClick={() => setMenuOpen(false)} />
+                <div className="menu__scrim" ref={compact ? leaveRef : undefined} onClick={() => setMenuOpen(false)} />
                 <div className="menu__list" role="menu" ref={menuListLeaving} onKeyDown={onMenuKeyDown}>
                   {/* Labelled groups, each the registry's rows for that group.
                       They were only separated by hairlines once, so the menu
                       read as one 13-item wall. On a phone there's no Export
                       caret, so its group heads this menu — less Download PDF,
                       which is the bar's own button on every screen. */}
-                  {[...(compact ? (["export"] as const) : []), ...MENU_GROUPS, "settings" as const, "file" as const].map((g, gi) => {
-                    const rows = inGroup(g).filter((c) => c.id !== "download");
+                  {[...(compact ? (["export"] as const) : []), ...MENU_GROUPS, ...(compact ? (["view"] as const) : []), "settings" as const, "file" as const].map((g, gi) => {
+                    // On a phone, View is where the zoom pill went: zoom and
+                    // Go to page — the palette's own View group, less Show
+                    // pages (its own bar button) and the panel (wide-only).
+                    const rows = inGroup(g).filter((c) => c.id !== "download" && !(g === "view" && c.id === "pages"));
                     return (
                       <Fragment key={g}>
                         {gi > 0 && <div className="menu__divider" />}
@@ -3304,14 +3329,15 @@ export const DocumentEditor = memo(function DocumentEditor({
               "Reading width"). On phones it yields to whichever top-centre
               contextual bar is showing (find / multi-select / selection) so
               the two never overlap on a narrow screen. */}
-          {!zoomHidden && (
+          {compact && !pillShown && !zoomHidden && shown.length > 1 && <PageHint pageCount={shown.length} docKey={plan} />}
+          {pillShown && (
           <div className="zoombar" role="group" aria-label="Zoom">
             <button className="icon-btn" onClick={vp.zoomOut} aria-label="Zoom out" data-tip="Zoom out">
               <Icon name="remove" size={18} />
             </button>
             {shown.length > 1 && (
               <>
-                <PageJump pageCount={shown.length} docKey={plan} editing={pageJumpOpen} onEditingChange={setPageJumpOpen} />
+                <PageJump pageCount={shown.length} docKey={plan} editing={pageJumpOpen} onEditingChange={onPageJumpChange} />
                 <span className="zoombar__sep" aria-hidden="true" />
               </>
             )}

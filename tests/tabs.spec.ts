@@ -398,11 +398,11 @@ test.describe("document tabs", () => {
     await page.setInputFiles('input[data-open-input]', f.typeset);
     await expect(page.locator(".doctabs")).toBeVisible();
     await expect(tabs(page)).toHaveCount(2);
-    // The status toast is fixed to the window, so it has to move down with the
-    // strip or it lands on the zoom pill.
+    // The status toast is fixed to the window, so it has to clear the strip
+    // (a phone has no zoom pill for it to clear, 11a).
     const snack = await page.locator(".snackbar").boundingBox();
-    const zoom = await page.locator(".zoombar").boundingBox();
-    if (snack && zoom) expect(snack.y, "snackbar clears the zoom pill").toBeGreaterThanOrEqual(zoom.y + zoom.height);
+    const strip = (await page.locator(".doctabs").boundingBox())!;
+    if (snack) expect(snack.y, "snackbar clears the tab strip").toBeGreaterThanOrEqual(strip.y + strip.height);
     // The strip must not push the page sideways.
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(width).toBeLessThanOrEqual(390);
