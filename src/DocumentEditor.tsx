@@ -1671,6 +1671,12 @@ export const DocumentEditor = memo(function DocumentEditor({
   useEffect(() => {
     if (zoomHidden) setPageJumpOpen(false);
   }, [zoomHidden]);
+  // A phone already zooms with two fingers, and the pill's corner is the
+  // page's first lines; it lived on a layer of its own, bright above the
+  // sheet's and the drawer's dim. So on a phone it gives the corner back:
+  // zoom is in ⋯ (View), and the pill shows only to hold the page field while
+  // "Go to page…" is open.
+  const pillShown = !zoomHidden && (!compact || pageJumpOpen);
   /** "Go to page…": on a phone, first put away whatever is hiding the pill. */
   const openPageJump = useCallback(() => {
     if (compact) {
@@ -3008,8 +3014,14 @@ export const DocumentEditor = memo(function DocumentEditor({
                       read as one 13-item wall. On a phone there's no Export
                       caret, so its group heads this menu — less Download PDF,
                       which is the bar's own button on every screen. */}
-                  {[...(compact ? (["export"] as const) : []), ...MENU_GROUPS, "settings" as const, "file" as const].map((g, gi) => {
-                    const rows = inGroup(g).filter((c) => c.id !== "download");
+                  {[...(compact ? (["export"] as const) : []), ...MENU_GROUPS, ...(compact ? (["view"] as const) : []), "settings" as const, "file" as const].map((g, gi) => {
+                    // On a phone, View is where the zoom pill went: zoom and
+                    // Go to page. (Pages has its own bar button; the panel
+                    // toggle is wide-only.)
+                    const rows =
+                      g === "view"
+                        ? [...inGroup("view").filter((c) => c.id.startsWith("zoom-")), ...inGroup("navigate").filter((c) => c.id === "goto")]
+                        : inGroup(g).filter((c) => c.id !== "download");
                     return (
                       <Fragment key={g}>
                         {gi > 0 && <div className="menu__divider" />}
@@ -3304,7 +3316,7 @@ export const DocumentEditor = memo(function DocumentEditor({
               "Reading width"). On phones it yields to whichever top-centre
               contextual bar is showing (find / multi-select / selection) so
               the two never overlap on a narrow screen. */}
-          {!zoomHidden && (
+          {pillShown && (
           <div className="zoombar" role="group" aria-label="Zoom">
             <button className="icon-btn" onClick={vp.zoomOut} aria-label="Zoom out" data-tip="Zoom out">
               <Icon name="remove" size={18} />

@@ -499,7 +499,7 @@ test.describe("inspector", () => {
     await page.locator(".fragment").first().click();
     await expect(page.locator(".props__title")).toHaveText("Text");
     await page.setInputFiles('input[data-open-input]', f.typeset);
-    await expect(page.locator(".snackbar__msg")).toHaveText("Opened · 1 page");
+    await expect(page.locator(".snackbar__msg")).toHaveText("Opened a 1-page document.");
     await expect(page.locator(".props__title")).toHaveText("Document");
     await expect(page.locator(".docpanel__fact", { hasText: "Pages" }).locator("dd")).toHaveText("1");
   });
@@ -579,7 +579,7 @@ test("user-facing counts are written as English", async ({ page }) => {
   await open(page, (await fixtures()).sample);
   // "1 page(s)" — a placeholder for copy, not copy; nor "9 text fragments",
   // which is how the app reads a file, not how a reader thinks of one.
-  await expect(page.locator(".snackbar__msg")).toHaveText("Opened · 12 pages");
+  await expect(page.locator(".snackbar__msg")).toHaveText("Opened a 12-page document.");
 });
 
 /**

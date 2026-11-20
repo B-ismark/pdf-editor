@@ -96,7 +96,7 @@ for (const [name, size, mobile] of [
     const page = await ctx.newPage();
     const w = watch(page);
     await open(page, (await fixtures()).long);
-    await expect(page.locator(".snackbar__msg")).toHaveText("Opened · 150 pages");
+    await expect(page.locator(".snackbar__msg")).toHaveText("Opened a 150-page document.");
     const top = await openingLines(page);
     for (const sel of [".zoombar", ".snackbar", ".tooldock"]) {
       const r = await rect(page, sel);
@@ -138,7 +138,7 @@ test("on a wide window, the toast stays off the Pages sidebar", async ({ page })
   await page.locator('[aria-label="Show pages"]').first().click();
   await expect(page.locator(".pagenav")).toBeVisible();
   await page.setInputFiles("input[data-open-input]", f.sample);
-  await expect(page.locator(".snackbar__msg")).toHaveText("Opened · 12 pages");
+  await expect(page.locator(".snackbar__msg")).toHaveText("Opened a 12-page document.");
   const s = await rect(page, ".snackbar");
   for (const sel of [".pagenav", ".tooldock", ".zoombar"]) {
     const r = await rect(page, sel);

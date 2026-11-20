@@ -13,7 +13,7 @@ const SHOW_DELAY = 110; // ms — deliberately fast
 /**
  * A single, app-wide tooltip. Any element carrying a `data-tip` attribute gets
  * a styled bubble on hover/focus — no per-button wrapper, no native `title`
- * lag. Skipped on coarse (touch) pointers, where tooltips only get in the way.
+ * lag. Never for touch: not on a finger's hover, nor on the focus a tap gives.
  */
 export function TooltipHost() {
   const [tip, setTip] = useState<TipState | null>(null);
@@ -24,6 +24,7 @@ export function TooltipHost() {
   const current = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
+    let touched = false;
     const clear = () => {
       window.clearTimeout(timer.current);
       current.current = null;
@@ -56,13 +57,26 @@ export function TooltipHost() {
       if (el instanceof HTMLElement) show(el);
       else if (current.current) clear();
     };
+    // Focus shows a tip for the keyboard's sake, but a tap focuses a button
+    // too, so a finger on Draw got "Draw · D": a shortcut for a keyboard the
+    // phone doesn't have, over the bar it had just opened. Focus after a
+    // touch (until a key is pressed) shows nothing.
+    const onDown = (e: PointerEvent) => {
+      touched = e.pointerType === "touch";
+      clear();
+    };
+    const onKey = () => {
+      touched = false;
+    };
     const onFocus = (e: FocusEvent) => {
+      if (touched) return;
       const el = (e.target as HTMLElement | null)?.closest?.("[data-tip]");
       if (el instanceof HTMLElement) show(el);
     };
 
     document.addEventListener("pointerover", onOver);
-    document.addEventListener("pointerdown", clear, true);
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey, true);
     document.addEventListener("focusin", onFocus);
     document.addEventListener("focusout", clear);
     window.addEventListener("scroll", clear, true);
@@ -70,7 +84,8 @@ export function TooltipHost() {
     return () => {
       window.clearTimeout(timer.current);
       document.removeEventListener("pointerover", onOver);
-      document.removeEventListener("pointerdown", clear, true);
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey, true);
       document.removeEventListener("focusin", onFocus);
       document.removeEventListener("focusout", clear);
       window.removeEventListener("scroll", clear, true);

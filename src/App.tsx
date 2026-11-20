@@ -373,7 +373,9 @@ export function App() {
         setStatus("ready");
         // Plain words: what opened, not how it was parsed ("3750 text
         // fragments" was the app's vocabulary, not the reader's).
-        const opened = `Opened · ${plural(loaded.pages.length, "page")}`;
+        // A sentence, like every other toast: "Opened · 3 pages" was the one
+        // that read as a label.
+        const opened = `Opened a ${loaded.pages.length}-page document.`;
         if (!opts.quiet) setMessage(note ?? opened);
         // The text, in the background. Into every tab showing these bytes, and
         // merged page by page, so OCR's words or another batch landing in
@@ -509,7 +511,7 @@ export function App() {
         new Uint8Array(ab).set(out);
         // ".jpg" alone has no name to keep: it would make ".pdf", a hidden file.
         const name = (files[0].name.replace(/\.[^./\\]+$/, "").trim() || "Pictures") + ".pdf";
-        const note = `Made a PDF of ${plural(files.length, "picture")} · not saved yet`;
+        const note = `Made a PDF of ${plural(files.length, "picture")}. It isn't saved yet.`;
         return { ok: (await openBytes(ab, name, note, undefined, { baked: 1 })) != null };
       } catch (e) {
         setStatus("error");
@@ -712,7 +714,7 @@ export function App() {
     } else {
       setStatus("ready");
       setMessage(
-        opened.length === 1 ? "Session restored." : `Session restored · ${plural(opened.length, "document")}.`,
+        opened.length === 1 ? "Session restored." : `Session restored: ${plural(opened.length, "document")}.`,
       );
     }
     pendingActivate.current = s.activeId;
@@ -833,7 +835,7 @@ export function App() {
       const kept: string[] = [];
       const keptIn: string[] = [];
       for (const [n, t] of tabs.entries()) {
-        setMessage(`Building ${n + 1} of ${tabs.length} · ${t.fileName}`);
+        setMessage(`Building ${n + 1} of ${tabs.length}: ${t.fileName}…`);
         let keptHere: string[] = [];
         const out = await exportPdf(t.pdf, {
           ...EMPTY_DOC,
@@ -957,6 +959,22 @@ export function App() {
     const t = setTimeout(() => setMessage(""), 4000);
     return () => clearTimeout(t);
   }, [message, status, busy]);
+  // …and an edit ends one sooner: "Opened a 1-page document." has nothing to
+  // add once you're working, and it sat over the bar you'd just opened. Only
+  // a message that was showing before the edit: one the edit itself raised
+  // arrives in the same render and is recorded first, so it stays.
+  const msgAt = useRef({ id: activeId, changes: frontChanges });
+  useEffect(() => {
+    msgAt.current = { id: activeId, changes: frontChanges };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [message]);
+  useEffect(() => {
+    const at = msgAt.current;
+    msgAt.current = { id: activeId, changes: frontChanges };
+    if (at.id !== activeId || at.changes === frontChanges) return;
+    if (message && status !== "error" && !busy) setMessage("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frontChanges, activeId]);
 
   // Ctrl/⌘+O on the start screen. With a document open its editor takes the
   // shortcut, along with every other one.
